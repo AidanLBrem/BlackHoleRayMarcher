@@ -70,7 +70,7 @@ Shader "Custom/RayTracer"
                 float3 rayColor;
                 bool rayEarlyKill;
                 int numBounces;
-                //int maxNumTriangleTests;    
+                int rayTriTests;    
             };
             struct Sphere
 			{
@@ -112,6 +112,8 @@ Shader "Custom/RayTracer"
                 float AABBRightZ;
                 int firstBVHNodeIndex;
                 int largestAxis;
+                float4x4 localToWorldMatrix;
+                float4x4 worldToLocalMatrix;
             };
             
             struct BVHNode {
@@ -168,7 +170,8 @@ Shader "Custom/RayTracer"
             int emergencyBreakMaxSteps;
             const float G = 1.975813844e-32;
             const float C = 0.430467210276;
-
+            float triTests = 0;
+            float BVHTests = 0;
              // Params (set from C#)
             float3 GalaxyNormal = float3(0.0,1.0,0.0); // unit normal to Milky Way plane
             float  BandHalfAngleDeg = 12.0;      // half-width of the band in degrees
@@ -228,8 +231,8 @@ Shader "Custom/RayTracer"
                 float tNear = max(max(t1.x, t1.y), t1.z);
                 float tFar = min(min(t2.x, t2.y), t2.z);
                 AABBHitInfo hitInfo = (AABBHitInfo)0;
-                hitInfo.didHit = tNear <= tFar && tNear <= distanceToBeat;
-                hitInfo.distance = tNear;
+                hitInfo.didHit = (tNear <= tFar) && (tFar >= 0.0) && (tNear <= distanceToBeat);
+                hitInfo.distance = max(tNear, 0.0);
                 return hitInfo;
             }
             HitInfo raySphere(Ray ray, float3 sphereCenter, float sphereRadius) {
@@ -266,7 +269,7 @@ Shader "Custom/RayTracer"
 				float3 normalVector = cross(tri.edgeAB, tri.edgeAC);
 
 				float determinant = -dot(ray.direction, normalVector);
-                if (determinant <= 0) {
+                if (abs(determinant) <= 1e-6) {
                     return (HitInfo)0;
                 }
 				float invDet = 1 / determinant;
@@ -318,128 +321,152 @@ Shader "Custom/RayTracer"
                 return closest;
             }
 
-            HitInfo checkMeshCollisions(Ray ray, float marchDistance) {
-                HitInfo closest = (HitInfo)0;
-                closest.distance = 3.402823e+38;
-                int triangleTests = 0;
-                for (int i = 0; i < numMeshes; i++) {
-                    Mesh mesh = Meshes[i];
-                    if (!RayAABB(ray.position, ray.direction,ray.inverseDirection, mesh.AABBLeftX, mesh.AABBLeftY, mesh.AABBLeftZ, mesh.AABBRightX, mesh.AABBRightY, mesh.AABBRightZ, min(marchDistance, closest.distance)).didHit) {
-                        continue;
-                    }
+                HitInfo checkMeshCollisions(Ray ray, float worldTMax)
+                {
+                    HitInfo closest = (HitInfo)0;
+                    float bestWorldT = 3.402823e+38;
 
-                    /*for (int j = mesh.indexOffset; j < mesh.indexOffset + mesh.triangleCount; j++) {
-                        Triangle tri = Triangles[j];
-                        HitInfo hitInfo = rayTriangle(ray, tri);
-                        triangleTests++;
-                        if (hitInfo.didHit && hitInfo.distance < closest.distance) {
-                            closest = hitInfo;
-                            closest.objectType = 2;
-                            closest.objectIndex = -1;
-                            closest.material = mesh.material;
-                        }
-                    }
-                }*/
-                    // Near-first traversal: descend into nearer child, push only farther child with its tNear
-                    uint stack[64];
-                    float tNearStack[64];
-                    int stackPointer = 0;
+                    // clamp max distance we’ll accept for meshes
+                    float worldLimit = min(worldTMax, bestWorldT);
 
-                    uint nodeIdx = mesh.firstBVHNodeIndex;
-                    float tBeat = min(marchDistance, closest.distance);
-                    float currentNodeTNear = -1.0;
+                    for (int i = 0; i < numMeshes; i++)
+                    {
+                        Mesh mesh = Meshes[i];
 
-                    for (;;) {
-                        // If current node is already farther than best, pop next candidate
-                        if (currentNodeTNear > tBeat) {
-                            if (stackPointer == 0) break;
-                            stackPointer--;
-                            nodeIdx = stack[stackPointer];
-                            currentNodeTNear = tNearStack[stackPointer];
-                            tBeat = min(marchDistance, closest.distance);
-                            continue;
-                        }
+                        // Build local ray
+                        Ray localRay = ray;
+                        localRay.position = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
 
-                        BVHNode node = BVHNodes[nodeIdx];
-                        bool isLeaf = (node.left == -1) && (node.right == -1);
-                        if (isLeaf) {
-                            for (int j = node.firstTriangleIndex; j < node.firstTriangleIndex + node.triangleCount; j++) {
-                                Triangle tri = Triangles[j];
-                                HitInfo hitInfo = rayTriangle(ray, tri);
-                                //triangleTests++;
-                                if (hitInfo.didHit && hitInfo.distance < closest.distance) {
-                                    closest = hitInfo;
-                                    closest.objectType = 2;
-                                    closest.objectIndex = -1;
-                                    closest.material = mesh.material;
-                                    tBeat = min(marchDistance, closest.distance);
-                                }
+                        float3 localDirUn = mul((float3x3)mesh.worldToLocalMatrix, ray.direction);
+                        float  dirScale   = length(localDirUn);
+                        if (dirScale < 1e-8) continue;
+
+                        localRay.direction       = localDirUn / dirScale;
+                        localRay.inverseDirection = 1.0 / localRay.direction;
+
+                        // Convert world max distance to local max distance
+                        float localTMax  = worldLimit * dirScale;
+                        float bestLocalT = bestWorldT * dirScale;
+
+                        // Stack traversal (local-t!)
+                        uint  stack[128];
+                        float stackT[128];
+                        int sp = 0;
+
+                        uint nodeIdx = mesh.firstBVHNodeIndex;
+                        float currentTNear = -1.0;
+
+                        for (;;)
+                        {
+                            // prune against bestLocalT/localTMax
+                            float tBeat = min(localTMax, bestLocalT);
+
+                            if (currentTNear > tBeat)
+                            {
+                                if (sp == 0) break;
+                                sp--;
+                                nodeIdx = stack[sp];
+                                currentTNear = stackT[sp];
+                                continue;
                             }
-                            if (stackPointer == 0) break;
-                            stackPointer--;
-                            nodeIdx = stack[stackPointer];
-                            currentNodeTNear = tNearStack[stackPointer];
-                            tBeat = min(marchDistance, closest.distance);
-                            continue;
+
+                            BVHNode node = BVHNodes[nodeIdx];
+                            bool isLeaf = (node.left == -1) && (node.right == -1);
+
+                            if (isLeaf)
+                            {
+                                for (int j = node.firstTriangleIndex; j < node.firstTriangleIndex + node.triangleCount; j++)
+                                {
+                                    Triangle tri = Triangles[j];
+                                    HitInfo h = rayTriangle(localRay, tri);     // h.distance is LOCAL t
+                                    triTests++;
+                                    if (!h.didHit) continue;
+
+                                    float localT = h.distance;
+                                    if (localT < 0 || localT > tBeat) continue;
+                                    if (localT >= bestLocalT) continue;
+
+                                    // Convert to world t
+                                    float worldT = localT / dirScale;
+                                    if (worldT < 0 || worldT >= bestWorldT) continue;
+
+                                    // Compute world hitpoint consistently
+                                    float3 hitWorld = ray.position + ray.direction * worldT;
+
+                                    // World normal (inverse-transpose)
+                                    float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
+                                    float3 nWorld = normalize(mul(nMat, h.normal));
+
+                                    bestWorldT = worldT;
+                                    bestLocalT = localT;
+
+                                    closest = h;
+                                    closest.hitPoint = hitWorld;
+                                    closest.normal   = nWorld;
+                                    closest.distance = bestWorldT;
+                                    closest.material = mesh.material;
+                                    closest.objectType = 2;
+                                    closest.objectIndex = i;
+                                }
+
+                                if (sp == 0) break;
+                                sp--;
+                                nodeIdx = stack[sp];
+                                currentTNear = stackT[sp];
+                                continue;
+                            }
+
+                            // Internal: test children AABBs in LOCAL t
+                            BVHNode leftNode  = BVHNodes[node.left];
+                            BVHNode rightNode = BVHNodes[node.right];
+
+                            float tBeat2 = min(localTMax, bestLocalT);
+
+                            AABBHitInfo lh = RayAABB(localRay.position, localRay.direction, localRay.inverseDirection,
+                                                     leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
+                                                     leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
+                                                     tBeat2);
+    
+                            AABBHitInfo rh = RayAABB(localRay.position, localRay.direction, localRay.inverseDirection,
+                                                     rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
+                                                     rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
+                                                     tBeat2);
+                            BVHTests += 2;
+                            if (!lh.didHit && !rh.didHit)
+                            {
+                                if (sp == 0) break;
+                                sp--;
+                                nodeIdx = stack[sp];
+                                currentTNear = stackT[sp];
+                                continue;
+                            }
+
+                            // nearer-first
+                            bool leftFirst = lh.didHit && (!rh.didHit || lh.distance <= rh.distance);
+
+                            uint nearIdx  = leftFirst ? node.left  : node.right;
+                            float nearT   = leftFirst ? lh.distance : rh.distance;
+                            uint farIdx   = leftFirst ? node.right : node.left;
+                            float farT    = leftFirst ? rh.distance : lh.distance;
+                            bool farHit   = leftFirst ? rh.didHit : lh.didHit;
+
+                            if (farHit && farT <= tBeat2 && sp < 64)
+                            {
+                                stack[sp] = farIdx;
+                                stackT[sp] = farT;
+                                sp++;
+                            }
+
+                            nodeIdx = nearIdx;
+                            currentTNear = nearT;
                         }
 
-                        // Internal node: get child AABB hits once
-                        BVHNode leftNode = BVHNodes[node.left];
-                        BVHNode rightNode = BVHNodes[node.right];
-                        AABBHitInfo leftHit = RayAABB(
-                            ray.position, ray.direction, ray.inverseDirection,
-                            leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
-                            leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
-                            tBeat
-                        );
-                        AABBHitInfo rightHit = RayAABB(
-                            ray.position, ray.direction, ray.inverseDirection,
-                            rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
-                            rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
-                            tBeat
-                        );
-
-                        if (!leftHit.didHit && !rightHit.didHit) {
-                            if (stackPointer == 0) break;
-                            stackPointer--;
-                            nodeIdx = stack[stackPointer];
-                            currentNodeTNear = tNearStack[stackPointer];
-                            tBeat = min(marchDistance, closest.distance);
-                            continue;
-                        }
-
-                        // Decide order: nearer first
-                        bool leftFirst = false;
-                        if (rightHit.didHit && (!leftHit.didHit || (rightHit.distance < leftHit.distance))) {
-                            leftFirst = false;
-                        } else {
-                            leftFirst = true;
-                        }
-
-                        uint nearIdx   = leftFirst ? node.left  : node.right;
-                        float nearT    = leftFirst ? leftHit.distance  : rightHit.distance;
-                        uint farIdx    = leftFirst ? node.right : node.left;
-                        float farT     = leftFirst ? rightHit.distance : leftHit.distance;
-                        bool farHits   = leftFirst ? rightHit.didHit : leftHit.didHit;
-
-                        // Push far only
-                        if (farHits && (farT <= tBeat) && (stackPointer < 64)) {
-                            stack[stackPointer] = farIdx;
-                            tNearStack[stackPointer] = farT;
-                            stackPointer++;
-                        }
-
-                        // Tail-recurse into near
-                        nodeIdx = nearIdx;
-                        currentNodeTNear = nearT;
+                        // tighten for next meshes
+                        worldLimit = min(worldTMax, bestWorldT);
                     }
-                }
 
-                //if (triangleTests > ray.maxNumTriangleTests) {
-                //    ray.maxNumTriangleTests = triangleTests;
-                //}
-                return closest;
-            }
+                    return closest;
+                }
 
             HitInfo checkBlackHoleSOICollisions(Ray ray) {
                 HitInfo closest = (HitInfo)0;
@@ -465,7 +492,7 @@ Shader "Custom/RayTracer"
                 float3 specularDir = reflect(ray.direction, hitInfo.normal);
                 ray.direction = normalize(lerp(diffuseDir, specularDir, material.smoothness));
                 ray.inverseDirection = 1.0 / ray.direction;
-                ray.position = hitInfo.hitPoint;
+                ray.position = hitInfo.hitPoint + hitInfo.normal * 1e-4;  // tune for your scene scale
                 float3 emittedLight = material.emissiveColor * material.emissionStrength;
                 ray.incomingLight += emittedLight * ray.rayColor;
                 ray.rayColor *= material.color;
@@ -493,24 +520,6 @@ Shader "Custom/RayTracer"
                 return -1;
             }
             
-            HitInfo checkForCollisions(Ray ray) {
-                HitInfo closest = (HitInfo)0;
-                closest.didHit = false;
-                closest.distance = 3.402823e+38;
-                #ifdef TEST_SPHERE
-                HitInfo sphereHitInfo = checkSphereCollisions(ray);
-                if (sphereHitInfo.didHit) {
-                    closest = sphereHitInfo;
-                }
-                #endif
-                #ifdef TEST_TRIANGLE
-                HitInfo meshHitInfo = checkMeshCollisions(ray, closest.distance);
-                if (meshHitInfo.didHit && meshHitInfo.distance < closest.distance) {
-                    closest = meshHitInfo;
-                }
-                #endif
-                return closest;
-            }
 
             Sphere checkInsideSphere(float3 position) {
                 for (int i = 0; i < numSpheres; i++) {
@@ -556,7 +565,11 @@ Shader "Custom/RayTracer"
             }
 
             float pointAABBDistance(float3 p, float aabbMinX, float aabbMinY, float aabbMinZ, float aabbMaxX, float aabbMaxY, float aabbMaxZ) {
-                float3 AABBCenter = float3(aabbMinX + aabbMaxX / 2, aabbMinY + aabbMaxY / 2, aabbMinZ + aabbMaxZ / 2);
+                float3 AABBCenter = float3(
+                    (aabbMinX + aabbMaxX) * 0.5,
+                    (aabbMinY + aabbMaxY) * 0.5,
+                    (aabbMinZ + aabbMaxZ) * 0.5
+                );
                 return length(p - AABBCenter);
             }
 
@@ -567,7 +580,7 @@ Shader "Custom/RayTracer"
                     min(min(d1.y, d2.y),
                         min(d1.z, d2.z))));
             }
-                        float pointTriangleDistance(float3 p, Triangle tri)
+            float pointTriangleDistance(float3 p, Triangle tri)
             {
                     float3 n = normalize(cross(tri.edgeAB, tri.edgeAC));
                     return abs(dot(p - tri.vertex1, n));
@@ -578,7 +591,9 @@ Shader "Custom/RayTracer"
                 for (int i = 0; i < numMeshes; i++) {
                     Mesh mesh = Meshes[i];
                     BVHNode root = BVHNodes[mesh.firstBVHNodeIndex];
-                    float distanceToRootFace = aabbUnsignedDistance(ray.position, float3(root.AABBLeftX, root.AABBLeftY, root.AABBLeftZ), float3(root.AABBRightX, root.AABBRightY, root.AABBRightZ));
+                    Ray localRay = ray;
+                    localRay.position = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
+                    float distanceToRootFace = aabbUnsignedDistance(localRay.position, float3(root.AABBLeftX, root.AABBLeftY, root.AABBLeftZ), float3(root.AABBRightX, root.AABBRightY, root.AABBRightZ));
                     if (distanceToRootFace > 0) {
                         closestDistance = min(closestDistance, distanceToRootFace);
                         if (closestDistance < 0.25) {
@@ -685,9 +700,9 @@ Shader "Custom/RayTracer"
                     //float estimatedDistance = nearestPointOnSphere(ray.position, blackHole.position, blackHole.radius);
                     ray = blackHoleRK4Check(ray, blackHole, rngState, estimatedDistance, directionToBlackHole, chordLen, dirEnd);
                     HitInfo h = (HitInfo)0;
-                    if (chordLen * 1.01 > estimatedDistance) {
+                    //if (chordLen * 1.01 > estimatedDistance) {
                         h = queryCollisions(ray, chordLen);
-                    }
+                    //}
                     if (ray.debugEarlyBreakout) {
                         return ray;
                     }
@@ -812,8 +827,10 @@ Shader "Custom/RayTracer"
                 ray.hitBlackHole = false;
                 ray.debugEarlyBreakout = false;
                 ray.rayColor = 1;
-                float3 incomingLight = 0;
+                ray.incomingLight = 0;
+                ray.rayEarlyKill  = false;
                 ray.numBounces = 0;
+                ray.rayTriTests = 0;
                 int maxIterations = 1000;
                 int iterations = 0;
                 //ray.debugSOISteps = 0;
@@ -826,7 +843,7 @@ Shader "Custom/RayTracer"
                     hitInfo.objectType = -1;
                     int blackHoleOverrideIndex = blackHoleOverrideCheck(ray);  
                     if (blackHoleOverrideIndex == -1) {
-                        HitInfo objectHitInfo = checkForCollisions(ray);
+                        HitInfo objectHitInfo = queryCollisions(ray, 100000);
                         HitInfo blackHoleHitInfo = checkBlackHoleSOICollisions(ray);
 
                         if (!objectHitInfo.didHit && !blackHoleHitInfo.didHit) { //no hit
@@ -874,6 +891,7 @@ Shader "Custom/RayTracer"
                     }
 
                     else if (hitInfo.objectType == 0 || hitInfo.objectType == 2) {
+                        //return float3(1,0,1);
                         ray = handleReflection(ray, rngState, hitInfo);
                         /*if (checkInsideSphere(ray.position).radius > 0) {
                             return float3(0,0,1);
@@ -881,38 +899,15 @@ Shader "Custom/RayTracer"
 
                     }
                     if (ray.rayEarlyKill) {
+                        //return float3(BVHTests / 100, BVHTests / 100, BVHTests / 100);
+                        //return float3(triTests / 1000, triTests / 1000, triTests / 1000);
                         return ray.incomingLight;
                     }
 
                     
                 }    
-                /*if (ray.numBounces > 2) {
-                    return float3(0.1,0,0);
-                }
-
-                else if (ray.numBounces > 4) {  
-                    return float3(0.3,0,0);
-                }*/
-                
-                /*if (ray.numBounces > 6) {
-                    return float3(0.5,0,0);
-                }
-
-                else if (ray.numBounces > 8) {
-                    return float3(0.7,0,0);
-                }
-
-                else if (ray.numBounces > 10) {
-                    return float3(0.9,0,0);
-                }*/
-
-                //if (ray.maxNumTriangleTests > 1) {
-                //    return float3(1,0,0);
-                //}
-
-                
-                
-
+                //return float3(BVHTests / 100, BVHTests / 100, BVHTests / 100);
+                //return float3(triTests / 1000, triTests / 1000, triTests / 1000);
                 return ray.incomingLight;
             }
 

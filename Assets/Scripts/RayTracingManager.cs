@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
-using static UnityEngine.Mathf;
-using UnityEditor;
 using Unity.Mathematics;
+using Debug = UnityEngine.Debug;
+using UnityEngine.Profiling;
+
 [ExecuteAlways, ImageEffectAllowedInSceneView]
 public class RayTracingManager : MonoBehaviour
 {
@@ -39,87 +40,107 @@ public class RayTracingManager : MonoBehaviour
     public bool renderTriangles = true;
     const float G = 1.975813844e-32f;
     const float C = 0.430467210276f;
-    
 
-    void OnValidate() {
+
+    void OnValidate()
+    {
         // This method is called when the shader is changed in the inspector
-        if (rayTracingShader != null) {
+        if (rayTracingShader != null)
+        {
             ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
         }
-        if (accumulatorShader != null) {
+
+        if (accumulatorShader != null)
+        {
             ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
         }
 
         numRenderedFrames = 0;
     }
 
-    void OnRenderImage(RenderTexture source, RenderTexture target) {
-    //Debug.Log("Working");
+    void OnRenderImage(RenderTexture source, RenderTexture target)
+    {
 
-       if (Camera.current.name != "SceneCamera" || useShaderInSceneView) {
-                float t0 = Time.realtimeSinceStartup;
-        InitFrame();
-        if (stopRendering) {
+        //Debug.Log("Working");
+
+        if (Camera.current.name != "SceneCamera" || useShaderInSceneView)
+        {
+            InitFrame();
+            if (stopRendering)
+            {
+                Graphics.Blit(resultTexture, target);
+                return;
+            }
+
+            //Store the previous frame
+            RenderTexture prevFrame =
+                RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
+            Graphics.Blit(resultTexture, prevFrame); //the previous frame is stored in resultTexuture
+
+            //Render the current frame without averaging
+            rayTracingMaterial.SetInt("numRenderedFrames", numRenderedFrames);
+            RenderTexture currentFrame =
+                RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
+
+            Graphics.Blit(null, currentFrame, rayTracingMaterial);
+
+            //Accumulate step
+            accumulatorMaterial.SetInt("numRenderedFrames", numRenderedFrames);
+            accumulatorMaterial.SetTexture("_MainTexOld", prevFrame);
+            Graphics.Blit(currentFrame, resultTexture, accumulatorMaterial);
             Graphics.Blit(resultTexture, target);
-            return;
-        }
-
-        //Store the previous frame
-        RenderTexture prevFrame = RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
-        Graphics.Blit(resultTexture, prevFrame); //the previous frame is stored in resultTexuture
-
-        //Render the current frame without averaging
-        rayTracingMaterial.SetInt("numRenderedFrames", numRenderedFrames);
-        RenderTexture currentFrame = RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
-
-        Graphics.Blit(null, currentFrame, rayTracingMaterial);
-
-        //Accumulate step
-        accumulatorMaterial.SetInt("numRenderedFrames", numRenderedFrames);
-        accumulatorMaterial.SetTexture("_MainTexOld", prevFrame);
-        Graphics.Blit(currentFrame, resultTexture, accumulatorMaterial);
-        Graphics.Blit(resultTexture, target);
-        if (Camera.current.name == "SceneCamera" && !accumlateInSceneView) {
-            Graphics.Blit(currentFrame, target);
-        }
-
-        if (Camera.current.name != "SceneCamera" && !accumulateInGameView) {
-            Graphics.Blit(currentFrame, target);
-        }
-        if (Camera.current.name != "SceneCamera") {
-            numRenderedFrames++;
-            if (numRenderedFrames % 100 == 0) {
-                Debug.Log("Num Rendered Frames: " + numRenderedFrames);
+            if (Camera.current.name == "SceneCamera" && !accumlateInSceneView)
+            {
+                Graphics.Blit(currentFrame, target);
             }
-            if (numRenderedFrames > numFrames) {
-                //stopRendering = true;
+
+            if (Camera.current.name != "SceneCamera" && !accumulateInGameView)
+            {
+                Graphics.Blit(currentFrame, target);
             }
+
+            if (Camera.current.name != "SceneCamera")
+            {
+                numRenderedFrames++;
+                if (numRenderedFrames % 100 == 0)
+                {
+                    Debug.Log("Num Rendered Frames: " + numRenderedFrames);
+                }
+
+                if (numRenderedFrames > numFrames)
+                {
+                    //stopRendering = true;
+                }
+            }
+
+            RenderTexture.ReleaseTemporary(prevFrame);
+            RenderTexture.ReleaseTemporary(currentFrame);
+
         }
 
-        RenderTexture.ReleaseTemporary(prevFrame);
-        RenderTexture.ReleaseTemporary(currentFrame);
-
-       }
-
-       else {
-        Graphics.Blit(source, target);
-       }
+        else
+        {
+            Graphics.Blit(source, target);
+        }
     }
 
-    void InitFrame() {
+    void InitFrame()
+    {
         Camera.current.cullingMask = 0;
         ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
         ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
-        ShaderHelper.CreateRenderTexture(ref resultTexture, Screen.width, Screen.height, FilterMode.Bilinear, ShaderHelper.RGBA_SFloat, "Result");
+        ShaderHelper.CreateRenderTexture(ref resultTexture, Screen.width, Screen.height, FilterMode.Bilinear,
+            ShaderHelper.RGBA_SFloat, "Result");
         var cam = Camera.current;
         UpdateCameraParams(cam);
         UpdateShaderValues();
+        PerfTimer.Time("AllocateMeshBuffer", () => allocateMeshBuffer());
         allocateSphereBuffer();
         allocateBlackHoleBuffer();
-        allocateMeshBuffer();
     }
 
-    void UpdateCameraParams(Camera camera) {
+    void UpdateCameraParams(Camera camera)
+    {
         float planeHeight = camera.nearClipPlane * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad) * 2f;
         float planeWidth = planeHeight * camera.aspect;
         rayTracingMaterial.SetVector("ViewParams", new Vector3(planeWidth, planeHeight, camera.nearClipPlane));
@@ -129,36 +150,43 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetVector("CameraWorldPos", camera.transform.position);
         rayTracingMaterial.SetInt("RaysPerPixel", raysPerPixel);
         rayTracingMaterial.SetInt("maxBounces", maxBounces);
-        if (blackHoleSOIStepSize == 0) {
+        if (blackHoleSOIStepSize == 0)
+        {
             blackHoleSOIStepSize = 1.0f;
         }
+
         rayTracingMaterial.SetFloat("stepSize", blackHoleSOIStepSize);
         rayTracingMaterial.SetInt("emergencyBreakMaxSteps", emergencyBreakMaxSteps);
         accumulatorMaterial.SetFloat("accumWeight", accumWeight);
 
-        if (renderSphere) {
+        if (renderSphere)
+        {
             rayTracingMaterial.EnableKeyword("TEST_SPHERE");
         }
-        else {
+        else
+        {
             rayTracingMaterial.DisableKeyword("TEST_SPHERE");
         }
-        if (renderTriangles) {
+
+        if (renderTriangles)
+        {
             rayTracingMaterial.EnableKeyword("TEST_TRIANGLE");
         }
-        else {
+        else
+        {
             rayTracingMaterial.DisableKeyword("TEST_TRIANGLE");
         }
     }
 
-    void allocateMeshBuffer() {
+    void allocateMeshBuffer()
+    {
+        long Before = Profiler.GetMonoUsedSizeLong();
         RayTracedMesh[] meshObjects = FindObjectsOfType<RayTracedMesh>();
         MeshStruct[] meshes = new MeshStruct[meshObjects.Length];
         int indexOffset = 0;
         int vertexAndNormalOffset = 0;
-        List<float3> vertices = new List<float3>();
-        List<float3> normals = new List<float3>();
-        List<int> indices = new List<int>();
-        
+        int totalVertexCount = 0;
+
         int totalTris = 0;
         int currentBVHNodeIndex = 0;
         int totalBVHNodes = getTotalBVHNodes(meshObjects);
@@ -166,8 +194,8 @@ public class RayTracingManager : MonoBehaviour
         bool anyMeshMarkedUpdated = false;
         for (int i = 0; i < meshObjects.Length; i++) {
             var m = meshObjects[i];
-            int triCount = (m.triangles != null) ? (m.triangles.Count / 3) : 0;
-            totalTris += triCount;
+            uint triCount = m.mesh.GetIndexCount(0) / 3;
+            totalTris += (int)triCount;
             if (m.update) anyMeshMarkedUpdated = true;
             m.update = false;
         }
@@ -178,26 +206,33 @@ public class RayTracingManager : MonoBehaviour
                       || BVHBuffer.stride != ShaderHelper.GetStride<GPUBVHNode>()
                       || anyMeshMarkedUpdated;
         if (needMeshes || needTriangles || needBVH) {
-            Debug.Log("Updating mesh buffers");
+            Debug.Log($"Updating mesh buffers: meshes={meshes.Length}, totalTris={totalTris}, totalBVHNodes={totalBVHNodes}");
             Triangle[] triangles = new Triangle[totalTris];
-            for (int i = 0; i < meshObjects.Length; i++) {
-                for (int j = 0; j < meshObjects[i].vertices.Count; j++) {
-                    vertices.Add(meshObjects[i].vertices[j]);
-                    normals.Add(meshObjects[i].normals[j]);
+            for (int i = 0; i < meshObjects.Length; i++)
+            {
+                totalVertexCount += meshObjects[i].numVertices;
+            }
+
+            List<float3> vertices = new List<float3>(totalVertexCount);
+            List<float3> normals = new List<float3>(totalVertexCount);
+            for (int i = 0; i < meshObjects.Length; i++)
+            {
+                List<Vector3> tV = new List<Vector3>();
+                List<Vector3> tN = new List<Vector3>();
+                meshObjects[i].mesh.GetVertices(tV);
+                meshObjects[i].mesh.GetNormals(tN);
+                
+                foreach(Vector3 v in tV)
+                {
+                    vertices.Add(v);
                 }
-                meshes[i] = new MeshStruct() {
-                    indexOffset = indexOffset,
-                    triangleCount = meshObjects[i].triangles.Count/3,
-                    material = meshObjects[i].material,
-                    AABBLeftX = meshObjects[i].ModelBounds.min.x,
-                    AABBLeftY = meshObjects[i].ModelBounds.min.y,
-                    AABBLeftZ = meshObjects[i].ModelBounds.min.z,
-                    AABBRightX = meshObjects[i].ModelBounds.max.x,
-                    AABBRightY = meshObjects[i].ModelBounds.max.y,
-                    AABBRightZ = meshObjects[i].ModelBounds.max.z,
-                    firstBVHNodeIndex = currentBVHNodeIndex,
-                    largestAxis = meshObjects[i].largestAxis,
-                };
+
+                foreach (Vector3 N in tN)
+                {
+                    normals.Add(N);
+                }
+                
+                int[] tT = meshObjects[i].mesh.triangles;
                 int bvhStart = currentBVHNodeIndex; //offset BVH start index
                 if (meshObjects[i].GPUBVH.Count == 0) {
                     Debug.LogError("No BVH for mesh " + meshObjects[i].name);
@@ -210,49 +245,91 @@ public class RayTracingManager : MonoBehaviour
                     if (node.right != -1) {
                         node.right += bvhStart;
                     }
-
+                    //note
                     node.firstTriangleIndex += indexOffset;
                     BVHNodes[currentBVHNodeIndex++] = node;
                 }
-                for (int j = 0; j < meshObjects[i].buildTriangles.Count; j++) {
-                    int baseIndex = meshObjects[i].buildTriangles[j].triangleIndex;
-                    int vertexIndex1 = meshObjects[i].triangles[baseIndex];
-                    int vertexIndex2 = meshObjects[i].triangles[baseIndex+1];
-                    int vertexIndex3 = meshObjects[i].triangles[baseIndex+2];
-                    Vector3 edgeAB = meshObjects[i].vertices[vertexIndex2] - meshObjects[i].vertices[vertexIndex1];
-                    Vector3 edgeAC = meshObjects[i].vertices[vertexIndex3] - meshObjects[i].vertices[vertexIndex1];
-                    triangles[indexOffset] = new Triangle() {
-                        /*vertexIndex1 = vertexIndex1 + vertexAndNormalOffset,
-                        vertexIndex2 = vertexIndex2 + vertexAndNormalOffset,
-                        vertexIndex3 = vertexIndex3 + vertexAndNormalOffset,*/
-                        vertex1 = meshObjects[i].vertices[vertexIndex1],
-                        normalIndex1 = vertexIndex1 + vertexAndNormalOffset,
-                        normalIndex2 = vertexIndex2 + vertexAndNormalOffset,
-                        normalIndex3 = vertexIndex3 + vertexAndNormalOffset,
+                var bvh = meshObjects[i].GetComponent<BVHCreator>(); // or however you store it
+                int[] order = bvh.triIndexArray; // must be built by BVHCreator.BuildBVH()
+                for (int t = 0; t < order.Length; t++)
+                {
+                    int triId = order[t];                       // triangle id in original buildTriangles list
+                    var bt = meshObjects[i].buildTriangles[triId];
+
+                    int baseIndex = bt.triangleIndex;           // index into meshObjects[i].triangles list (x3 indices)
+                    int v1 = tT[baseIndex];
+                    int v2 = tT[baseIndex + 1];
+                    int v3 = tT[baseIndex + 2];
+
+                    Vector3 edgeAB = tV[v2] - tV[v1];
+                    Vector3 edgeAC = tV[v3] - tV[v1];
+
+                    triangles[indexOffset] = new Triangle()
+                    {
+                        vertex1 = tV[v1],
+                        normalIndex1 = v1 + vertexAndNormalOffset,
+                        normalIndex2 = v2 + vertexAndNormalOffset,
+                        normalIndex3 = v3 + vertexAndNormalOffset,
                         edgeAB = edgeAB,
                         edgeAC = edgeAC,
                     };
+
                     indexOffset++;
                 }
-                vertexAndNormalOffset += meshObjects[i].vertices.Count;
+                vertexAndNormalOffset += tV.Count;
+                tV.Clear();
+                tN.Clear();
             }
-            ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, vertices);
+
+
+            PerfTimer.Time("StructuredVertexBufferCreation", () => ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, vertices));
 
             ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer, normals);
 
             ShaderHelper.CreateStructuredBuffer(ref meshBuffer, meshes);
-
-            ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, triangles);
-
+            PerfTimer.Time("StructuredMeshBufferCreation: ", () => ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, triangles));
             ShaderHelper.CreateStructuredBuffer(ref BVHBuffer, BVHNodes);
-
+            rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
+            rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
+            rayTracingMaterial.SetBuffer("Vertices", MeshVerticesBuffer);
+            rayTracingMaterial.SetBuffer("Normals", MeshNormalsBuffer);
         }
+        
+        // Update worldPos every frame (meshes can move) - always rebuild meshes array with current positions
+        if (meshBuffer != null && meshObjects.Length > 0) {
+            MeshStruct[] updatedMeshes = new MeshStruct[meshObjects.Length];
+            int meshIdx = 0;
+            int triOffset = 0;
+            int bvhOffset = 0;
+            for (int i = 0; i < meshObjects.Length; i++)
+            {
+                var bvh = meshObjects[i].BVH;
+                var localRoot = bvh.root.bounds;
+                updatedMeshes[i] = new MeshStruct() {
+                    indexOffset = triOffset,
+                    triangleCount = meshObjects[i].buildTriangles.Length,
+                    material = meshObjects[i].material,
+                    AABBLeftX = localRoot.min.x,
+                    AABBLeftY = localRoot.min.y,
+                    AABBLeftZ = localRoot.min.z,
+                    AABBRightX = localRoot.max.x,
+                    AABBRightY = localRoot.min.y,
+                    AABBRightZ = localRoot.min.z,
+                    firstBVHNodeIndex = bvhOffset,
+                    largestAxis = meshObjects[i].largestAxis,
+                    localToWorld = meshObjects[i].transform.localToWorldMatrix,
+                    worldToLocal = meshObjects[i].transform.worldToLocalMatrix,
+                };
+                triOffset += meshObjects[i].buildTriangles.Length;
+                bvhOffset += meshObjects[i].GPUBVH.Count;
+            }
+            meshBuffer.SetData(updatedMeshes);
+        }
+        
         rayTracingMaterial.SetBuffer("Meshes", meshBuffer);
-        rayTracingMaterial.SetInt("numMeshes", meshes.Length);
-        rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
-        rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
-        rayTracingMaterial.SetBuffer("Vertices", MeshVerticesBuffer);
-        rayTracingMaterial.SetBuffer("Normals", MeshNormalsBuffer);
+        rayTracingMaterial.SetInt("numMeshes", meshObjects.Length);
+        long after = Profiler.GetMonoUsedSizeLong();
+        Debug.Log($"Mono delta: {(after-Before)/1024f/1024f:0.0} MB");
     }
 
     void UpdateShaderValues() {

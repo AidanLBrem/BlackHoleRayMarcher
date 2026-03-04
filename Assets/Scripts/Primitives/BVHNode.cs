@@ -4,6 +4,8 @@ public class BVHNode {
     public Vector3 boundsMin;
     public Vector3 boundsMax;
 
+    public Bounds bounds;
+
     public BVHNode left;
     public BVHNode right;
 
