@@ -134,7 +134,7 @@ public class RayTracingManager : MonoBehaviour
         var cam = Camera.current;
         UpdateCameraParams(cam);
         UpdateShaderValues();
-        PerfTimer.Time("AllocateMeshBuffer", () => allocateMeshBuffer());
+        allocateMeshBuffer();
         allocateSphereBuffer();
         allocateBlackHoleBuffer();
     }
@@ -328,8 +328,6 @@ public class RayTracingManager : MonoBehaviour
         
         rayTracingMaterial.SetBuffer("Meshes", meshBuffer);
         rayTracingMaterial.SetInt("numMeshes", meshObjects.Length);
-        long after = Profiler.GetMonoUsedSizeLong();
-        Debug.Log($"Mono delta: {(after-Before)/1024f/1024f:0.0} MB");
     }
 
     void UpdateShaderValues() {

@@ -400,7 +400,7 @@ public class BVHCreator : MonoBehaviour
         int axis = (s.x > s.y && s.x > s.z) ? 0 : (s.y > s.z ? 1 : 2);
         
 
-        float split = FindBestSplitBalanced_NoMutate(start, end, axis);
+        float split = FindBestSplitBalanced_NoMutate(start, end, ref axis);
         if (float.IsNaN(split))
         {
             return node;
@@ -420,48 +420,107 @@ public class BVHCreator : MonoBehaviour
         return node;
     }
 
-    float FindBestSplitBalanced_NoMutate(int start, int end, int axis)
+    float FindBestSplitBalanced_NoMutate(int start, int end, ref int axis)
     {
         // Use centroid range, not bounds range (usually better for splitting)
-        float cmin = float.PositiveInfinity;
-        float cmax = float.NegativeInfinity;
-
-        for (int k = start; k <= end; k++)
-        {
-            float c = meshObj.buildTriangles[triIndexArray[k]].centroid[axis];
-            cmin = Mathf.Min(cmin, c);
-            cmax = Mathf.Max(cmax, c);
-        }
-
-        // Degenerate: all centroids same on this axis -> no meaningful split
-        if (cmax <= cmin + 1e-8f)
-            return float.NaN;
 
         int total = end - start + 1;
         int targetLeft = total / 2;
 
         float bestSplit = float.NaN;
-        int bestDelta = int.MaxValue;
-
-        for (float t = 0.125f; t <= 0.875f; t += 0.125f)
+        float bestCost = float.MaxValue;
+        float bestRatio = 1f;
+        for (int i = 0; i <= 2; i++)
         {
-            float split = Mathf.Lerp(cmin, cmax, t);
+            float cmin = float.PositiveInfinity;
+            float cmax = float.NegativeInfinity;
 
-            int leftCount = 0;
             for (int k = start; k <= end; k++)
             {
-                float c = meshObj.buildTriangles[triIndexArray[k]].centroid[axis];
-                if (c < split) leftCount++;
+                float c = meshObj.buildTriangles[triIndexArray[k]].centroid[i];
+                cmin = Mathf.Min(cmin, c);
+                cmax = Mathf.Max(cmax, c);
             }
 
-            int delta = Mathf.Abs(leftCount - targetLeft);
-            if (delta < bestDelta)
+            // Degenerate: all centroids same on this axis -> no meaningful split
+            if (cmax <= cmin + 1e-8f)
+                continue;
+
+            for (float t = 0.125f; t <= 0.875f; t += 0.125f)
             {
-                bestDelta = delta;
-                bestSplit = split;
+                float split = Mathf.Lerp(cmin, cmax, t);
+                Bounds leftBounds = default;
+                Bounds rightBounds = default;
+                bool leftInit = false;
+                bool rightInit = false;
+                int leftCount = 0;
+                int rightCount = 0;
+
+                for (int k = start; k <= end; k++)
+                {
+                    float c = meshObj.buildTriangles[triIndexArray[k]].centroid[i];
+                    if (c < split)
+                    {
+                        leftCount++;
+                        Bounds bounds = meshObj.buildTriangles[triIndexArray[k]].bounds;
+                        if (!leftInit)
+                        {
+                            leftBounds = bounds;
+                            leftInit = true;
+                        }
+                        else
+                        {
+                            leftBounds.Encapsulate(bounds);
+                        }
+                        
+                    }
+
+                    else
+                    {
+                        rightCount++;
+                        Bounds bounds = meshObj.buildTriangles[triIndexArray[k]].bounds;
+                        if (!rightInit)
+                        {
+                            rightBounds = bounds;
+                            rightInit = true;
+                        }
+
+                        else
+                        {
+                            rightBounds.Encapsulate(bounds);
+                        }
+                    }
+                }
+
+                if (leftCount == 0 || rightCount == 0)
+                {
+                    continue;
+                }
+
+                /*float ratio = (float)leftCount / total; //Even split
+                if (Math.Abs(ratio - 0.5f) < bestRatio)
+                {
+                    bestRatio = ratio;
+                    bestSplit = split;
+                }*/
+                //SAH split
+                float leftCost = leftCount * surfaceArea(leftBounds);
+                float rightCost = rightCount * surfaceArea(rightBounds);
+                float totalCost = leftCost + rightCost;
+                if (totalCost < bestCost)
+                {
+                    bestCost = totalCost;
+                    bestSplit = split;
+                    axis = i;
+                }
             }
         }
 
         return bestSplit;
+    }
+    public static float surfaceArea(Bounds b)
+    {
+        Vector3 size = b.size;
+        return 2f * (size.x * size.y + size.y * size.z + size.z * size.x);
     }
 }

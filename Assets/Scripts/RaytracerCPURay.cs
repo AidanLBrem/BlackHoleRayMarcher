@@ -8,7 +8,9 @@ public struct BoundsHitData
 {
     public Bounds bounds;
     public bool isLeaf;
+    public BVHNode node;
 }
+[System.Serializable]
 public struct CPUHitInfo
 {
     public float hitDistance;
@@ -16,6 +18,7 @@ public struct CPUHitInfo
     public int triangleTests;
     public int BVHNodesSearched;
     public float time;
+    public BVHNode hitNode;
 }
 [ExecuteAlways]
 public class RaytracerCPURay : MonoBehaviour
@@ -24,7 +27,7 @@ public class RaytracerCPURay : MonoBehaviour
     [SerializeField] private TextMeshProUGUI GUIElement;
     [SerializeField] private Transform tracerProperties;
 
-    private CPUHitInfo intersect;
+    [SerializeField] private CPUHitInfo intersect;
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -56,7 +59,12 @@ public class RaytracerCPURay : MonoBehaviour
             for (int i = 0; i < intersect.boundsHitData.Count; i++)
             {
                 BoundsHitData data =  intersect.boundsHitData[i];
-                if (data.isLeaf)
+                if (intersect.hitNode == data.node)
+                {
+                    Gizmos.color = new Color(0f, 1f, 0f, 1f);
+                    leafCount++;
+                }
+                else if (data.isLeaf)
                 {
                     Gizmos.color = new Color(1f, 0f, 0f, 1f / (++leafCount));
                 }
@@ -132,7 +140,7 @@ public class RaytracerCPURay : MonoBehaviour
         BoundsHitData data = new BoundsHitData();
         data.bounds = BVHBounds;
         data.isLeaf = false;
-
+        data.node = node;
         if (node.left == null && node.right == null)
         {
             data.isLeaf = true;
@@ -245,6 +253,7 @@ public class RaytracerCPURay : MonoBehaviour
             if (dst < hit.hitDistance)
             {
                 hit.hitDistance = dst;
+                hit.hitNode = node;
             }
         }
     }
