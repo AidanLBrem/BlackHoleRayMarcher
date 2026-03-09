@@ -40,7 +40,31 @@ public class RayTracingManager : MonoBehaviour
     public bool renderTriangles = true;
     const float G = 1.975813844e-32f;
     const float C = 0.430467210276f;
+    public Texture2D blackHoleBendLUT;
 
+    public float rMinOverRs = 1.02f;
+    public float rMaxOverRs = 100f;
+    public float logEpsilonOverRs = 0.001f;
+    public bool use_lut = true;
+    public bool enable_lensing = true;
+    public float bendStrength = 1.27f;
+    static List<Vector3> tV = new();
+
+    private static List<Vector3> tN = new();
+    void ApplyBlackHoleLUT(Material rayTracingMaterial, RayTracedBlackHole blackHole)
+    {
+        BlackHoleBendLUTGenerator gen = blackHole.transform.GetComponent<BlackHoleBendLUTGenerator>();
+        rMinOverRs = gen.rMinOverRs;
+        rMaxOverRs = gen.rMaxOverRs;
+        logEpsilonOverRs = gen.logEpsilonOverRs;
+        rayTracingMaterial.SetTexture("_BlackHoleBendLUT", blackHoleBendLUT);
+        rayTracingMaterial.SetFloat("_BHLUT_MuResolution", gen.muResolution);
+        rayTracingMaterial.SetFloat("_BHLUT_RadiusResolution", gen.radiusResolution);
+        rayTracingMaterial.SetFloat("_BHLUT_RMinOverRs", rMinOverRs);
+        rayTracingMaterial.SetFloat("_BHLUT_RMaxOverRs", rMaxOverRs);
+        rayTracingMaterial.SetFloat("_BHLUT_LogEpsilonOverRs", logEpsilonOverRs);
+        rayTracingMaterial.SetFloat("bendStrength", bendStrength);
+    }
 
     void OnValidate()
     {
@@ -176,6 +200,26 @@ public class RayTracingManager : MonoBehaviour
         {
             rayTracingMaterial.DisableKeyword("TEST_TRIANGLE");
         }
+
+        if (use_lut)
+        {
+            rayTracingMaterial.EnableKeyword("USE_LUT");
+        }
+
+        else
+        {
+            rayTracingMaterial.DisableKeyword("USE_LUT");
+        }
+
+        if (enable_lensing)
+        {
+            rayTracingMaterial.EnableKeyword("ENABLE_LENSING");
+        }
+
+        else
+        {
+            rayTracingMaterial.DisableKeyword("ENABLE_LENSING");
+        }
     }
 
     void allocateMeshBuffer()
@@ -205,7 +249,9 @@ public class RayTracingManager : MonoBehaviour
                       || BVHBuffer.count != Mathf.Max(1, totalBVHNodes)
                       || BVHBuffer.stride != ShaderHelper.GetStride<GPUBVHNode>()
                       || anyMeshMarkedUpdated;
-        if (needMeshes || needTriangles || needBVH) {
+        if (needMeshes || needTriangles || needBVH)
+        {
+            float startTime = Time.realtimeSinceStartup;
             Debug.Log($"Updating mesh buffers: meshes={meshes.Length}, totalTris={totalTris}, totalBVHNodes={totalBVHNodes}");
             Triangle[] triangles = new Triangle[totalTris];
             for (int i = 0; i < meshObjects.Length; i++)
@@ -217,8 +263,8 @@ public class RayTracingManager : MonoBehaviour
             List<float3> normals = new List<float3>(totalVertexCount);
             for (int i = 0; i < meshObjects.Length; i++)
             {
-                List<Vector3> tV = new List<Vector3>();
-                List<Vector3> tN = new List<Vector3>();
+
+
                 meshObjects[i].mesh.GetVertices(tV);
                 meshObjects[i].mesh.GetNormals(tN);
                 
@@ -250,14 +296,14 @@ public class RayTracingManager : MonoBehaviour
                     BVHNodes[currentBVHNodeIndex++] = node;
                 }
                 var bvh = meshObjects[i].GetComponent<BVHCreator>(); // or however you store it
-                int[] order = bvh.triIndexArray; // must be built by BVHCreator.BuildBVH()
+                ref int[] order = ref bvh.triIndexArray; // must be built by BVHCreator.BuildBVH()
                 for (int t = 0; t < order.Length; t++)
                 {
                     int triId = order[t];                       // triangle id in original buildTriangles list
-                    var bt = meshObjects[i].buildTriangles[triId];
+                    ref buildTri bt = ref meshObjects[i].buildTriangles[triId];
 
-                    int baseIndex = bt.triangleIndex;           // index into meshObjects[i].triangles list (x3 indices)
-                    int v1 = tT[baseIndex];
+                    int baseIndex = bt.triangleIndex;           // triangleIndex is the index of the triangle in the mesh triangle array (that points to the first vertex in the vetex array)
+                    int v1 = tT[baseIndex]; //the index that we need to lookup in the vertex array
                     int v2 = tT[baseIndex + 1];
                     int v3 = tT[baseIndex + 2];
 
@@ -266,12 +312,13 @@ public class RayTracingManager : MonoBehaviour
 
                     triangles[indexOffset] = new Triangle()
                     {
-                        vertex1 = tV[v1],
-                        normalIndex1 = v1 + vertexAndNormalOffset,
-                        normalIndex2 = v2 + vertexAndNormalOffset,
-                        normalIndex3 = v3 + vertexAndNormalOffset,
+                        //posibility: store v1 instead. 
+                        v1 = v1 + vertexAndNormalOffset,
+                        v2 = v2 +  vertexAndNormalOffset,
+                        v3 = v3 + vertexAndNormalOffset,
                         edgeAB = edgeAB,
                         edgeAC = edgeAC,
+                        normal = Vector3.Cross(edgeAB, edgeAC)
                     };
 
                     indexOffset++;
@@ -281,6 +328,8 @@ public class RayTracingManager : MonoBehaviour
                 tN.Clear();
             }
 
+            float endTime = Time.realtimeSinceStartup;
+            Debug.Log("Time taken to assemble buffers: " + (endTime - startTime) + " ms");
 
             PerfTimer.Time("StructuredVertexBufferCreation", () => ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, vertices));
 
@@ -313,8 +362,8 @@ public class RayTracingManager : MonoBehaviour
                     AABBLeftY = localRoot.min.y,
                     AABBLeftZ = localRoot.min.z,
                     AABBRightX = localRoot.max.x,
-                    AABBRightY = localRoot.min.y,
-                    AABBRightZ = localRoot.min.z,
+                    AABBRightY = localRoot.max.y,
+                    AABBRightZ = localRoot.max.z,
                     firstBVHNodeIndex = bvhOffset,
                     largestAxis = meshObjects[i].largestAxis,
                     localToWorld = meshObjects[i].transform.localToWorldMatrix,
@@ -367,7 +416,7 @@ public class RayTracingManager : MonoBehaviour
 				position = blackHoleObjects[i].transform.position,
 				radius = blackHoleObjects[i].transform.localScale.x * 0.5f,
 				blackHoleSOIMultiplier = blackHoleObjects[i].blackHoleSOIMultiplier,
-                blackHoleMass = (blackHoleObjects[i].transform.localScale.x * 0.5f * C * C) / (2.0f * G),
+                blackHoleMass = blackHoleObjects[i].transform.localScale.x * 0.5f,
 			};
             if (blackHoles[i].blackHoleSOIMultiplier <= 0) {
                 Debug.LogError("BlackHoleSOIMultiplier is less than or equal to 0 for " + blackHoleObjects[i].name);
@@ -378,6 +427,11 @@ public class RayTracingManager : MonoBehaviour
                 Debug.LogError("BlackHoleMass is 0 for " + blackHoleObjects[i].name);
             }
 		}
+
+        if (blackHoleObjects.Length > 0)
+        {
+            ApplyBlackHoleLUT(rayTracingMaterial, blackHoleObjects[0]);
+        }
 
 		ShaderHelper.CreateStructuredBuffer(ref blackHoleBuffer, blackHoles);
 		rayTracingMaterial.SetBuffer("BlackHoles", blackHoleBuffer);

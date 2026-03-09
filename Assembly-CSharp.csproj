@@ -56,11 +56,13 @@
     <Compile Include="Assets\Scripts\Primitives\BuildTri.cs" />
     <Compile Include="Assets\Scripts\ShaderHelper.cs" />
     <Compile Include="Assets\Scripts\FPSDisplay.cs" />
+    <Compile Include="Assets\Scripts\BlackHoleCPUPreCalculator.cs" />
     <Compile Include="Assets\Scripts\Primitives\RayTracedMesh.cs" />
     <Compile Include="Assets\Scripts\BVHCreator.cs" />
     <Compile Include="Assets\TutorialInfo\Scripts\Readme.cs" />
     <Compile Include="Assets\Scripts\Primitives\Triangle.cs" />
     <Compile Include="Assets\Scripts\RaytracerCPURay.cs" />
+    <Compile Include="Assets\Scripts\BlackHoleBendingLUT.cs" />
     <Compile Include="Assets\Scripts\Primitives\RayTracedBlackHole.cs" />
     <Compile Include="Assets\Scripts\Primitives\Mesh.cs" />
     <Compile Include="Assets\Scripts\Primitives\Sphere.cs" />

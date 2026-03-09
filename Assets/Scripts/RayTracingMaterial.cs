@@ -6,5 +6,6 @@ public struct RayTracingMaterial
     public Color emissiveColor;
     public Color specularColor;
     public float emissiveStrength;
-    public float smoothness;
+    public float roughness;
+    public float metallicity;
 }

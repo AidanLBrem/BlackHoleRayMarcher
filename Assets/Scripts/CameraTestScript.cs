@@ -11,7 +11,7 @@ public class CameraTestScript : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-                CameraRayTest();
+        //CameraRayTest();
     }
 
     void CameraRayTest() {

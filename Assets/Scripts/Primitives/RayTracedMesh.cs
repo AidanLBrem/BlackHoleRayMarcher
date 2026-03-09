@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System;
+
 [ExecuteAlways]
 public class RayTracedMesh : MonoBehaviour
 {
@@ -8,7 +9,8 @@ public class RayTracedMesh : MonoBehaviour
     [NonSerialized] public buildTri[] buildTriangles;
     public int numVertices;
     public RayTracingMaterial material;
-    public bool update = true;
+    [HideInInspector] public bool update = true;
+    public bool rebuildBVH = false;
     public BVHCreator BVH;
     public Bounds ModelBounds;
     [NonSerialized] public List<GPUBVHNode> GPUBVH;
@@ -48,16 +50,21 @@ public class RayTracedMesh : MonoBehaviour
         ModelBounds = mesh.bounds;
 
         // Build local-space triangle data
-        buildTriangles = new buildTri[mesh.GetIndexCount(0) / 3];
-        PerfTimer.Time("Population of build triangles: in model " + transform.name, () => PopulateBuildTriangles());
+        if (BVH.root == null || rebuildBVH)
+        {
+            buildTriangles = new buildTri[mesh.GetIndexCount(0) / 3];
+            PerfTimer.Time("Population of build triangles: in model " + transform.name, () => PopulateBuildTriangles());
 
-        numVertices = (int)mesh.GetIndexCount(0);
+            numVertices = (int)mesh.GetIndexCount(0);
 
-        // Build BVH once in local space
-        BVH.StartBVHConstruction();
-        PerfTimer.Time("Flattening of BVH for GPU in model " + transform.name, () => GPUBVH = BVH.flattenBVH());
-        // Signal to your ray tracer that buffers need re-upload
-        update = true;
+            // Build BVH once in local space
+            BVH.StartBVHConstruction();
+            PerfTimer.Time("Flattening of BVH for GPU in model " + transform.name, () => GPUBVH = BVH.flattenBVH());
+            // Signal to your ray tracer that buffers need re-upload
+            update = true;
+            rebuildBVH = false;
+        }
+
     }
 
     void PopulateBuildTriangles()

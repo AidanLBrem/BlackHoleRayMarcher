@@ -20,10 +20,27 @@ static class PerfTimer
     }
 }
 
+public struct BVHBin
+{
+    public int triCount;
+    public Bounds bounds;
+    public bool initialized;
+}
+
+public struct SplitResult
+{
+    public bool valid;
+    public int axis;
+    public float splitPos;
+    public Bounds leftBounds;
+    public Bounds rightBounds;
+}
+
 [DisallowMultipleComponent]
 public class BVHCreator : MonoBehaviour
 {
     public static int triangleCountPerLeaf = 4;
+    public int numBins = 16;
     public BVHNode root;
     public RayTracedMesh meshObj;
     public bool drawCentroids = false;
@@ -47,6 +64,12 @@ public class BVHCreator : MonoBehaviour
 
     [SerializeField][Range(1, 16)] private int trianglesInNodesCutoff = 1;
     [SerializeField] [Range(1, 32)] private int depthCutOff = 1;
+    
+    BVHBin[] bins;
+    Bounds[] leftB, rightB;
+    int[] leftC, rightC;
+    bool[] leftInit, rightInit;
+
 
     public void StartBVHConstruction()
     {
@@ -332,7 +355,8 @@ public class BVHCreator : MonoBehaviour
     void BuildBVH()
     {
         PerfTimer.Time("TriIndexArray Assembly", () => CreateTriIndexArray());
-        PerfTimer.Time("BVH assembly", () => root = BuildBVHRec(0, triIndexArray.Length - 1, 0));
+        Bounds rootBounds = ComputeBoundsForRange(0, triIndexArray.Length - 1);
+        PerfTimer.Time("BVH assembly of " + transform.name, () => root = BuildBVHRec(0, triIndexArray.Length - 1, 0, rootBounds));
     }
 
     int PartitionTriIndexArray(float split, int start, int end, int axis)
@@ -375,14 +399,14 @@ public class BVHCreator : MonoBehaviour
         return b;
     }
 
-    BVHNode BuildBVHRec(int start, int end, int depth)
+    BVHNode BuildBVHRec(int start, int end, int depth, Bounds bounds)
     {
         BVHNode node = new BVHNode();
         node.firstTriangleIndex = start;
         node.triangleCount = end - start + 1;
-
+        totalNodes++;
         // Always compute node bounds from triangles in this range (Unity Bounds)
-        Bounds nodeBounds = ComputeBoundsForRange(start, end);
+        Bounds nodeBounds = bounds;
 
         // Store Bounds directly (NEW)
         node.bounds = nodeBounds;
@@ -400,19 +424,17 @@ public class BVHCreator : MonoBehaviour
         int axis = (s.x > s.y && s.x > s.z) ? 0 : (s.y > s.z ? 1 : 2);
         
 
-        float split = FindBestSplitBalanced_NoMutate(start, end, ref axis);
-        if (float.IsNaN(split))
+        SplitResult split = FindBestSplitBalanced_NoMutate(start, end, ref axis);
+        if (!split.valid)
         {
             return node;
         }
 
-        int mid = PartitionTriIndexArray(split, start, end, axis);
-        if (mid <= start || mid > end)
-        {
-            return node;
-        }
-        node.left = BuildBVHRec(start, mid - 1, depth + 1);
-        node.right = BuildBVHRec(mid, end, depth + 1);
+        int mid = PartitionTriIndexArray(split.splitPos, start, end, split.axis);
+        if (mid <= start) mid = start + 1;
+        else if (mid > end) mid = end;
+        node.left = BuildBVHRec(start, mid - 1, depth + 1, split.leftBounds);
+        node.right = BuildBVHRec(mid, end, depth + 1, split.rightBounds);
 
         // Optional but good: ensure parent bounds encapsulate children exactly
         // (also keeps Bounds consistent if you later change ComputeBoundsForRange)
@@ -420,18 +442,24 @@ public class BVHCreator : MonoBehaviour
         return node;
     }
 
-    float FindBestSplitBalanced_NoMutate(int start, int end, ref int axis)
+    SplitResult FindBestSplitBalanced_NoMutate(int start, int end, ref int axis)
     {
         // Use centroid range, not bounds range (usually better for splitting)
-
+        SplitResult toReturn = new SplitResult
+            { valid = false, axis = -1, splitPos = 0f, leftBounds = default, rightBounds = default };
         int total = end - start + 1;
-        int targetLeft = total / 2;
-
-        float bestSplit = float.NaN;
-        float bestCost = float.MaxValue;
-        float bestRatio = 1f;
+        EnsureScratch();
+        float bestScore = Mathf.Infinity;
+        for (int i = 0; i < numBins; i++)
+        {
+            bins[i] = new BVHBin { triCount = 0, initialized = false };
+        }
         for (int i = 0; i <= 2; i++)
         {
+            Array.Clear(leftC, 0, leftC.Length);
+            Array.Clear(rightC, 0, rightC.Length);
+            Array.Clear(rightInit, 0, rightInit.Length);
+            Array.Clear(leftInit, 0, leftInit.Length);
             float cmin = float.PositiveInfinity;
             float cmax = float.NegativeInfinity;
 
@@ -445,82 +473,116 @@ public class BVHCreator : MonoBehaviour
             // Degenerate: all centroids same on this axis -> no meaningful split
             if (cmax <= cmin + 1e-8f)
                 continue;
-
-            for (float t = 0.125f; t <= 0.875f; t += 0.125f)
+            for (int k = 0; k < numBins; k++)
             {
-                float split = Mathf.Lerp(cmin, cmax, t);
-                Bounds leftBounds = default;
-                Bounds rightBounds = default;
-                bool leftInit = false;
-                bool rightInit = false;
-                int leftCount = 0;
-                int rightCount = 0;
-
-                for (int k = start; k <= end; k++)
+                bins[k].triCount = 0;
+                bins[k].bounds = default;
+                bins[k].initialized = false;
+            }
+            float invRange = 1f / (cmax - cmin);
+            for (int k = start; k <= end; k++)
+            {
+                ref buildTri tri = ref meshObj.buildTriangles[triIndexArray[k]];
+                float c = tri.centroid[i];
+                float t = (c - cmin) * invRange;
+                int binIndex = Mathf.Clamp((int)(t * numBins), 0, numBins - 1);
+                ref BVHBin bin = ref bins[binIndex];
+                bin.triCount++;
+                if (!bin.initialized)
                 {
-                    float c = meshObj.buildTriangles[triIndexArray[k]].centroid[i];
-                    if (c < split)
-                    {
-                        leftCount++;
-                        Bounds bounds = meshObj.buildTriangles[triIndexArray[k]].bounds;
-                        if (!leftInit)
-                        {
-                            leftBounds = bounds;
-                            leftInit = true;
-                        }
-                        else
-                        {
-                            leftBounds.Encapsulate(bounds);
-                        }
-                        
-                    }
-
-                    else
-                    {
-                        rightCount++;
-                        Bounds bounds = meshObj.buildTriangles[triIndexArray[k]].bounds;
-                        if (!rightInit)
-                        {
-                            rightBounds = bounds;
-                            rightInit = true;
-                        }
-
-                        else
-                        {
-                            rightBounds.Encapsulate(bounds);
-                        }
-                    }
+                    bin.bounds = tri.bounds;
+                    bin.initialized = true;
                 }
 
-                if (leftCount == 0 || rightCount == 0)
+                else
                 {
-                    continue;
-                }
-
-                /*float ratio = (float)leftCount / total; //Even split
-                if (Math.Abs(ratio - 0.5f) < bestRatio)
-                {
-                    bestRatio = ratio;
-                    bestSplit = split;
-                }*/
-                //SAH split
-                float leftCost = leftCount * surfaceArea(leftBounds);
-                float rightCost = rightCount * surfaceArea(rightBounds);
-                float totalCost = leftCost + rightCost;
-                if (totalCost < bestCost)
-                {
-                    bestCost = totalCost;
-                    bestSplit = split;
-                    axis = i;
+                    bin.bounds.Encapsulate(tri.bounds);
                 }
             }
+            
+// prefix
+            for (int b = 0; b < numBins; b++)
+            {
+                if (b > 0)
+                {
+                    leftC[b] = leftC[b - 1];
+                    leftB[b] = leftB[b - 1];
+                    leftInit[b] = leftInit[b - 1];
+                }
+
+                leftC[b] += bins[b].triCount;
+
+                if (bins[b].initialized)
+                {
+                    if (!leftInit[b]) { leftB[b] = bins[b].bounds; leftInit[b] = true; }
+                    else leftB[b].Encapsulate(bins[b].bounds);
+                }
+            }
+
+// suffix
+            for (int b = numBins - 1; b >= 0; b--)
+            {
+                if (b < numBins - 1)
+                {
+                    rightC[b] = rightC[b + 1];
+                    rightB[b] = rightB[b + 1];
+                    rightInit[b] = rightInit[b + 1];
+                }
+
+                rightC[b] += bins[b].triCount;
+
+                if (bins[b].initialized)
+                {
+                    if (!rightInit[b]) { rightB[b] = bins[b].bounds; rightInit[b] = true; }
+                    else rightB[b].Encapsulate(bins[b].bounds);
+                }
+            }
+
+// evaluate all boundaries k = 1..B-1
+            for (int k = 1; k < numBins; k++)
+            {
+                int lc = leftC[k - 1];
+                int rc = rightC[k];
+
+                if (!leftInit[k - 1] || !rightInit[k]) continue; // empty side
+
+                float cost = lc * surfaceArea(leftB[k - 1]) + rc * surfaceArea(rightB[k]);
+
+                if (cost < bestScore)
+                {
+                    bestScore = cost;
+
+                    float t = k / (float)numBins;
+                    float splitPos = cmin + t * (cmax - cmin);
+
+                    toReturn.valid = true;
+                    toReturn.axis = i;
+                    toReturn.splitPos = splitPos;
+                    toReturn.leftBounds = leftB[k - 1];
+                    toReturn.rightBounds = rightB[k];
+                }
+            }
+
+
         }
 
-        return bestSplit;
+        return toReturn;
     }
     public static float surfaceArea(Bounds b)
     {
         Vector3 size = b.size;
         return 2f * (size.x * size.y + size.y * size.z + size.z * size.x);
+    }
+    
+    void EnsureScratch()
+    {
+        if (bins != null && bins.Length == numBins) return;
+        bins = new BVHBin[numBins];
+        leftB = new Bounds[numBins];
+        rightB = new Bounds[numBins];
+        leftC = new int[numBins];
+        rightC = new int[numBins];
+        leftInit = new bool[numBins];
+        rightInit = new bool[numBins];
     }
 }
