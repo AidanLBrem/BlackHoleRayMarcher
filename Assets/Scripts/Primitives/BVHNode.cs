@@ -9,15 +9,15 @@ public class BVHNode {
     public BVHNode left;
     public BVHNode right;
 
-    public int firstTriangleIndex;
-    public int triangleCount;
+    public uint firstIndex;
+    public uint count;
 
     public BVHNode() {
         boundsMin = Vector3.zero;
         boundsMax = Vector3.zero;
         left = null;
         right = null;
-        firstTriangleIndex = 0;
-        triangleCount = 0;
+        firstIndex = 0;
+        count = 0;
     }
 }

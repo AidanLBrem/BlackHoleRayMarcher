@@ -7,8 +7,8 @@ public struct GPUBVHNode {
     public int left;
     public int right;
 
-    public int firstTriangleIndex;
-    public int triangleCount;
+    public uint firstIndex;
+    public uint count;
 
     public float AABBLeftX;
     public float AABBLeftY;

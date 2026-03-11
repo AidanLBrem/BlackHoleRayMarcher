@@ -2,32 +2,33 @@ using System;
 using UnityEngine;
 using TMPro;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using UnityEngine.InputSystem.HID;
 using Random = System.Random;
 
 public struct BoundsHitData
 {
-    public Bounds bounds;
+    public Bounds bounds;   // stored in world space for debug drawing
     public bool isLeaf;
-    public BVHNode node;
+    public int nodeIndex;
 }
+
 [System.Serializable]
 public struct CPUHitInfo
 {
-    public float hitDistance;
-    public Vector3 hitPoint;
-    public Vector3 shadingNormal;
-    public Vector3 geometricNormal;
+    public float hitDistance;              // WORLD distance
+    public float localHitDistance;         // LOCAL ray t for current mesh
+    public Vector3 hitPoint;               // WORLD space
+    public Vector3 shadingNormal;          // WORLD space
+    public Vector3 geometricNormal;        // WORLD space
     public List<BoundsHitData> boundsHitData;
-    public int triangleTests;
+    public List<buildTri> triangleTests;   // WORLD space debug tris
     public int BVHNodesSearched;
     public float time;
-    public BVHNode hitNode;
+    public int hitNodeIndex;
     public RayTracingMaterial material;
     public bool debugInvalidBelowSurface;
     public bool debugInvalidBRDF;
 }
+
 [System.Serializable]
 public struct RayPathStruct
 {
@@ -36,35 +37,32 @@ public struct RayPathStruct
     public int debugInvalidBelowSurfaceCount;
     public int debugInvalidBRDFCount;
 }
+
+public struct MeshCollisionStruct
+{
+    public float distance;
+    public int meshIndex;
+    public Ray localRay;
+}
+
 [ExecuteAlways]
 public class RaytracerCPURay : MonoBehaviour
 {
-    private Vector3 rayStartPosition;
     [SerializeField] private TextMeshProUGUI GUIElement;
     [SerializeField] private Transform tracerProperties;
     [SerializeField] private RayPathStruct path;
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    
-    public static float randomValueNormalDistribution()
-    {
-        float theta = 2 * 3.1415926f * UnityEngine.Random.value;
-        float rho = Mathf.Sqrt(-2 * Mathf.Log(Mathf.Max(UnityEngine.Random.value, 1e-6f)));
-        return rho * Mathf.Cos(theta);
-    }
-    public static Vector3 randomDirection()
-    {
-        float x = randomValueNormalDistribution();
-        float y = randomValueNormalDistribution();
-        float z = randomValueNormalDistribution();
-        return Vector3.Normalize(new Vector3(x,y,z));
-    }
+    const float DET_EPS = 1e-10f;
+    const float T_EPS = 1e-6f;
+    const float BARY_EPS = 1e-6f;
 
-    // Update is called once per frame
+    const float BOUNDS_PAD = 1e-3f;
+
     void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.red;
         DrawRayStartingPosition();
+
         if (transform.hasChanged)
         {
             float time = Time.realtimeSinceStartup;
@@ -73,57 +71,63 @@ public class RaytracerCPURay : MonoBehaviour
             path.time = (timeAfter - time);
             transform.hasChanged = false;
         }
+
         Vector3 currentPosition = transform.position;
+
+        if (path.hitInfos == null) return;
+
         foreach (CPUHitInfo intersect in path.hitInfos)
         {
             if (intersect.hitDistance < float.MaxValue)
             {
                 Gizmos.color = Color.red;
                 Gizmos.DrawLine(currentPosition, intersect.hitPoint);
-                GUIElement.text = "Triangle Test: " + intersect.triangleTests + "\n Node Tests: " +
-                                  intersect.BVHNodesSearched + "\nTime taken: " + intersect.time * 1000f;
 
+                if (GUIElement != null)
+                {
+                    GUIElement.text =
+                        "Triangle Test: " + intersect.triangleTests.Count +
+                        "\nNode Tests: " + intersect.BVHNodesSearched +
+                        "\nTime taken: " + intersect.time * 1000f;
+                }
+
+                Gizmos.color = new Color(0f, 1f, 0f, 0.5f);
                 int leafCount = 0;
-                int nonLeafCount = 0;
                 for (int i = 0; i < intersect.boundsHitData.Count; i++)
                 {
-                    BoundsHitData data =  intersect.boundsHitData[i];
-                    if (intersect.hitNode == data.node)
+                    BoundsHitData data = intersect.boundsHitData[i];
+                    if (intersect.hitNodeIndex == data.nodeIndex)
                     {
-                        //Gizmos.color = new Color(0f, 1f, 0f, 1f);
-                        //leafCount++;
-                        //Gizmos.DrawCube(data.bounds.center, data.bounds.size);
+                        Gizmos.DrawCube(data.bounds.center, data.bounds.size);
                     }
-                    /*else if (data.isLeaf)
+                    else if (data.isLeaf)
                     {
-                        Gizmos.color = new Color(1f, 0f, 0f, 1f / (++leafCount));
+                        Gizmos.color = new Color(0, 0, 1, ((float)++leafCount / 10f));
+                        Gizmos.DrawCube(data.bounds.center, data.bounds.size);
                     }
+                }
 
-                    else
-                    {
-                        Gizmos.color = new Color(0f, 0f, 1f, 0.5f / (++nonLeafCount));
-                    }*/
-                    
+                Gizmos.color = Color.green;
+                foreach (buildTri tri in intersect.triangleTests)
+                {
+                    Gizmos.DrawLine(tri.posA, tri.posB);
+                    Gizmos.DrawLine(tri.posB, tri.posC);
+                    Gizmos.DrawLine(tri.posA, tri.posC);
+                    Gizmos.DrawSphere(tri.centroid, 0.01f);
                 }
 
                 currentPosition = intersect.hitPoint;
-            }   
-
+            }
             else
             {
-                Debug.Log("No collision");
                 Gizmos.DrawLine(transform.position, transform.position + transform.forward * 1000f);
-                GUIElement.text = "No collision";
+                if (GUIElement != null) GUIElement.text = "No collision";
             }
         }
-        
-        
-
     }
 
     void DrawRayStartingPosition()
     {
-
         Gizmos.DrawSphere(transform.position, 0.25f);
     }
 
@@ -131,35 +135,30 @@ public class RaytracerCPURay : MonoBehaviour
     {
         RayPathStruct toReturn = new RayPathStruct();
         toReturn.hitInfos = new List<CPUHitInfo>();
-        Vector3 rayPosition = transform.position;
-        Vector3 rayDirection = transform.forward;
-        
+
         RayTracingManager manager = tracerProperties.GetComponent<RayTracingManager>();
         int maxBounces = manager.maxBounces;
-        Ray ray = new Ray(transform.position, rayDirection);
+
+        Ray ray = new Ray(transform.position, transform.forward);
+
         for (int i = 0; i < maxBounces; i++)
         {
-            CPUHitInfo intersect = queryRayCollisions(ref ray);
+            CPUHitInfo intersect = QueryRayCollisionsWorld(ref ray);
 
             if (intersect.hitDistance == float.MaxValue)
-            {
                 return toReturn;
-            }
+
             HandleReflection(ref ray, ref intersect);
-            
+
             if (intersect.debugInvalidBelowSurface)
-            {
                 toReturn.debugInvalidBelowSurfaceCount++;
-            }
 
             if (intersect.debugInvalidBRDF)
-            {
                 toReturn.debugInvalidBRDFCount++;
-            }
-            
+
             toReturn.hitInfos.Add(intersect);
         }
-        
+
         return toReturn;
     }
 
@@ -246,20 +245,13 @@ public class RaytracerCPURay : MonoBehaviour
 
     public static float Saturate(float x) => Mathf.Clamp01(x);
 
-    public static float RandomValue(System.Random rng)
-    {
-        return (float)rng.NextDouble();
-    }
-
     public static void HandleReflection(ref Ray ray, ref CPUHitInfo hitInfo)
     {
-
         RayTracingMaterial material = hitInfo.material;
 
         Vector3 N = SafeNormalize(hitInfo.shadingNormal);
         Vector3 Ng = SafeNormalize(hitInfo.geometricNormal);
         Vector3 V = SafeNormalize(-ray.direction);
-        
 
         Vector3 baseColor = new Vector3(material.color.r, material.color.g, material.color.b);
         float metallic = Saturate(material.metallicity);
@@ -272,8 +264,7 @@ public class RaytracerCPURay : MonoBehaviour
 
         float specularWeight = Saturate(Luminance(F0));
         float diffuseWeight = Luminance(diffuseColor);
-
-        float totalWeight = specularWeight + diffuseWeight;
+        float totalWeight = Mathf.Max(specularWeight + diffuseWeight, 1e-8f);
 
         float specularChance = specularWeight / totalWeight;
         specularChance = Mathf.Clamp(specularChance, 0.001f, 0.999f);
@@ -289,7 +280,6 @@ public class RaytracerCPURay : MonoBehaviour
 
             float NdotL = Saturate(Vector3.Dot(N, L));
             float NdotV = Saturate(Vector3.Dot(N, V));
-            float NdotH = Saturate(Vector3.Dot(N, H));
             float VdotH = Saturate(Vector3.Dot(V, H));
 
             if (Vector3.Dot(L, Ng) <= 0f)
@@ -297,6 +287,7 @@ public class RaytracerCPURay : MonoBehaviour
                 hitInfo.debugInvalidBelowSurface = true;
                 return;
             }
+
             if (NdotL <= 1e-6f || NdotV <= 1e-6f || VdotH <= 1e-6f)
             {
                 hitInfo.debugInvalidBRDF = true;
@@ -309,6 +300,7 @@ public class RaytracerCPURay : MonoBehaviour
         {
             Vector2 xi = new Vector2(UnityEngine.Random.value, UnityEngine.Random.value);
             Vector3 L = ToWorld(SampleCosineHemisphere(xi), N);
+
             if (Vector3.Dot(L, Ng) <= 0f)
             {
                 hitInfo.debugInvalidBelowSurface = true;
@@ -319,181 +311,258 @@ public class RaytracerCPURay : MonoBehaviour
         }
 
         ray.direction = SafeNormalize(ray.direction);
-
-        ray.origin = hitInfo.hitPoint + Ng * (1e-4f);
+        ray.origin = hitInfo.hitPoint + Ng * 1e-4f;
     }
 
-    CPUHitInfo queryRayCollisions(ref Ray ray)
+    CPUHitInfo QueryRayCollisionsWorld(ref Ray worldRay)
     {
         RayTracedMesh[] meshObjects = FindObjectsOfType<RayTracedMesh>();
-        float closestIntersectedDistance = float.MaxValue;
-        CPUHitInfo bestHit = new CPUHitInfo { hitDistance = float.MaxValue, boundsHitData = new List<BoundsHitData>() };
-        foreach (RayTracedMesh mesh in meshObjects)
+
+        CPUHitInfo bestHit = new CPUHitInfo
         {
-            BVHNode root = mesh.BVH.root;
-            float dist = float.MaxValue;
-            if (TransformBounds(root.bounds, mesh.transform).IntersectRay(ray, out dist))
+            hitDistance = float.MaxValue,
+            localHitDistance = float.MaxValue,
+            hitNodeIndex = -1,
+            boundsHitData = new List<BoundsHitData>(),
+            triangleTests = new List<buildTri>()
+        };
+
+        MeshCollisionStruct[] collisions = new MeshCollisionStruct[meshObjects.Length];
+        int collisionIndex = 0;
+
+        for (int i = 0; i < meshObjects.Length; i++)
+        {
+            RayTracedMesh mesh = meshObjects[i];
+            if (mesh.blas == null || mesh.blas.Nodes == null || mesh.blas.Nodes.Length == 0)
+                continue;
+
+            int rootIndex = mesh.blas.RootIndex;
+            if (rootIndex < 0)
+                continue;
+
+            BvhNode root = mesh.blas.Nodes[rootIndex];
+
+            Vector3 localOrigin = mesh.transform.InverseTransformPoint(worldRay.origin);
+            Vector3 localDirection = mesh.transform.InverseTransformDirection(worldRay.direction);
+            localDirection = SafeNormalize(localDirection);
+
+            Ray localRay = new Ray(localOrigin, localDirection);
+
+            Bounds rootBounds = ExpandLocalBounds(root.bounds, BOUNDS_PAD);
+            if (IntersectAABB(localRay, rootBounds, out float rootEnter, out float rootExit))
             {
-                if (dist < bestHit.hitDistance)
-                {
-                    CheckTriangleCollisions(root, ref bestHit, ref ray, mesh);
-                }
+                MeshCollisionStruct collision = new MeshCollisionStruct();
+                float worldDistance = mesh.transform.TransformVector(localRay.direction * rootEnter).magnitude;
+                collision.distance = worldDistance;
+                collision.meshIndex = i;
+                collision.localRay = localRay;
+                collisions[collisionIndex++] = collision;
             }
-            
+        }
+
+        Array.Sort(collisions, 0, collisionIndex, Comparer<MeshCollisionStruct>.Create(
+            (a, b) => a.distance.CompareTo(b.distance)
+        ));
+
+        for (int i = 0; i < collisionIndex; i++)
+        {
+            ref MeshCollisionStruct collision = ref collisions[i];
+            if (collision.distance > bestHit.hitDistance)
+                return bestHit;
+
+            RayTracedMesh mesh = meshObjects[collision.meshIndex];
+            CheckTriangleCollisionsLocal(mesh.blas.RootIndex, ref bestHit, ref collision.localRay, ref worldRay, mesh);
         }
 
         return bestHit;
-
     }
 
-    void CheckTriangleCollisions(BVHNode node, ref CPUHitInfo best, ref Ray ray, RayTracedMesh mesh)
+    void CheckTriangleCollisionsLocal(int nodeIndex, ref CPUHitInfo best, ref Ray localRay, ref Ray worldRay, RayTracedMesh mesh)
     {
-        if (node == null)
+        if (mesh.blas == null || mesh.blas.Nodes == null)
+            return;
+
+        if (nodeIndex < 0 || nodeIndex >= mesh.blas.Nodes.Length)
+            return;
+
+        BvhNode node = mesh.blas.Nodes[nodeIndex];
+
+        Bounds expandedNodeBounds = ExpandLocalBounds(node.bounds, BOUNDS_PAD);
+
+        if (!IntersectAABB(localRay, expandedNodeBounds, out float nodeEnter, out float nodeExit))
+            return;
+
+        if (best.localHitDistance < float.MaxValue && nodeEnter > best.localHitDistance)
+            return;
+
+        best.BVHNodesSearched++;
+
+        bool isLeaf = node.IsLeaf;
+
+        best.boundsHitData.Add(new BoundsHitData
         {
+            bounds = TransformBoundsToWorld(node.bounds, mesh.transform, BOUNDS_PAD),
+            isLeaf = isLeaf,
+            nodeIndex = nodeIndex
+        });
+
+        if (isLeaf)
+        {
+            PerformTriangleTestLocal(ref best, ref localRay, ref worldRay, nodeIndex, mesh);
             return;
         }
-        best.BVHNodesSearched++;
-        Bounds BVHBounds = TransformBounds(node.bounds, mesh.transform);
-        BoundsHitData data = new BoundsHitData();
-        data.bounds = BVHBounds;
-        data.isLeaf = false;
-        data.node = node;
-        if (node.left == null && node.right == null)
-        {
-            data.isLeaf = true;
-            performTriangleTest(ref best, ref ray, node, mesh);
-        }
 
-        best.boundsHitData.Add(data);
-        float leftDist = float.MaxValue;
+        int leftIndex = node.leftChild;
+        int rightIndex = node.rightChild;
+
         bool leftHit = false;
-        if (node.left != null)
-        {
-            leftHit = TransformBounds(node.left.bounds, mesh.transform).IntersectRay(ray, out leftDist);
-        }
-        float rightDist = float.MaxValue;
         bool rightHit = false;
-        if (node.right != null)
+        float leftEnter = float.MaxValue, leftExit = float.MaxValue;
+        float rightEnter = float.MaxValue, rightExit = float.MaxValue;
+
+        if (leftIndex >= 0)
         {
-            rightHit = TransformBounds(node.right.bounds, mesh.transform).IntersectRay(ray, out rightDist);
+            Bounds leftBounds = ExpandLocalBounds(mesh.blas.Nodes[leftIndex].bounds, BOUNDS_PAD);
+            leftHit = IntersectAABB(localRay, leftBounds, out leftEnter, out leftExit);
         }
 
-        if (leftDist < rightDist && leftHit && leftDist < best.hitDistance)
+        if (rightIndex >= 0)
         {
-            CheckTriangleCollisions(node.left, ref best, ref ray, mesh);
-            if (rightHit && rightDist < best.hitDistance)
+            Bounds rightBounds = ExpandLocalBounds(mesh.blas.Nodes[rightIndex].bounds, BOUNDS_PAD);
+            rightHit = IntersectAABB(localRay, rightBounds, out rightEnter, out rightExit);
+        }
+
+        if (leftHit && best.localHitDistance < float.MaxValue && leftEnter > best.localHitDistance)
+            leftHit = false;
+
+        if (rightHit && best.localHitDistance < float.MaxValue && rightEnter > best.localHitDistance)
+            rightHit = false;
+
+        if (leftHit && rightHit)
+        {
+            if (leftEnter <= rightEnter)
             {
-                CheckTriangleCollisions(node.right, ref best, ref ray, mesh);
+                CheckTriangleCollisionsLocal(leftIndex, ref best, ref localRay, ref worldRay, mesh);
+                CheckTriangleCollisionsLocal(rightIndex, ref best, ref localRay, ref worldRay, mesh);
+            }
+            else
+            {
+                CheckTriangleCollisionsLocal(rightIndex, ref best, ref localRay, ref worldRay, mesh);
+                CheckTriangleCollisionsLocal(leftIndex, ref best, ref localRay, ref worldRay, mesh);
             }
         }
-        
-        else if (rightDist < leftDist && rightHit && rightDist < best.hitDistance)
+        else if (leftHit)
         {
-            CheckTriangleCollisions(node.right, ref best, ref ray, mesh);
-            if (leftHit && leftDist < best.hitDistance)
-            {
-                CheckTriangleCollisions(node.left, ref best, ref ray, mesh);
-            }
+            CheckTriangleCollisionsLocal(leftIndex, ref best, ref localRay, ref worldRay, mesh);
         }
-        
-        else if (leftHit && leftDist < best.hitDistance)
+        else if (rightHit)
         {
-            CheckTriangleCollisions(node.left, ref best, ref ray, mesh);
-        }
-        
-        else if (rightHit && rightDist < best.hitDistance)
-        {
-            CheckTriangleCollisions(node.right, ref best, ref ray, mesh);
+            CheckTriangleCollisionsLocal(rightIndex, ref best, ref localRay, ref worldRay, mesh);
         }
     }
 
-    void performTriangleTest(ref CPUHitInfo hit, ref Ray ray, BVHNode node, RayTracedMesh mesh)
+    void PerformTriangleTestLocal(ref CPUHitInfo hit, ref Ray localRay, ref Ray worldRay, int nodeIndex, RayTracedMesh mesh)
     {
-        int triangleStartIndex = node.firstTriangleIndex;
-        int triangleCount = node.triangleCount;
-        int[] triIndices = mesh.BVH.triIndexArray;
+        BvhNode node = mesh.blas.Nodes[nodeIndex];
+
+        int triangleStartIndex = node.start;
+        int triangleCount = node.count;
+        int[] triIndices = mesh.blas.PrimitiveRefs;
         buildTri[] triangles = mesh.buildTriangles;
+
         int end = triangleStartIndex + triangleCount;
+
+        Matrix4x4 localToWorld = mesh.transform.localToWorldMatrix;
+        Matrix4x4 normalMatrix = localToWorld.inverse.transpose;
+
         for (int i = triangleStartIndex; i < end; i++)
         {
-            hit.triangleTests++;
             buildTri tri = triangles[triIndices[i]];
-            int baseIndex = tri.triangleIndex;
-            int v1 = mesh.mesh.triangles[baseIndex];
-            int v2 = mesh.mesh.triangles[baseIndex + 1];
-            int v3 = mesh.mesh.triangles[baseIndex + 2];
-            Vector3 edgeAB = mesh.transform.TransformVector(mesh.mesh.vertices[v2] - mesh.mesh.vertices[v1]);
-            Vector3 edgeAC = mesh.transform.TransformVector(mesh.mesh.vertices[v3] - mesh.mesh.vertices[v1]);
-            Vector3 vertex1 = mesh.transform.TransformPoint(mesh.mesh.vertices[v1]);
-            Vector3 n1 = mesh.transform.TransformDirection(mesh.mesh.normals[v1]);
-            Vector3 n2 = mesh.transform.TransformDirection(mesh.mesh.normals[v2]);
-            Vector3 n3 = mesh.transform.TransformDirection(mesh.mesh.normals[v3]);
 
-            Vector3 ao = ray.origin - vertex1;
+            buildTri temp = new buildTri();
+            temp.posA = mesh.transform.TransformPoint(tri.posA);
+            temp.posB = mesh.transform.TransformPoint(tri.posB);
+            temp.posC = mesh.transform.TransformPoint(tri.posC);
+            temp.centroid = mesh.transform.TransformPoint(tri.centroid);
+            hit.triangleTests.Add(temp);
+
+            Vector3 edgeAB = tri.posB - tri.posA;
+            Vector3 edgeAC = tri.posC - tri.posA;
+            Vector3 vertex1 = tri.posA;
 
             Vector3 normalVector = Vector3.Cross(edgeAB, edgeAC);
-            Vector3 geomNormal = SafeNormalize(normalVector);
-            if (Vector3.Dot(geomNormal, ray.direction) > 0f)
-            {
-                geomNormal = -geomNormal;
-            }
-
-            float det = -Vector3.Dot(ray.direction, normalVector);
-
-            if (Mathf.Abs(det) <= 1e-8f)
-            {
+            float normalLenSq = Vector3.Dot(normalVector, normalVector);
+            if (normalLenSq < 1e-16f)
                 continue;
-            }
+
+            Vector3 ao = localRay.origin - vertex1;
+
+            float det = -Vector3.Dot(localRay.direction, normalVector);
+            if (Mathf.Abs(det) < DET_EPS)
+                continue;
 
             float invDet = 1f / det;
 
-            Vector3 dao = Vector3.Cross(ao, ray.direction);
             float dst = Vector3.Dot(ao, normalVector) * invDet;
-
-            if (dst < 0.0f)
-            {
+            if (dst < T_EPS)
                 continue;
-            }
+
+            if (dst > hit.localHitDistance)
+                continue;
+
+            Vector3 dao = Vector3.Cross(ao, localRay.direction);
 
             float u = Vector3.Dot(edgeAC, dao) * invDet;
-            if (u < 0.0f)
-            {
+            if (u < -BARY_EPS)
                 continue;
-            }
 
             float v = -Vector3.Dot(edgeAB, dao) * invDet;
-            if (v < 0.0f)
-            {
+            if (v < -BARY_EPS)
                 continue;
-            }
 
             float w = 1f - u - v;
-            if (w < 0.0f)
-            {
+            if (w < -BARY_EPS)
                 continue;
-            }
 
-            if (dst < hit.hitDistance)
-            {
-                hit.hitDistance = dst;
-                hit.hitNode = node;
-                hit.hitPoint = ray.origin + ray.direction * dst;
-                hit.material = mesh.material;
-                hit.geometricNormal = geomNormal;
-                Vector3 shadingNormal = Vector3.Normalize(n1 * w + n2 * u + n3 * v);
-                if (Vector3.Dot(shadingNormal, geomNormal) < 0f)
-                {
-                    shadingNormal = -shadingNormal;
-                }
-                hit.shadingNormal = shadingNormal;
-            }
+            Vector3 localHitPoint = localRay.origin + localRay.direction * dst;
+            Vector3 worldHitPoint = mesh.transform.TransformPoint(localHitPoint);
+            float worldDistance = Vector3.Distance(worldRay.origin, worldHitPoint);
+
+            if (worldDistance > hit.hitDistance)
+                continue;
+
+            Vector3 geomNormalLocal = SafeNormalize(normalVector);
+            if (Vector3.Dot(geomNormalLocal, localRay.direction) > 0f)
+                geomNormalLocal = -geomNormalLocal;
+
+            Vector3 shadingNormalLocal = SafeNormalize(tri.n1 * w + tri.n2 * u + tri.n3 * v);
+            if (Vector3.Dot(shadingNormalLocal, geomNormalLocal) < 0f)
+                shadingNormalLocal = -shadingNormalLocal;
+
+            Vector3 worldGeomNormal = SafeNormalize(normalMatrix.MultiplyVector(geomNormalLocal));
+            Vector3 worldShadingNormal = SafeNormalize(normalMatrix.MultiplyVector(shadingNormalLocal));
+
+            hit.localHitDistance = dst;
+            hit.hitDistance = worldDistance;
+            hit.hitNodeIndex = nodeIndex;
+            hit.hitPoint = worldHitPoint;
+            hit.material = mesh.material;
+            hit.geometricNormal = worldGeomNormal;
+            hit.shadingNormal = worldShadingNormal;
         }
     }
-    
-    public static Bounds TransformBounds(Bounds localBounds, Transform t)
-    {
-        Matrix4x4 m = t.localToWorldMatrix;
 
+    static Bounds ExpandLocalBounds(Bounds b, float pad)
+    {
+        b.Expand(pad);
+        return b;
+    }
+
+    public static Bounds TransformBoundsToWorld(Bounds localBounds, Transform t, float pad = 0f)
+    {
+        localBounds.Expand(pad);
+
+        Matrix4x4 m = t.localToWorldMatrix;
         Vector3 center = m.MultiplyPoint3x4(localBounds.center);
         Vector3 extents = localBounds.extents;
 
@@ -509,5 +578,45 @@ public class RaytracerCPURay : MonoBehaviour
 
         return new Bounds(center, worldExtents * 2f);
     }
-    
+
+    static bool IntersectAABB(Ray ray, Bounds b, out float tEnter, out float tExit)
+    {
+        Vector3 min = b.min;
+        Vector3 max = b.max;
+
+        tEnter = 0f;
+        tExit = float.PositiveInfinity;
+
+        for (int axis = 0; axis < 3; axis++)
+        {
+            float origin = ray.origin[axis];
+            float dir = ray.direction[axis];
+
+            if (Mathf.Abs(dir) < 1e-12f)
+            {
+                if (origin < min[axis] || origin > max[axis])
+                    return false;
+                continue;
+            }
+
+            float invDir = 1f / dir;
+            float t0 = (min[axis] - origin) * invDir;
+            float t1 = (max[axis] - origin) * invDir;
+
+            if (t0 > t1)
+            {
+                float tmp = t0;
+                t0 = t1;
+                t1 = tmp;
+            }
+
+            tEnter = Mathf.Max(tEnter, t0);
+            tExit = Mathf.Min(tExit, t1);
+
+            if (tExit < tEnter)
+                return false;
+        }
+
+        return tExit >= Mathf.Max(tEnter, 0f);
+    }
 }

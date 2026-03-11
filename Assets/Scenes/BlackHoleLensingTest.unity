@@ -355,7 +355,7 @@ MonoBehaviour:
   accumulatorShader: {fileID: 4800000, guid: 32812c464f9bb7944bccf2042f6e3436, type: 3}
   marchStepsCount: 1
   renderDistance: 1000
-  raysPerPixel: 10
+  raysPerPixel: 1
   maxBounces: 5
   accumlateInSceneView: 0
   accumulateInGameView: 1
@@ -1351,6 +1351,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   GUIElement: {fileID: 2001837282}
   tracerProperties: {fileID: 330585546}
+  path:
+    hitInfos: []
+    time: 0
+    debugInvalidBelowSurfaceCount: 0
+    debugInvalidBRDFCount: 0
 --- !u!4 &1436880562
 Transform:
   m_ObjectHideFlags: 0
@@ -1694,7 +1699,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &1941010480
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1748,7 +1753,7 @@ MonoBehaviour:
     emissiveStrength: 1
     roughness: 1
     metallicity: 0
-  update: 1
+  update: 0
   rebuildBVH: 0
   BVH: {fileID: 1941010480}
   ModelBounds:

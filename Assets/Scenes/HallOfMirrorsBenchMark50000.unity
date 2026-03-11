@@ -371,7 +371,7 @@ MonoBehaviour:
   logEpsilonOverRs: 0.001
   use_lut: 1
   enable_lensing: 1
-  bendStrength: 1.27
+  bendStrength: 1
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -429,8 +429,8 @@ MonoBehaviour:
     emissiveColor: {r: 1, g: 1, b: 1, a: 0}
     specularColor: {r: 0, g: 0, b: 0, a: 0}
     emissiveStrength: 1
-    roughness: 0
-    metallicity: 0
+    roughness: 1
+    metallicity: 1
   update: 0
   rebuildBVH: 0
   BVH: {fileID: 401877721}
@@ -526,7 +526,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
   m_LocalPosition: {x: 0, y: 7.5, z: 0}
-  m_LocalScale: {x: 0.5, y: 0.5, z: 0.1}
+  m_LocalScale: {x: 1, y: 1, z: 0.1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -1172,7 +1172,7 @@ Transform:
   m_GameObject: {fileID: 1092420451}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 5.12, z: 0}
+  m_LocalPosition: {x: 0, y: 5.04, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1288,7 +1288,7 @@ MonoBehaviour:
     emissiveColor: {r: 1, g: 1, b: 1, a: 0}
     specularColor: {r: 1, g: 1, b: 1, a: 0}
     emissiveStrength: 0
-    roughness: 0.001
+    roughness: 1
     metallicity: 1
   update: 0
   rebuildBVH: 0
@@ -1362,13 +1362,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1342701285}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.04141055, y: -0.3822988, z: -0.01715281, w: 0.92295104}
-  m_LocalPosition: {x: 0, y: -3, z: 2.41}
+  m_LocalRotation: {x: -0.04141055, y: 0.3822988, z: 0.01715281, w: 0.92295104}
+  m_LocalPosition: {x: 0, y: -3, z: 0}
   m_LocalScale: {x: 0.5, y: 0.5, z: 0.5}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: -5.138, y: -45, z: 0}
+  m_LocalEulerAnglesHint: {x: -5.138, y: 45, z: 0}
 --- !u!1 &1408453339
 GameObject:
   m_ObjectHideFlags: 0
@@ -1550,46 +1550,46 @@ MonoBehaviour:
         emissiveColor: {r: 1, g: 1, b: 1, a: 0}
         specularColor: {r: 0, g: 0, b: 0, a: 0}
         emissiveStrength: 0
-        roughness: 0
-        metallicity: 0
+        roughness: 1
+        metallicity: 1
       debugInvalidBelowSurface: 0
       debugInvalidBRDF: 0
-    - hitDistance: 7.952227
-      hitPoint: {x: -4.371771, y: 7.4999995, z: 2.6403587}
-      shadingNormal: {x: 0, y: -1, z: -0.000000119209275}
-      geometricNormal: {x: -0, y: -1, z: -0.000000095367426}
+    - hitDistance: 6.824189
+      hitPoint: {x: 0.18571329, y: 2.0891552, z: 4.5}
+      shadingNormal: {x: 0, y: 0, z: -1}
+      geometricNormal: {x: -0, y: 0, z: -1}
       triangleTests: 4
       BVHNodesSearched: 5
       time: 0
       material:
         color: {r: 1, g: 1, b: 1, a: 0}
         emissiveColor: {r: 0, g: 0, b: 0, a: 0}
-        specularColor: {r: 0, g: 0, b: 0, a: 0}
-        emissiveStrength: 0
-        roughness: 0
-        metallicity: 0
-      debugInvalidBelowSurface: 0
-      debugInvalidBRDF: 0
-    - hitDistance: 13.110928
-      hitPoint: {x: -3.1991138, y: -4.5000005, z: -2.5097578}
-      shadingNormal: {x: 0, y: 1, z: 0.000000119209275}
-      geometricNormal: {x: 0, y: 1, z: 0.000000095367426}
-      triangleTests: 8
-      BVHNodesSearched: 10
-      time: 0
-      material:
-        color: {r: 1, g: 1, b: 1, a: 0}
-        emissiveColor: {r: 0, g: 0, b: 0, a: 0}
-        specularColor: {r: 0, g: 0, b: 0, a: 0}
+        specularColor: {r: 1, g: 1, b: 1, a: 0}
         emissiveStrength: 0
         roughness: 1
-        metallicity: 0
+        metallicity: 1
       debugInvalidBelowSurface: 1
       debugInvalidBRDF: 0
-    - hitDistance: 13.110928
-      hitPoint: {x: -3.1991138, y: -4.5000005, z: -2.5097578}
-      shadingNormal: {x: 0, y: 1, z: 0.000000119209275}
-      geometricNormal: {x: 0, y: 1, z: 0.000000095367426}
+    - hitDistance: 6.824189
+      hitPoint: {x: 0.18571329, y: 2.0891552, z: 4.5}
+      shadingNormal: {x: 0, y: 0, z: -1}
+      geometricNormal: {x: -0, y: 0, z: -1}
+      triangleTests: 4
+      BVHNodesSearched: 5
+      time: 0
+      material:
+        color: {r: 1, g: 1, b: 1, a: 0}
+        emissiveColor: {r: 0, g: 0, b: 0, a: 0}
+        specularColor: {r: 1, g: 1, b: 1, a: 0}
+        emissiveStrength: 0
+        roughness: 1
+        metallicity: 1
+      debugInvalidBelowSurface: 0
+      debugInvalidBRDF: 0
+    - hitDistance: 10.582394
+      hitPoint: {x: 5.8403234, y: 7.5, z: -2.6229649}
+      shadingNormal: {x: 0, y: -1, z: -0.000000119209275}
+      geometricNormal: {x: -0, y: -1, z: -0.000000095367426}
       triangleTests: 8
       BVHNodesSearched: 10
       time: 0
@@ -1599,26 +1599,26 @@ MonoBehaviour:
         specularColor: {r: 0, g: 0, b: 0, a: 0}
         emissiveStrength: 0
         roughness: 1
-        metallicity: 0
+        metallicity: 1
       debugInvalidBelowSurface: 0
       debugInvalidBRDF: 0
-    - hitDistance: 1.7751937
-      hitPoint: {x: -4.5, y: -3.2921886, z: -2.488792}
-      shadingNormal: {x: 1, y: 0, z: -0.00000011920928}
-      geometricNormal: {x: 1, y: 0, z: -0.00000009536742}
-      triangleTests: 10
-      BVHNodesSearched: 2
+    - hitDistance: 5.4880633
+      hitPoint: {x: 10.98122, y: 7.0915475, z: -4.5}
+      shadingNormal: {x: 0, y: 0, z: 1}
+      geometricNormal: {x: 0, y: -0, z: 1}
+      triangleTests: 4
+      BVHNodesSearched: 5
       time: 0
       material:
         color: {r: 1, g: 1, b: 1, a: 0}
-        emissiveColor: {r: 1, g: 1, b: 1, a: 0}
-        specularColor: {r: 0, g: 0, b: 0, a: 0}
+        emissiveColor: {r: 0, g: 0, b: 0, a: 0}
+        specularColor: {r: 1, g: 1, b: 1, a: 0}
         emissiveStrength: 0
-        roughness: 0
-        metallicity: 0
+        roughness: 1
+        metallicity: 1
       debugInvalidBelowSurface: 0
       debugInvalidBRDF: 0
-    time: 0.0057873726
+    time: 0.0057344437
     debugInvalidBelowSurfaceCount: 1
     debugInvalidBRDFCount: 0
 --- !u!4 &1436880562
@@ -1677,7 +1677,7 @@ MonoBehaviour:
     specularColor: {r: 0, g: 0, b: 0, a: 0}
     emissiveStrength: 0
     roughness: 1
-    metallicity: 0
+    metallicity: 1
   update: 0
   rebuildBVH: 0
   BVH: {fileID: 1483012332}
@@ -1829,7 +1829,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!33 &1578048711
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -1894,13 +1894,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1578048710}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.013478374, y: -0.95275843, z: -0.042747937, w: 0.30040362}
-  m_LocalPosition: {x: 0, y: -3, z: -2.14}
+  m_LocalRotation: {x: -0.013478373, y: 0.95275843, z: 0.042747937, w: 0.3004036}
+  m_LocalPosition: {x: -0.61, y: -3, z: -2.14}
   m_LocalScale: {x: -0.5, y: 0.5, z: 0.5}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: -5.138, y: -145, z: 0}
+  m_LocalEulerAnglesHint: {x: -5.138, y: 145, z: 0}
 --- !u!114 &1578048714
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1952,9 +1952,9 @@ MonoBehaviour:
     emissiveColor: {r: 1, g: 1, b: 1, a: 0}
     specularColor: {r: 1, g: 1, b: 1, a: 0}
     emissiveStrength: 0
-    roughness: 0.001
+    roughness: 1
     metallicity: 1
-  update: 0
+  update: 1
   rebuildBVH: 0
   BVH: {fileID: 1578048714}
   ModelBounds:
@@ -2329,7 +2329,7 @@ MonoBehaviour:
     specularColor: {r: 0, g: 0, b: 0, a: 0}
     emissiveStrength: 0
     roughness: 1
-    metallicity: 0
+    metallicity: 1
   update: 0
   rebuildBVH: 0
   BVH: {fileID: 1777804314}
@@ -2656,7 +2656,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "Triangle Test: 10\n Node Tests: 2\nTime taken: 0"
+  m_text: "Triangle Test: 4\n Node Tests: 5\nTime taken: 0"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -2795,7 +2795,7 @@ MonoBehaviour:
     specularColor: {r: 0, g: 0, b: 0, a: 0}
     emissiveStrength: 0
     roughness: 1
-    metallicity: 0
+    metallicity: 1
   update: 0
   rebuildBVH: 0
   BVH: {fileID: 2013927947}
