@@ -77,15 +77,10 @@ public class RayTracingManager : MonoBehaviour
 
     public bool renderSphere = true;
     public bool renderTriangles = true;
-
-    public Texture2D blackHoleBendLUT;
-
-    public float rMinOverRs = 1.02f;
-    public float rMaxOverRs = 100f;
-    public float logEpsilonOverRs = 0.001f;
+    
     public bool use_lut = true;
     public bool enable_lensing = true;
-    public float bendStrength = 1.27f;
+    public float bendStrength = 1.0f;
 
     static readonly List<Vector3> tV = new();
     static readonly List<Vector3> tN = new();
@@ -471,18 +466,15 @@ public class RayTracingManager : MonoBehaviour
     void ApplyBlackHoleLUT(Material rayTracingMaterial, RayTracedBlackHole blackHole)
     {
         BlackHoleBendLUTGenerator gen = blackHole.transform.GetComponent<BlackHoleBendLUTGenerator>();
-        rMinOverRs = gen.rMinOverRs;
-        rMaxOverRs = gen.rMaxOverRs;
-        logEpsilonOverRs = gen.logEpsilonOverRs;
-        rayTracingMaterial.SetTexture("_BlackHoleBendLUT", blackHoleBendLUT);
+        rayTracingMaterial.SetTexture("_BlackHoleBendLUT", gen.generatedTexture);
         rayTracingMaterial.SetFloat("_BHLUT_MuResolution", gen.muResolution);
         rayTracingMaterial.SetFloat("_BHLUT_RadiusResolution", gen.radiusResolution);
-        rayTracingMaterial.SetFloat("_BHLUT_RMinOverRs", rMinOverRs);
-        rayTracingMaterial.SetFloat("_BHLUT_RMaxOverRs", rMaxOverRs);
-        rayTracingMaterial.SetFloat("_BHLUT_LogEpsilonOverRs", logEpsilonOverRs);
+        rayTracingMaterial.SetFloat("_BHLUT_RMinOverRs", gen.rMinOverRs);
+        rayTracingMaterial.SetFloat("_BHLUT_RMaxOverRs", gen.rMaxOverRs);
+        rayTracingMaterial.SetFloat("_BHLUT_LogEpsilonOverRs", gen.logEpsilonOverRs);
         rayTracingMaterial.SetFloat("bendStrength", bendStrength);
-        rayTracingMaterial.SetFloat("_BHLUT_Width", blackHoleBendLUT.width);
-        rayTracingMaterial.SetFloat("_BHLUT_Height", blackHoleBendLUT.height);
+        rayTracingMaterial.SetFloat("_BHLUT_Width", gen.generatedTexture.width);
+        rayTracingMaterial.SetFloat("_BHLUT_Height", gen.generatedTexture.height);
     }
 
     void OnValidate()

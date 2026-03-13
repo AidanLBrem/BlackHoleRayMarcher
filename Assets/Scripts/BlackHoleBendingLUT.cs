@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using UnityEngine;
-
 /// <summary>
 /// Generates a 2D LUT of Schwarzschild photon geodesic bend rates.
 ///
@@ -54,11 +53,11 @@ public class BlackHoleBendLUTGenerator : MonoBehaviour
     public bool previewInScene = false;
     public FilterMode filterMode = FilterMode.Bilinear;
 
-    [NonSerialized] public Texture2D generatedTexture;
+    public Texture2D generatedTexture;
     public bool regenerate = false;
 
     // -------------------------------------------------------------------------
-
+    public Texture2D blackHoleBendLUT;
     private void OnValidate()
     {
         if (regenerate)
@@ -66,6 +65,8 @@ public class BlackHoleBendLUTGenerator : MonoBehaviour
             schwarzschildRadius = transform.localScale.x;
             Generate();
             regenerate = false;
+            Texture2D tex = new Texture2D(radiusResolution, radiusResolution, TextureFormat.RGBAFloat, false, true);
+            GeoDiscSolver.SolveGeodisc(schwarzschildRadius, 10, 10, rMinOverRs, rMinOverRs, logEpsilonOverRs, ref tex);
         }
     }
 
@@ -97,13 +98,13 @@ public class BlackHoleBendLUTGenerator : MonoBehaviour
 
         for (int y = 0; y < muResolution; y++)
         {
-            float mu       = IndexToMu(y);
+            float mu       = BlackHoleLutHelpers.IndexToMu(y, muResolution);
             float sinAlpha = Mathf.Sqrt(Mathf.Max(0f, 1f - mu * mu));
 
             for (int x = 0; x < radiusResolution; x++)
             {
-                float r    = IndexToRadius(x, rs);
-                float bend = AnalyticDThetaDs(r, sinAlpha, rs);
+                float r    = BlackHoleLutHelpers.IndexToRadius(x, rs, radiusResolution, logEpsilonOverRs, rMinOverRs, rMaxOverRs);
+                float bend = BlackHoleLutHelpers.AnalyticDThetaDs(r, sinAlpha, rs);
 
                 if (!float.IsFinite(bend) || bend < 0f)
                     bend = 0f;
@@ -115,8 +116,8 @@ public class BlackHoleBendLUTGenerator : MonoBehaviour
 
         if (maxBend <= 0f) maxBend = 1f;
         // After the loop, before SetPixel
-        Debug.Log($"y=0 mu={IndexToMu(0):F3} sinAlpha={Mathf.Sqrt(1f - IndexToMu(0)*IndexToMu(0)):F3} bend[0,0]={bendValues[0,0]:E4}");
-        Debug.Log($"y=127 mu={IndexToMu(127):F3} sinAlpha={Mathf.Sqrt(1f - IndexToMu(127)*IndexToMu(127)):F3} bend[0,127]={bendValues[0,127]:E4}");
+        Debug.Log($"y=0 mu={BlackHoleLutHelpers.IndexToMu(0, muResolution):F3} sinAlpha={Mathf.Sqrt(1f - BlackHoleLutHelpers.IndexToMu(0, muResolution)*BlackHoleLutHelpers.IndexToMu(0, muResolution)):F3} bend[0,0]={bendValues[0,0]:E4}");
+        Debug.Log($"y=127 mu={BlackHoleLutHelpers.IndexToMu(127, muResolution):F3} sinAlpha={Mathf.Sqrt(1f - BlackHoleLutHelpers.IndexToMu(127, muResolution)*BlackHoleLutHelpers.IndexToMu(127, muResolution)):F3} bend[0,127]={bendValues[0,127]:E4}");
         for (int y = 0; y < muResolution; y++)
         {
             for (int x = 0; x < radiusResolution; x++)
@@ -144,85 +145,12 @@ public class BlackHoleBendLUTGenerator : MonoBehaviour
 
         if (printSampleValues)
             PrintSampleRows(bendValues, rs);
-
         SaveTextureIfRequested(tex);
 
         Debug.Log($"Generated black hole bend LUT: {radiusResolution}x{muResolution}, " +
                   $"max dPhi/dr = {maxBend:E6}");
     }
 
-    // -------------------------------------------------------------------------
-    // Core analytic formula
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Returns dPhi/dr for a photon at coordinate radius r with local angle
-    /// sin(alpha) = sinAlpha (alpha = angle from outward radial).
-    ///
-    /// Derivation from Schwarzschild null geodesic first integrals:
-    ///   E  = (1 - rs/r) dt/dlambda          (conserved energy)
-    ///   L  = r²         dphi/dlambda        (conserved angular momentum)
-    ///   b  = L/E                             (impact parameter)
-    ///
-    /// Locally measured: sin(alpha) = r*(dphi/dlambda) / (local speed)
-    ///   => b = r * sin(alpha) / sqrt(1 - rs/r)
-    ///
-    /// Radial null equation:
-    ///   (dr/dlambda)² = E² [ 1 - b²(1 - rs/r)/r² ]
-    ///
-    /// Therefore:
-    ///   dPhi/dr = (dphi/dlambda) / (dr/dlambda)
-    ///           = (b/r²) / sqrt( 1 - b²(1 - rs/r)/r² )
-    ///
-    /// The denominator vanishes at the photon turning point; we floor it.
-    /// </summary>
-    private float AnalyticDThetaDs(float r, float sinAlpha, float rs)
-    {
-        float f = 1f - rs / r;
-        if (f <= 0f) return 0f; // static-frame formula only valid outside horizon
-
-        float bend =
-            sinAlpha * (
-                1f / r +
-                ((1.5f * rs) - r) / (r * r * Mathf.Sqrt(f))
-            );
-
-        return float.IsFinite(bend) ? bend : 0f;
-    }
-
-    // -------------------------------------------------------------------------
-    // Index -> physical value mappings
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Log-spaced radius, dense near the horizon.
-    /// Result is always in [rMinOverRs*rs, rMaxOverRs*rs].
-    /// </summary>
-    private float IndexToRadius(int x, float rs)
-    {
-        float t   = radiusResolution <= 1 ? 0f : x / (float)(radiusResolution - 1);
-        float eps = logEpsilonOverRs * rs;
-        float rMin = rMinOverRs * rs;
-        float rMax = rMaxOverRs * rs;
-
-        float a = Mathf.Log((rMin - rs) + eps);
-        float b = Mathf.Log((rMax - rs) + eps);
-        float u = Mathf.Lerp(a, b, t);
-
-        return Mathf.Max(rMin, rs + Mathf.Exp(u) - eps);
-    }
-
-    /// <summary>
-    /// mu = cos(alpha), sampled at cell centres so mu is in (0,1) exclusive.
-    /// Shaders must apply the same (y+0.5)/muResolution offset when sampling.
-    /// </summary>
-    private float IndexToMu(int y)
-    {
-        float t = muResolution <= 1 ? 0.5f : (y + 0.5f) / muResolution;
-        return Mathf.Clamp01(t);
-    }
-
-    // -------------------------------------------------------------------------
 
     private void ValidateSettings()
     {
@@ -252,13 +180,13 @@ public class BlackHoleBendLUTGenerator : MonoBehaviour
         foreach (int y in sampleY)
         {
             int   yy  = Mathf.Clamp(y, 0, muResolution - 1);
-            float mu  = IndexToMu(yy);
+            float mu  = BlackHoleLutHelpers.IndexToMu(yy, muResolution);
             string line = $"mu={mu:F3} : ";
 
             foreach (int x in sampleX)
             {
                 int   xx   = Mathf.Clamp(x, 0, radiusResolution - 1);
-                float r    = IndexToRadius(xx, rs);
+                float r    = BlackHoleLutHelpers.IndexToRadius(xx, rs, radiusResolution, logEpsilonOverRs, rMinOverRs, rMaxOverRs);
                 float bend = values[xx, yy];
                 line += $"[r/rs={(r/rs):F3}, dPhi/dr={bend:E4}] ";
             }

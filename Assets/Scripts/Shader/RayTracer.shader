@@ -1084,11 +1084,7 @@ Shader "Custom/RayTracer"
                                         _BHLUT_RMinOverRs, _BHLUT_RMaxOverRs,
                                         _BHLUT_LogEpsilonOverRs);
                 float v = MuToLUT_V(mu, _BHLUT_MuResolution);
-
                 
-                float2 uv = float2(u, v);
-                float2 ddxUV = float2(0.0, 0.0);
-                float2 ddyUV = float2(0.0, 0.0);
                 float dPhiDs = SampleBHLUT_Bilinear(u, v);
                 
                 float dTheta = dPhiDs * stepLen;
