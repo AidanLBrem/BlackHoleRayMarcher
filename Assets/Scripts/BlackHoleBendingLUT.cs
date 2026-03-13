@@ -226,12 +226,12 @@ public class BlackHoleBendLUTGenerator : MonoBehaviour
 
     private void ValidateSettings()
     {
-        schwarzschildRadius = Mathf.Max(1e-6f, schwarzschildRadius);
+        schwarzschildRadius = Mathf.Max(1e-12f, schwarzschildRadius);
         radiusResolution    = Mathf.Max(8,     radiusResolution);
         muResolution        = Mathf.Max(8,     muResolution);
         rMinOverRs          = Mathf.Max(1.0001f, rMinOverRs);
         rMaxOverRs          = Mathf.Max(rMinOverRs + 0.001f, rMaxOverRs);
-        logEpsilonOverRs    = Mathf.Max(1e-6f, logEpsilonOverRs);
+        logEpsilonOverRs    = Mathf.Max(1e-12f, logEpsilonOverRs);
     }
 
     private void OnDrawGizmosSelected()

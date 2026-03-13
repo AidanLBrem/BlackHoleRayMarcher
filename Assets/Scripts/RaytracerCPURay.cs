@@ -15,13 +15,16 @@ public struct BoundsHitData
 public struct CPUHitInfo
 {
     public float hitDistance;              // WORLD distance
-    public float localHitDistance;         // LOCAL ray t for current mesh
     public Vector3 hitPoint;               // WORLD space
     public Vector3 shadingNormal;          // WORLD space
     public Vector3 geometricNormal;        // WORLD space
     public List<BoundsHitData> boundsHitData;
     public List<buildTri> triangleTests;   // WORLD space debug tris
     public int BVHNodesSearched;
+    public int BLASLeafNodesSearched;
+    public int TLASLeafNodesSearched;
+    public int BLASNodesSearched;
+    public int TLASNodesSearched;
     public float time;
     public int hitNodeIndex;
     public RayTracingMaterial material;
@@ -100,11 +103,11 @@ public class RaytracerCPURay : MonoBehaviour
                     {
                         Gizmos.DrawCube(data.bounds.center, data.bounds.size);
                     }
-                    else if (data.isLeaf)
+                    /*else if (data.isLeaf)
                     {
                         Gizmos.color = new Color(0, 0, 1, ((float)++leafCount / 10f));
                         Gizmos.DrawCube(data.bounds.center, data.bounds.size);
-                    }
+                    }*/
                 }
 
                 Gizmos.color = Color.green;
@@ -316,43 +319,58 @@ public class RaytracerCPURay : MonoBehaviour
 
     CPUHitInfo QueryRayCollisionsWorld(ref Ray worldRay)
     {
-        RayTracedMesh[] meshObjects = FindObjectsOfType<RayTracedMesh>();
+        UnityEngine.Random.InitState(0);
+        RayTracingManager manager = tracerProperties.GetComponent<RayTracingManager>();
 
         CPUHitInfo bestHit = new CPUHitInfo
         {
             hitDistance = float.MaxValue,
-            localHitDistance = float.MaxValue,
             hitNodeIndex = -1,
             boundsHitData = new List<BoundsHitData>(),
             triangleTests = new List<buildTri>()
         };
 
+        RayTracedMesh[] meshObjects = FindObjectsOfType<RayTracedMesh>();
+
+        if (manager != null && manager.useTlas)
+        {
+            QueryRayCollisionsWithTLAS(ref bestHit, ref worldRay, meshObjects, manager);
+        }
+        else
+        {
+            QueryRayCollisionsWithoutTLAS(ref bestHit, ref worldRay, meshObjects);
+        }
+
+        return bestHit;
+    }
+
+    void QueryRayCollisionsWithoutTLAS(ref CPUHitInfo bestHit, ref Ray worldRay, RayTracedMesh[] meshObjects)
+    {
         MeshCollisionStruct[] collisions = new MeshCollisionStruct[meshObjects.Length];
         int collisionIndex = 0;
 
         for (int i = 0; i < meshObjects.Length; i++)
         {
             RayTracedMesh mesh = meshObjects[i];
-            if (mesh.blas == null || mesh.blas.Nodes == null || mesh.blas.Nodes.Length == 0)
+            if (mesh == null ||mesh.sharedMesh.blas == null || mesh.sharedMesh.blas.Nodes == null || mesh.sharedMesh.blas.Nodes.Length == 0)
                 continue;
 
-            int rootIndex = mesh.blas.RootIndex;
+            int rootIndex = mesh.sharedMesh.blas.RootIndex;
             if (rootIndex < 0)
                 continue;
 
-            BvhNode root = mesh.blas.Nodes[rootIndex];
+            BvhNode root = mesh.sharedMesh.blas.Nodes[rootIndex];
 
             Vector3 localOrigin = mesh.transform.InverseTransformPoint(worldRay.origin);
             Vector3 localDirection = mesh.transform.InverseTransformDirection(worldRay.direction);
-            localDirection = SafeNormalize(localDirection);
 
             Ray localRay = new Ray(localOrigin, localDirection);
 
             Bounds rootBounds = ExpandLocalBounds(root.bounds, BOUNDS_PAD);
-            if (IntersectAABB(localRay, rootBounds, out float rootEnter, out float rootExit))
+            if (IntersectAABB(localRay, rootBounds, out float rootEnter, out float _))
             {
                 MeshCollisionStruct collision = new MeshCollisionStruct();
-                float worldDistance = mesh.transform.TransformVector(localRay.direction * rootEnter).magnitude;
+                float worldDistance = rootEnter;
                 collision.distance = worldDistance;
                 collision.meshIndex = i;
                 collision.localRay = localRay;
@@ -368,35 +386,275 @@ public class RaytracerCPURay : MonoBehaviour
         {
             ref MeshCollisionStruct collision = ref collisions[i];
             if (collision.distance > bestHit.hitDistance)
-                return bestHit;
+                return;
 
             RayTracedMesh mesh = meshObjects[collision.meshIndex];
-            CheckTriangleCollisionsLocal(mesh.blas.RootIndex, ref bestHit, ref collision.localRay, ref worldRay, mesh);
+            CheckTriangleCollisionsLocal(mesh.sharedMesh.blas.RootIndex, ref bestHit, ref collision.localRay, ref worldRay, mesh);
+        }
+    }
+
+    void QueryRayCollisionsWithTLAS(ref CPUHitInfo bestHit, ref Ray worldRay, RayTracedMesh[] meshObjects, RayTracingManager manager)
+    {
+        BvhInstance[] instances = BuildCPUInstances(meshObjects);
+        if (instances.Length == 0)
+            return;
+
+        TLASBuilder tlasBuilder = new TLASBuilder();
+        BvhBuildSettings settings = new BvhBuildSettings
+        {
+            maxLeafSize = manager.tlasMaxLeafSize,
+            maxDepth = manager.tlasMaxDepth,
+            numBins = manager.tlasNumBins
+        };
+
+        tlasBuilder.Build(instances, settings);
+
+        if (tlasBuilder.Nodes == null || tlasBuilder.Nodes.Length == 0 || tlasBuilder.RootIndex < 0)
+            return;
+
+        TraverseTLASNode(
+            tlasBuilder.RootIndex,
+            tlasBuilder,
+            instances,
+            meshObjects,
+            ref bestHit,
+            ref worldRay
+        );
+    }
+
+    BvhInstance[] BuildCPUInstances(RayTracedMesh[] meshObjects)
+    {
+        List<BvhInstance> instances = new List<BvhInstance>(meshObjects.Length);
+
+        for (int i = 0; i < meshObjects.Length; i++)
+        {
+            RayTracedMesh mesh = meshObjects[i];
+            if (mesh == null || mesh.sharedMesh.blas == null || mesh.sharedMesh.blas.Nodes == null || mesh.sharedMesh.blas.Nodes.Length == 0)
+                continue;
+
+            int localRootIndex = mesh.sharedMesh.blas.RootIndex;
+            if (localRootIndex < 0)
+                continue;
+
+            Bounds localRootBounds = mesh.sharedMesh.blas.Nodes[localRootIndex].bounds;
+            Bounds worldBounds = TransformBoundsToWorld(localRootBounds, mesh.transform);
+
+            instances.Add(new BvhInstance
+            {
+                blasIndex = i,
+                blasRootIndex = localRootIndex,
+                localToWorld = mesh.transform.localToWorldMatrix,
+                worldToLocal = mesh.transform.worldToLocalMatrix,
+                localBounds = localRootBounds,
+                worldBounds = worldBounds,
+                materialIndex = i
+            });
         }
 
-        return bestHit;
+        return instances.ToArray();
+    }
+
+    void TraverseTLASNode(
+        int nodeIndex,
+        TLASBuilder tlasBuilder,
+        BvhInstance[] instances,
+        RayTracedMesh[] meshObjects,
+        ref CPUHitInfo bestHit,
+        ref Ray worldRay)
+    {
+        if (nodeIndex < 0 || nodeIndex >= tlasBuilder.Nodes.Length)
+            return;
+
+        BvhNode node = tlasBuilder.Nodes[nodeIndex];
+
+        Bounds expandedNodeBounds = node.bounds;
+        expandedNodeBounds.Expand(BOUNDS_PAD);
+
+        if (!IntersectAABB(worldRay, expandedNodeBounds, out float nodeEnter, out float _))
+            return;
+
+        if (bestHit.hitDistance < float.MaxValue && nodeEnter > bestHit.hitDistance)
+            return;
+
+        bestHit.BVHNodesSearched++;
+        bestHit.TLASNodesSearched++;
+
+        bool isLeaf = node.IsLeaf;
+
+        bestHit.boundsHitData.Add(new BoundsHitData
+        {
+            bounds = expandedNodeBounds,
+            isLeaf = isLeaf,
+            nodeIndex = nodeIndex
+        });
+
+        if (isLeaf)
+        {
+            bestHit.TLASLeafNodesSearched++;
+            TraverseTLASLeaf(node, tlasBuilder, instances, meshObjects, ref bestHit, ref worldRay);
+            return;
+        }
+
+        int leftIndex = node.leftChild;
+        int rightIndex = node.rightChild;
+
+        bool leftHit = false;
+        bool rightHit = false;
+        float leftEnter = float.MaxValue, rightEnter = float.MaxValue;
+
+        if (leftIndex >= 0)
+        {
+            Bounds leftBounds = tlasBuilder.Nodes[leftIndex].bounds;
+            leftBounds.Expand(BOUNDS_PAD);
+            leftHit = IntersectAABB(worldRay, leftBounds, out leftEnter, out _);
+        }
+
+        if (rightIndex >= 0)
+        {
+            Bounds rightBounds = tlasBuilder.Nodes[rightIndex].bounds;
+            rightBounds.Expand(BOUNDS_PAD);
+            rightHit = IntersectAABB(worldRay, rightBounds, out rightEnter, out _);
+        }
+
+        if (leftHit && bestHit.hitDistance < float.MaxValue && leftEnter > bestHit.hitDistance)
+            leftHit = false;
+
+        if (rightHit && bestHit.hitDistance < float.MaxValue && rightEnter > bestHit.hitDistance)
+            rightHit = false;
+
+        if (leftHit && rightHit)
+        {
+            if (leftEnter <= rightEnter)
+            {
+                TraverseTLASNode(leftIndex, tlasBuilder, instances, meshObjects, ref bestHit, ref worldRay);
+                TraverseTLASNode(rightIndex, tlasBuilder, instances, meshObjects, ref bestHit, ref worldRay);
+            }
+            else
+            {
+                TraverseTLASNode(rightIndex, tlasBuilder, instances, meshObjects, ref bestHit, ref worldRay);
+                TraverseTLASNode(leftIndex, tlasBuilder, instances, meshObjects, ref bestHit, ref worldRay);
+            }
+        }
+        else if (leftHit)
+        {
+            TraverseTLASNode(leftIndex, tlasBuilder, instances, meshObjects, ref bestHit, ref worldRay);
+        }
+        else if (rightHit)
+        {
+            TraverseTLASNode(rightIndex, tlasBuilder, instances, meshObjects, ref bestHit, ref worldRay);
+        }
+    }
+
+    void TraverseTLASLeaf(
+    BvhNode leafNode,
+    TLASBuilder tlasBuilder,
+    BvhInstance[] instances,
+    RayTracedMesh[] meshObjects,
+    ref CPUHitInfo bestHit,
+    ref Ray worldRay)
+    {
+        int start = leafNode.start;
+        int count = leafNode.count;
+
+        TLASCandidate[] candidates = new TLASCandidate[count];
+        int candidateCount = 0;
+
+        for (int i = start; i < start + count; i++)
+        {
+            int instanceRef = tlasBuilder.PrimitiveRefs[i];
+            if (instanceRef < 0 || instanceRef >= instances.Length)
+                continue;
+
+            BvhInstance instance = instances[instanceRef];
+            int meshIndex = instance.blasIndex;
+
+            if (meshIndex < 0 || meshIndex >= meshObjects.Length)
+                continue;
+
+            RayTracedMesh mesh = meshObjects[meshIndex];
+            if (mesh == null || mesh.sharedMesh.blas == null || mesh.sharedMesh.blas.Nodes == null || mesh.sharedMesh.blas.Nodes.Length == 0)
+                continue;
+
+            // Coarse world-space TLAS instance test
+            Bounds worldBounds = instance.worldBounds;
+            worldBounds.Expand(BOUNDS_PAD);
+
+            if (!IntersectAABB(worldRay, worldBounds, out float coarseEnter, out float _))
+                continue;
+
+            if (bestHit.hitDistance < float.MaxValue && coarseEnter > bestHit.hitDistance)
+                continue;
+
+            // Tight local-space BLAS root test
+            Vector3 localOrigin = mesh.transform.InverseTransformPoint(worldRay.origin);
+            Vector3 localDirection = mesh.transform.InverseTransformDirection(worldRay.direction);
+            Ray localRay = new Ray(localOrigin, localDirection);
+
+            Bounds localRootBounds = ExpandLocalBounds(mesh.sharedMesh.blas.Nodes[instance.blasRootIndex].bounds, BOUNDS_PAD);
+            if (!IntersectAABB(localRay, localRootBounds, out float rootEnter, out float _))
+                continue;
+
+            if (bestHit.hitDistance < float.MaxValue && rootEnter > bestHit.hitDistance)
+                continue;
+
+            candidates[candidateCount++] = new TLASCandidate
+            {
+                enter = rootEnter,
+                instanceRef = instanceRef
+            };
+        }
+
+        Array.Sort(
+            candidates,
+            0,
+            candidateCount,
+            Comparer<TLASCandidate>.Create((a, b) => a.enter.CompareTo(b.enter))
+        );
+
+        for (int i = 0; i < candidateCount; i++)
+        {
+            TLASCandidate candidate = candidates[i];
+            if (candidate.enter > bestHit.hitDistance)
+                break;
+
+            BvhInstance instance = instances[candidate.instanceRef];
+            int meshIndex = instance.blasIndex;
+
+            if (meshIndex < 0 || meshIndex >= meshObjects.Length)
+                continue;
+
+            RayTracedMesh mesh = meshObjects[meshIndex];
+            if (mesh == null || mesh.sharedMesh.blas == null || mesh.sharedMesh.blas.Nodes == null || mesh.sharedMesh.blas.Nodes.Length == 0)
+                continue;
+
+            Vector3 localOrigin = mesh.transform.InverseTransformPoint(worldRay.origin);
+            Vector3 localDirection = mesh.transform.InverseTransformDirection(worldRay.direction);
+            Ray localRay = new Ray(localOrigin, localDirection);
+
+            CheckTriangleCollisionsLocal(instance.blasRootIndex, ref bestHit, ref localRay, ref worldRay, mesh);
+        }
     }
 
     void CheckTriangleCollisionsLocal(int nodeIndex, ref CPUHitInfo best, ref Ray localRay, ref Ray worldRay, RayTracedMesh mesh)
     {
-        if (mesh.blas == null || mesh.blas.Nodes == null)
+        if (mesh.sharedMesh.blas == null || mesh.sharedMesh.blas.Nodes == null)
             return;
 
-        if (nodeIndex < 0 || nodeIndex >= mesh.blas.Nodes.Length)
+        if (nodeIndex < 0 || nodeIndex >= mesh.sharedMesh.blas.Nodes.Length)
             return;
 
-        BvhNode node = mesh.blas.Nodes[nodeIndex];
+        BvhNode node = mesh.sharedMesh.blas.Nodes[nodeIndex];
 
         Bounds expandedNodeBounds = ExpandLocalBounds(node.bounds, BOUNDS_PAD);
 
-        if (!IntersectAABB(localRay, expandedNodeBounds, out float nodeEnter, out float nodeExit))
+        if (!IntersectAABB(localRay, expandedNodeBounds, out float nodeEnter, out float _))
             return;
 
-        if (best.localHitDistance < float.MaxValue && nodeEnter > best.localHitDistance)
+        if (best.hitDistance < float.MaxValue && nodeEnter > best.hitDistance)
             return;
 
         best.BVHNodesSearched++;
-
+        best.BLASNodesSearched++;
         bool isLeaf = node.IsLeaf;
 
         best.boundsHitData.Add(new BoundsHitData
@@ -408,6 +666,7 @@ public class RaytracerCPURay : MonoBehaviour
 
         if (isLeaf)
         {
+            best.BLASLeafNodesSearched++;
             PerformTriangleTestLocal(ref best, ref localRay, ref worldRay, nodeIndex, mesh);
             return;
         }
@@ -417,25 +676,24 @@ public class RaytracerCPURay : MonoBehaviour
 
         bool leftHit = false;
         bool rightHit = false;
-        float leftEnter = float.MaxValue, leftExit = float.MaxValue;
-        float rightEnter = float.MaxValue, rightExit = float.MaxValue;
+        float leftEnter = float.MaxValue, rightEnter = float.MaxValue;
 
         if (leftIndex >= 0)
         {
-            Bounds leftBounds = ExpandLocalBounds(mesh.blas.Nodes[leftIndex].bounds, BOUNDS_PAD);
-            leftHit = IntersectAABB(localRay, leftBounds, out leftEnter, out leftExit);
+            Bounds leftBounds = ExpandLocalBounds(mesh.sharedMesh.blas.Nodes[leftIndex].bounds, BOUNDS_PAD);
+            leftHit = IntersectAABB(localRay, leftBounds, out leftEnter, out _);
         }
 
         if (rightIndex >= 0)
         {
-            Bounds rightBounds = ExpandLocalBounds(mesh.blas.Nodes[rightIndex].bounds, BOUNDS_PAD);
-            rightHit = IntersectAABB(localRay, rightBounds, out rightEnter, out rightExit);
+            Bounds rightBounds = ExpandLocalBounds(mesh.sharedMesh.blas.Nodes[rightIndex].bounds, BOUNDS_PAD);
+            rightHit = IntersectAABB(localRay, rightBounds, out rightEnter, out _);
         }
 
-        if (leftHit && best.localHitDistance < float.MaxValue && leftEnter > best.localHitDistance)
+        if (leftHit && best.hitDistance < float.MaxValue && leftEnter > best.hitDistance)
             leftHit = false;
 
-        if (rightHit && best.localHitDistance < float.MaxValue && rightEnter > best.localHitDistance)
+        if (rightHit && best.hitDistance < float.MaxValue && rightEnter > best.hitDistance)
             rightHit = false;
 
         if (leftHit && rightHit)
@@ -463,12 +721,12 @@ public class RaytracerCPURay : MonoBehaviour
 
     void PerformTriangleTestLocal(ref CPUHitInfo hit, ref Ray localRay, ref Ray worldRay, int nodeIndex, RayTracedMesh mesh)
     {
-        BvhNode node = mesh.blas.Nodes[nodeIndex];
+        BvhNode node = mesh.sharedMesh.blas.Nodes[nodeIndex];
 
         int triangleStartIndex = node.start;
         int triangleCount = node.count;
-        int[] triIndices = mesh.blas.PrimitiveRefs;
-        buildTri[] triangles = mesh.buildTriangles;
+        int[] triIndices = mesh.sharedMesh.blas.PrimitiveRefs;
+        buildTri[] triangles = mesh.sharedMesh.buildTriangles;
 
         int end = triangleStartIndex + triangleCount;
 
@@ -507,7 +765,7 @@ public class RaytracerCPURay : MonoBehaviour
             if (dst < T_EPS)
                 continue;
 
-            if (dst > hit.localHitDistance)
+            if (dst > hit.hitDistance)
                 continue;
 
             Vector3 dao = Vector3.Cross(ao, localRay.direction);
@@ -526,7 +784,7 @@ public class RaytracerCPURay : MonoBehaviour
 
             Vector3 localHitPoint = localRay.origin + localRay.direction * dst;
             Vector3 worldHitPoint = mesh.transform.TransformPoint(localHitPoint);
-            float worldDistance = Vector3.Distance(worldRay.origin, worldHitPoint);
+            float worldDistance = dst;
 
             if (worldDistance > hit.hitDistance)
                 continue;
@@ -541,8 +799,7 @@ public class RaytracerCPURay : MonoBehaviour
 
             Vector3 worldGeomNormal = SafeNormalize(normalMatrix.MultiplyVector(geomNormalLocal));
             Vector3 worldShadingNormal = SafeNormalize(normalMatrix.MultiplyVector(shadingNormalLocal));
-
-            hit.localHitDistance = dst;
+            
             hit.hitDistance = worldDistance;
             hit.hitNodeIndex = nodeIndex;
             hit.hitPoint = worldHitPoint;
@@ -618,5 +875,11 @@ public class RaytracerCPURay : MonoBehaviour
         }
 
         return tExit >= Mathf.Max(tEnter, 0f);
+    }
+
+    struct TLASCandidate
+    {
+        public float enter;
+        public int instanceRef;
     }
 }

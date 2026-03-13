@@ -1,17 +1,51 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using Unity.Mathematics;
 using Debug = UnityEngine.Debug;
 using UnityEngine.Profiling;
 using static RaytracerCPURay;
+
+public static class SharedMeshRegistry
+{
+    private static Dictionary<Mesh, SharedMeshData> cache = new();
+
+    public static SharedMeshData GetOrCreate(Mesh mesh)
+    {
+        if (mesh == null) return null;
+
+        if (cache.TryGetValue(mesh, out var data))
+            return data;
+
+        data = new SharedMeshData(mesh);
+        cache.Add(mesh, data);
+        return data;
+    }
+
+    public static void DeleteKey(Mesh mesh)
+    {
+        cache.Remove(mesh);
+    }
+}
+
 [ExecuteAlways, ImageEffectAllowedInSceneView]
 public class RayTracingManager : MonoBehaviour
 {
     [SerializeField] bool useShaderInSceneView = true;
+    [SerializeField] public bool useTlas = true;
+    public bool useRedshifting = true;
     [SerializeField] Shader rayTracingShader;
     [SerializeField] Shader accumulatorShader;
+
+    [Header("TLAS Settings")]
+    public int tlasMaxLeafSize = 2;
+    public int tlasMaxDepth = 32;
+    public int tlasNumBins = 8;
+
     Material rayTracingMaterial;
     Material accumulatorMaterial;
+
     public int marchStepsCount;
     public int renderDistance;
     public int raysPerPixel;
@@ -19,15 +53,20 @@ public class RayTracingManager : MonoBehaviour
     public bool accumlateInSceneView = true;
     public bool accumulateInGameView = true;
     public float blackHoleSOIStepSize = 0.01f;
-    ComputeBuffer sphereBuffer;
-    ComputeBuffer blackHoleBuffer;
 
-    ComputeBuffer meshBuffer;
-    ComputeBuffer MeshVerticesBuffer;
-    ComputeBuffer MeshNormalsBuffer;
-    ComputeBuffer MeshIndicesBuffer;
-    ComputeBuffer TriangleBuffer;
-    ComputeBuffer BVHBuffer;
+    [NonSerialized] ComputeBuffer sphereBuffer;
+    [NonSerialized] ComputeBuffer blackHoleBuffer;
+
+    [NonSerialized] ComputeBuffer MeshVerticesBuffer;
+    [NonSerialized] ComputeBuffer MeshNormalsBuffer;
+    [NonSerialized] ComputeBuffer MeshIndicesBuffer;
+    [NonSerialized]ComputeBuffer TriangleBuffer;
+    [NonSerialized] ComputeBuffer BVHBuffer;
+
+    [NonSerialized] ComputeBuffer TLASBuffer;
+    [NonSerialized] ComputeBuffer TLASRefBuffer;
+    [NonSerialized] ComputeBuffer InstanceBuffer;
+
     RenderTexture resultTexture;
     int numRenderedFrames = 0;
 
@@ -38,8 +77,7 @@ public class RayTracingManager : MonoBehaviour
 
     public bool renderSphere = true;
     public bool renderTriangles = true;
-    const float G = 1.975813844e-32f;
-    const float C = 0.430467210276f;
+
     public Texture2D blackHoleBendLUT;
 
     public float rMinOverRs = 1.02f;
@@ -48,9 +86,387 @@ public class RayTracingManager : MonoBehaviour
     public bool use_lut = true;
     public bool enable_lensing = true;
     public float bendStrength = 1.27f;
-    static List<Vector3> tV = new();
 
-    private static List<Vector3> tN = new();
+    static readonly List<Vector3> tV = new();
+    static readonly List<Vector3> tN = new();
+
+    struct MeshOffsets
+    {
+        public int vertexOffset;
+        public int triangleOffset;
+        public int blasNodeOffset;
+        public int rootNodeIndex;
+    }
+
+    List<RayTracedMesh> GetValidMeshInstances()
+    {
+        RayTracedMesh[] allMeshes = FindObjectsOfType<RayTracedMesh>();
+        List<RayTracedMesh> validMeshes = new(allMeshes.Length);
+
+        for (int i = 0; i < allMeshes.Length; i++)
+        {
+            RayTracedMesh m = allMeshes[i];
+            if (m == null)
+                continue;
+
+            if (m.sharedMesh == null)
+                m.RebuildStaticData();
+
+            if (m.sharedMesh == null)
+                continue;
+            if (m.sharedMesh.mesh == null)
+                continue;
+            if (m.sharedMesh.buildTriangles == null || m.sharedMesh.buildTriangles.Length == 0)
+                continue;
+            if (m.sharedMesh.blas == null)
+                continue;
+            if (m.sharedMesh.blas.Nodes == null || m.sharedMesh.blas.Nodes.Length == 0)
+                continue;
+            if (m.sharedMesh.blas.PrimitiveRefs == null || m.sharedMesh.blas.PrimitiveRefs.Length == 0)
+                continue;
+            if (m.sharedMesh.GPUBVH == null || m.sharedMesh.GPUBVH.Count == 0)
+                continue;
+
+            validMeshes.Add(m);
+        }
+
+        return validMeshes;
+    }
+
+    List<SharedMeshData> GetUniqueSharedMeshes(List<RayTracedMesh> validInstances)
+    {
+        HashSet<SharedMeshData> seen = new();
+        List<SharedMeshData> unique = new();
+
+        for (int i = 0; i < validInstances.Count; i++)
+        {
+            SharedMeshData sm = validInstances[i].sharedMesh;
+            if (sm == null)
+                continue;
+
+            if (seen.Add(sm))
+                unique.Add(sm);
+        }
+
+        return unique;
+    }
+
+    bool AnyInstanceNeedsUpdate(List<RayTracedMesh> validInstances)
+    {
+        for (int i = 0; i < validInstances.Count; i++)
+        {
+            if (validInstances[i].update)
+                return true;
+        }
+        return false;
+    }
+    void BindDummyAccelerationBuffers()
+    {
+        ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, new Triangle[1]);
+        ShaderHelper.CreateStructuredBuffer(ref BVHBuffer, new GPUBVHNode[1]);
+        ShaderHelper.CreateStructuredBuffer(ref TLASBuffer, new GPUBVHNode[1]);
+        ShaderHelper.CreateStructuredBuffer(ref TLASRefBuffer, new uint[1]);
+        ShaderHelper.CreateStructuredBuffer(ref InstanceBuffer, new MeshStruct[1]);
+        ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, new Vector3[1]);
+        ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer, new Vector3[1]);
+        ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer, new uint[1]);
+
+        rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
+        rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
+        rayTracingMaterial.SetBuffer("TLASNodes", TLASBuffer);
+        rayTracingMaterial.SetBuffer("TLASRefs", TLASRefBuffer);
+        rayTracingMaterial.SetBuffer("Instances", InstanceBuffer);
+        rayTracingMaterial.SetBuffer("Vertices", MeshVerticesBuffer);
+        rayTracingMaterial.SetBuffer("Normals", MeshNormalsBuffer);
+        rayTracingMaterial.SetBuffer("TriangleIndices", MeshIndicesBuffer);
+
+        rayTracingMaterial.SetInt("numMeshes", 0);
+        rayTracingMaterial.SetInt("numBLASNodes", 0);
+        rayTracingMaterial.SetInt("numTLASNodes", 0);
+        rayTracingMaterial.SetInt("numInstances", 0);
+        rayTracingMaterial.SetInt("TLASRootIndex", 0);
+    }
+    void AllocateAccelerationBuffers()
+    {
+        List<RayTracedMesh> validInstances = GetValidMeshInstances();
+
+        if (validInstances.Count == 0)
+        {
+            BindDummyAccelerationBuffers();
+            return;
+        }
+
+        List<SharedMeshData> uniqueSharedMeshes = GetUniqueSharedMeshes(validInstances);
+        Dictionary<SharedMeshData, MeshOffsets> offsets = ComputeMeshOffsets(uniqueSharedMeshes);
+
+        BuildGlobalBLASGeometry(uniqueSharedMeshes, validInstances, offsets);
+        BuildAndUploadTLAS(validInstances, offsets);
+    }
+
+    Dictionary<SharedMeshData, MeshOffsets> ComputeMeshOffsets(List<SharedMeshData> sharedMeshes)
+    {
+        Dictionary<SharedMeshData, MeshOffsets> offsets = new(sharedMeshes.Count);
+
+        int vertexOffset = 0;
+        int triangleOffset = 0;
+        int blasOffset = 0;
+
+        for (int i = 0; i < sharedMeshes.Count; i++)
+        {
+            SharedMeshData mesh = sharedMeshes[i];
+            int localRootIndex = mesh.blas.RootIndex;
+
+            MeshOffsets entry = new MeshOffsets
+            {
+                vertexOffset = vertexOffset,
+                triangleOffset = triangleOffset,
+                blasNodeOffset = blasOffset,
+                rootNodeIndex = blasOffset + localRootIndex
+            };
+
+            offsets.Add(mesh, entry);
+
+            vertexOffset += mesh.mesh.vertexCount;
+            triangleOffset += mesh.blas.PrimitiveRefs.Length;
+            blasOffset += mesh.GPUBVH.Count;
+        }
+
+        return offsets;
+    }
+
+    void BuildGlobalBLASGeometry(
+        List<SharedMeshData> sharedMeshes,
+        List<RayTracedMesh> validInstances,
+        Dictionary<SharedMeshData, MeshOffsets> offsets)
+    {
+        int totalVertexCount = 0;
+        int totalTris = 0;
+        int totalBVHNodes = 0;
+
+        for (int i = 0; i < sharedMeshes.Count; i++)
+        {
+            SharedMeshData sm = sharedMeshes[i];
+            totalVertexCount += sm.mesh.vertexCount;
+            totalTris += sm.blas.PrimitiveRefs.Length;
+            totalBVHNodes += sm.GPUBVH.Count;
+        }
+
+        bool anyMeshMarkedUpdated = AnyInstanceNeedsUpdate(validInstances);
+
+        bool needTriangles = TriangleBuffer == null || TriangleBuffer.count != Mathf.Max(1, totalTris) || anyMeshMarkedUpdated;
+        bool needBVH = BVHBuffer == null || BVHBuffer.count != Mathf.Max(1, totalBVHNodes) || anyMeshMarkedUpdated;
+        bool needVertices = MeshVerticesBuffer == null || MeshNormalsBuffer == null || MeshIndicesBuffer == null || anyMeshMarkedUpdated;
+
+        if (!(needTriangles || needBVH || needVertices))
+            return;
+
+        float startTime = Time.realtimeSinceStartup;
+
+        Triangle[] triangles = new Triangle[Mathf.Max(1, totalTris)];
+        uint[] triangleIndices = new uint[Mathf.Max(1, totalTris * 3)];
+        GPUBVHNode[] blasNodes = new GPUBVHNode[Mathf.Max(1, totalBVHNodes)];
+
+        List<float3> vertices = new(totalVertexCount);
+        List<float3> normals = new(totalVertexCount);
+
+        int degenerateTriangles = 0;
+
+        for (int i = 0; i < sharedMeshes.Count; i++)
+        {
+            SharedMeshData sharedMesh = sharedMeshes[i];
+            MeshOffsets off = offsets[sharedMesh];
+
+            sharedMesh.mesh.GetVertices(tV);
+            sharedMesh.mesh.GetNormals(tN);
+
+            for (int v = 0; v < tV.Count; v++)
+                vertices.Add(tV[v]);
+
+            if (tN.Count == tV.Count)
+            {
+                for (int n = 0; n < tN.Count; n++)
+                    normals.Add(tN[n]);
+            }
+            else
+            {
+                // Fallback so buffer sizes always match vertex indexing.
+                for (int n = 0; n < tV.Count; n++)
+                    normals.Add(Vector3.up);
+            }
+
+            int[] meshTriangles = sharedMesh.mesh.triangles;
+
+            for (int j = 0; j < sharedMesh.GPUBVH.Count; j++)
+            {
+                GPUBVHNode node = sharedMesh.GPUBVH[j];
+
+                if (node.left != -1) node.left += off.blasNodeOffset;
+                if (node.right != -1) node.right += off.blasNodeOffset;
+
+                node.firstIndex += (uint)off.triangleOffset;
+                blasNodes[off.blasNodeOffset + j] = node;
+            }
+
+            int[] order = sharedMesh.blas.PrimitiveRefs;
+            for (int t = 0; t < order.Length; t++)
+            {
+                int triId = order[t];
+                ref buildTri bt = ref sharedMesh.buildTriangles[triId];
+
+                int baseIndex = bt.triangleIndex;
+                int v1 = meshTriangles[baseIndex + 0];
+                int v2 = meshTriangles[baseIndex + 1];
+                int v3 = meshTriangles[baseIndex + 2];
+
+                Vector3 edgeAB = bt.posB - bt.posA;
+                Vector3 edgeAC = bt.posC - bt.posA;
+                Vector3 geometricNormal = Vector3.Cross(edgeAB, edgeAC);
+
+                if (geometricNormal.sqrMagnitude <= 1e-16f)
+                    degenerateTriangles++;
+
+                int globalTriIndex = off.triangleOffset + t;
+                int triIndexBase = globalTriIndex * 3;
+
+                triangles[globalTriIndex] = new Triangle
+                {
+                    baseIndex = (uint)triIndexBase,
+                    edgeAB = edgeAB,
+                    edgeAC = edgeAC,
+                    normal = geometricNormal
+                };
+
+                triangleIndices[triIndexBase + 0] = (uint)(off.vertexOffset + v1);
+                triangleIndices[triIndexBase + 1] = (uint)(off.vertexOffset + v2);
+                triangleIndices[triIndexBase + 2] = (uint)(off.vertexOffset + v3);
+            }
+
+            tV.Clear();
+            tN.Clear();
+        }
+
+        PerfTimer.Time("StructuredVertexBufferCreation", () =>
+            ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, vertices));
+
+        ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer, normals);
+        ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, triangles);
+        ShaderHelper.CreateStructuredBuffer(ref BVHBuffer, blasNodes);
+        ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer, triangleIndices);
+
+        rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
+        rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
+        rayTracingMaterial.SetBuffer("Vertices", MeshVerticesBuffer);
+        rayTracingMaterial.SetBuffer("Normals", MeshNormalsBuffer);
+        rayTracingMaterial.SetBuffer("TriangleIndices", MeshIndicesBuffer);
+
+        rayTracingMaterial.SetInt("numBLASNodes", totalBVHNodes);
+
+        for (int i = 0; i < validInstances.Count; i++)
+            validInstances[i].update = false;
+
+        float endTime = Time.realtimeSinceStartup;
+        Debug.Log($"BLAS/global geometry upload took {(endTime - startTime) * 1000f:F3} ms");
+        Debug.Log("Warning: " + degenerateTriangles + " degenerate triangles detected");
+    }
+
+    void BuildAndUploadTLAS(
+        List<RayTracedMesh> meshObjects,
+        Dictionary<SharedMeshData, MeshOffsets> offsets)
+    {
+        BvhInstance[] instances = new BvhInstance[meshObjects.Count];
+        MeshStruct[] gpuInstances = new MeshStruct[meshObjects.Count];
+
+        for (int i = 0; i < meshObjects.Count; i++)
+        {
+            RayTracedMesh meshObj = meshObjects[i];
+            MeshOffsets off = offsets[meshObj.sharedMesh];
+
+            int localRootIndex = meshObj.sharedMesh.blas.RootIndex;
+            Bounds localRootBounds = meshObj.sharedMesh.blas.Nodes[localRootIndex].bounds;
+            Bounds worldBounds = TransformBoundsToWorld(localRootBounds, meshObj.transform);
+
+            int globalBlasRootIndex = off.rootNodeIndex;
+
+            instances[i] = new BvhInstance
+            {
+                blasIndex = i,
+                blasRootIndex = globalBlasRootIndex,
+                localToWorld = meshObj.transform.localToWorldMatrix,
+                worldToLocal = meshObj.transform.worldToLocalMatrix,
+                localBounds = localRootBounds,
+                worldBounds = worldBounds,
+                materialIndex = i
+            };
+
+            gpuInstances[i] = new MeshStruct
+            {
+                localToWorldMatrix = meshObj.transform.localToWorldMatrix,
+                worldToLocalMatrix = meshObj.transform.worldToLocalMatrix,
+                material = meshObj.material,
+                firstBVHNodeIndex = (uint)globalBlasRootIndex,
+
+                AABBLeftX = worldBounds.min.x,
+                AABBLeftY = worldBounds.min.y,
+                AABBLeftZ = worldBounds.min.z,
+                AABBRightX = worldBounds.max.x,
+                AABBRightY = worldBounds.max.y,
+                AABBRightZ = worldBounds.max.z,
+            };
+        }
+
+        TLASBuilder tlasBuilder = new TLASBuilder();
+        BvhBuildSettings tlasSettings = new BvhBuildSettings
+        {
+            maxLeafSize = tlasMaxLeafSize,
+            maxDepth = tlasMaxDepth,
+            numBins = tlasNumBins
+        };
+
+        tlasBuilder.Build(instances, tlasSettings);
+
+        GPUBVHNode[] tlasNodes = PackNodes(tlasBuilder.Nodes);
+        uint[] tlasRefs = new uint[tlasBuilder.PrimitiveRefs.Length];
+        for (int i = 0; i < tlasRefs.Length; i++)
+            tlasRefs[i] = (uint)tlasBuilder.PrimitiveRefs[i];
+
+        ShaderHelper.CreateStructuredBuffer(ref TLASBuffer, tlasNodes);
+        ShaderHelper.CreateStructuredBuffer(ref TLASRefBuffer, tlasRefs);
+        ShaderHelper.CreateStructuredBuffer(ref InstanceBuffer, gpuInstances);
+
+        rayTracingMaterial.SetBuffer("TLASNodes", TLASBuffer);
+        rayTracingMaterial.SetBuffer("TLASRefs", TLASRefBuffer);
+        rayTracingMaterial.SetBuffer("Instances", InstanceBuffer);
+        rayTracingMaterial.SetInt("numMeshes", gpuInstances.Length);
+        rayTracingMaterial.SetInt("numTLASNodes", tlasNodes.Length);
+        rayTracingMaterial.SetInt("numInstances", gpuInstances.Length);
+        rayTracingMaterial.SetInt("TLASRootIndex", tlasBuilder.RootIndex);
+    }
+
+    static GPUBVHNode[] PackNodes(BvhNode[] nodes)
+    {
+        GPUBVHNode[] packed = new GPUBVHNode[nodes.Length];
+
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            BvhNode n = nodes[i];
+            packed[i] = new GPUBVHNode
+            {
+                left = n.leftChild,
+                right = n.rightChild,
+                firstIndex = (uint)n.start,
+                count = (uint)n.count,
+
+                AABBLeftX = n.bounds.min.x,
+                AABBLeftY = n.bounds.min.y,
+                AABBLeftZ = n.bounds.min.z,
+                AABBRightX = n.bounds.max.x,
+                AABBRightY = n.bounds.max.y,
+                AABBRightZ = n.bounds.max.z,
+            };
+        }
+
+        return packed;
+    }
 
     void ApplyBlackHoleLUT(Material rayTracingMaterial, RayTracedBlackHole blackHole)
     {
@@ -65,19 +481,17 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetFloat("_BHLUT_RMaxOverRs", rMaxOverRs);
         rayTracingMaterial.SetFloat("_BHLUT_LogEpsilonOverRs", logEpsilonOverRs);
         rayTracingMaterial.SetFloat("bendStrength", bendStrength);
+        rayTracingMaterial.SetFloat("_BHLUT_Width", blackHoleBendLUT.width);
+        rayTracingMaterial.SetFloat("_BHLUT_Height", blackHoleBendLUT.height);
     }
 
     void OnValidate()
     {
         if (rayTracingShader != null)
-        {
             ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
-        }
 
         if (accumulatorShader != null)
-        {
             ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
-        }
 
         numRenderedFrames = 0;
     }
@@ -109,22 +523,16 @@ public class RayTracingManager : MonoBehaviour
             Graphics.Blit(resultTexture, target);
 
             if (Camera.current.name == "SceneCamera" && !accumlateInSceneView)
-            {
                 Graphics.Blit(currentFrame, target);
-            }
 
             if (Camera.current.name != "SceneCamera" && !accumulateInGameView)
-            {
                 Graphics.Blit(currentFrame, target);
-            }
 
             if (Camera.current.name != "SceneCamera")
             {
                 numRenderedFrames++;
                 if (numRenderedFrames % 100 == 0)
-                {
                     Debug.Log("Num Rendered Frames: " + numRenderedFrames);
-                }
 
                 if (numRenderedFrames > numFrames)
                 {
@@ -144,15 +552,22 @@ public class RayTracingManager : MonoBehaviour
     void InitFrame()
     {
         Camera.current.cullingMask = 0;
+
         ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
         ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
-        ShaderHelper.CreateRenderTexture(ref resultTexture, Screen.width, Screen.height, FilterMode.Bilinear,
-            ShaderHelper.RGBA_SFloat, "Result");
 
-        var cam = Camera.current;
-        UpdateCameraParams(cam);
+        ShaderHelper.CreateRenderTexture(
+            ref resultTexture,
+            Screen.width,
+            Screen.height,
+            FilterMode.Bilinear,
+            ShaderHelper.RGBA_SFloat,
+            "Result"
+        );
+
+        UpdateCameraParams(Camera.current);
         UpdateShaderValues();
-        allocateMeshBuffer();
+        AllocateAccelerationBuffers();
         allocateSphereBuffer();
         allocateBlackHoleBuffer();
     }
@@ -170,9 +585,7 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("maxBounces", maxBounces);
 
         if (blackHoleSOIStepSize == 0)
-        {
             blackHoleSOIStepSize = 1.0f;
-        }
 
         rayTracingMaterial.SetFloat("stepSize", blackHoleSOIStepSize);
         rayTracingMaterial.SetInt("emergencyBreakMaxSteps", emergencyBreakMaxSteps);
@@ -189,222 +602,12 @@ public class RayTracingManager : MonoBehaviour
 
         if (enable_lensing) rayTracingMaterial.EnableKeyword("ENABLE_LENSING");
         else rayTracingMaterial.DisableKeyword("ENABLE_LENSING");
-    }
 
-    void allocateMeshBuffer()
-    {
-        long before = Profiler.GetMonoUsedSizeLong();
-
-        RayTracedMesh[] allMeshes = FindObjectsOfType<RayTracedMesh>();
-        List<RayTracedMesh> validMeshes = new List<RayTracedMesh>(allMeshes.Length);
-
-        for (int i = 0; i < allMeshes.Length; i++)
-        {
-            RayTracedMesh m = allMeshes[i];
-            if (m == null || m.mesh == null || m.buildTriangles == null || m.blas == null)
-                continue;
-            if (m.blas.Nodes == null || m.blas.Nodes.Length == 0)
-                continue;
-            if (m.blas.PrimitiveRefs == null || m.blas.PrimitiveRefs.Length == 0)
-                continue;
-            if (m.GPUBVH == null || m.GPUBVH.Count == 0)
-                continue;
-
-            validMeshes.Add(m);
-        }
-
-        RayTracedMesh[] meshObjects = validMeshes.ToArray();
-        MeshStruct[] meshes = new MeshStruct[meshObjects.Length];
-
-        int indexOffset = 0;
-        int vertexAndNormalOffset = 0;
-        int triangleIndicesOffset = 0;
-        int totalVertexCount = 0;
-
-        int totalTris = 0;
-        int currentBVHNodeIndex = 0;
-        int totalBVHNodes = getTotalBVHNodes(meshObjects);
-        int degenerateTriangles = 0;
-
-        GPUBVHNode[] BVHNodes = new GPUBVHNode[totalBVHNodes];
-        bool anyMeshMarkedUpdated = false;
+        if (useTlas) rayTracingMaterial.EnableKeyword("USE_TLAS");
+        else rayTracingMaterial.DisableKeyword("USE_TLAS");
         
-        foreach(RayTracedMesh mesh in validMeshes)
-        {
-            Bounds localBounds = mesh.blas.Nodes[mesh.blas.RootIndex].bounds;
-            Bounds worldBounds = TransformBoundsToWorld(localBounds, mesh.transform);
-        }
-
-        for (int i = 0; i < meshObjects.Length; i++)
-        {
-            var m = meshObjects[i];
-            uint triCount = (uint)m.buildTriangles.Length;
-            totalTris += (int)triCount;
-            if (m.update) anyMeshMarkedUpdated = true;
-            m.update = false;
-        }
-
-        bool needMeshes = meshBuffer == null || meshBuffer.count != Mathf.Max(1, meshes.Length) || anyMeshMarkedUpdated;
-        bool needTriangles = TriangleBuffer == null || TriangleBuffer.count != Mathf.Max(1, totalTris) || anyMeshMarkedUpdated;
-        bool needBVH = BVHBuffer == null
-                       || BVHBuffer.count != Mathf.Max(1, totalBVHNodes)
-                       || BVHBuffer.stride != ShaderHelper.GetStride<GPUBVHNode>()
-                       || anyMeshMarkedUpdated;
-
-        if (needMeshes || needTriangles || needBVH)
-        {
-            float startTime = Time.realtimeSinceStartup;
-            Debug.Log($"Updating mesh buffers: meshes={meshes.Length}, totalTris={totalTris}, totalBVHNodes={totalBVHNodes}");
-
-            Triangle[] triangles = new Triangle[totalTris];
-            uint[] triangleIndices = new uint[totalTris * 3];
-
-            for (int i = 0; i < meshObjects.Length; i++)
-            {
-                totalVertexCount += meshObjects[i].numVertices;
-            }
-
-            List<float3> vertices = new List<float3>(totalVertexCount);
-            List<float3> normals = new List<float3>(totalVertexCount);
-
-            for (int i = 0; i < meshObjects.Length; i++)
-            {
-                RayTracedMesh meshObj = meshObjects[i];
-
-                meshObj.mesh.GetVertices(tV);
-                meshObj.mesh.GetNormals(tN);
-
-                foreach (Vector3 v in tV)
-                    vertices.Add(v);
-
-                foreach (Vector3 n in tN)
-                    normals.Add(n);
-
-                int[] meshTriangles = meshObj.mesh.triangles;
-
-                int bvhStart = currentBVHNodeIndex;
-                if (meshObj.GPUBVH == null || meshObj.GPUBVH.Count == 0)
-                {
-                    Debug.LogError("No BVH for mesh " + meshObj.name);
-                }
-
-                for (int j = 0; j < meshObj.GPUBVH.Count; j++)
-                {
-                    GPUBVHNode node = meshObj.GPUBVH[j];
-
-                    if (node.left != -1) node.left += bvhStart;
-                    if (node.right != -1) node.right += bvhStart;
-
-                    node.firstIndex += (uint)indexOffset;
-                    BVHNodes[currentBVHNodeIndex++] = node;
-                }
-
-                int[] order = meshObj.blas.PrimitiveRefs;
-                for (int t = 0; t < order.Length; t++)
-                {
-                    int triId = order[t];
-                    ref buildTri bt = ref meshObj.buildTriangles[triId];
-
-                    int baseIndex = bt.triangleIndex;
-                    int v1 = meshTriangles[baseIndex + 0];
-                    int v2 = meshTriangles[baseIndex + 1];
-                    int v3 = meshTriangles[baseIndex + 2];
-
-                    Vector3 edgeAB = bt.posB - bt.posA;
-                    Vector3 edgeAC = bt.posC - bt.posA;
-
-                    int triIndexBase = triangleIndicesOffset + t * 3;
-                    Vector3 normal = Vector3.Cross(edgeAB, edgeAC);
-
-                    if (normal.magnitude <= 1e-8f)
-                    {
-                        Debug.Log("ERROR, DEGENERATE TRIANGLE: " + tV[v1] + " " + tV[v2] + " " + tV[v3] + " " + bt.posA + " " + bt.posB + " " + bt.posC + " " + normal.magnitude);
-                        degenerateTriangles++;
-                    }
-
-                    triangles[indexOffset] = new Triangle()
-                    {
-                        baseIndex = (uint)triIndexBase,
-                        edgeAB = edgeAB,
-                        edgeAC = edgeAC,
-                        normal = normal
-                    };
-
-                    triangleIndices[triIndexBase + 0] = (uint)(vertexAndNormalOffset + v1);
-                    triangleIndices[triIndexBase + 1] = (uint)(vertexAndNormalOffset + v2);
-                    triangleIndices[triIndexBase + 2] = (uint)(vertexAndNormalOffset + v3);
-
-                    indexOffset++;
-                }
-
-                vertexAndNormalOffset += tV.Count;
-                triangleIndicesOffset += order.Length * 3;
-                tV.Clear();
-                tN.Clear();
-            }
-
-            float endTime = Time.realtimeSinceStartup;
-            Debug.Log("Time taken to assemble buffers: " + (endTime - startTime) + " ms");
-
-            PerfTimer.Time("StructuredVertexBufferCreation", () => ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, vertices));
-            ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer, normals);
-            ShaderHelper.CreateStructuredBuffer(ref meshBuffer, meshes);
-            PerfTimer.Time("StructuredMeshBufferCreation: ", () => ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, triangles));
-            ShaderHelper.CreateStructuredBuffer(ref BVHBuffer, BVHNodes);
-            ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer, triangleIndices);
-
-            rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
-            rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
-            rayTracingMaterial.SetBuffer("Vertices", MeshVerticesBuffer);
-            rayTracingMaterial.SetBuffer("Normals", MeshNormalsBuffer);
-            rayTracingMaterial.SetBuffer("TriangleIndices", MeshIndicesBuffer);
-            Debug.Log("Warning: " + degenerateTriangles + " degenerate triangles detected");
-        }
-
-        if (meshBuffer != null && meshObjects.Length > 0)
-        {
-            MeshStruct[] updatedMeshes = new MeshStruct[meshObjects.Length];
-            int triOffset = 0;
-            int bvhOffset = 0;
-
-            for (int i = 0; i < meshObjects.Length; i++)
-            {
-                var meshObj = meshObjects[i];
-                var blas = meshObj.blas;
-
-                int rootIndex = blas.RootIndex;
-                Bounds localRoot = (rootIndex >= 0 && rootIndex < blas.Nodes.Length)
-                    ? blas.Nodes[rootIndex].bounds
-                    : meshObj.ModelBounds;
-
-                updatedMeshes[i] = new MeshStruct()
-                {
-                    indexOffset = triOffset,
-                    triangleCount = meshObj.buildTriangles.Length,
-                    material = meshObj.material,
-
-                    AABBLeftX = localRoot.min.x,
-                    AABBLeftY = localRoot.min.y,
-                    AABBLeftZ = localRoot.min.z,
-                    AABBRightX = localRoot.max.x,
-                    AABBRightY = localRoot.max.y,
-                    AABBRightZ = localRoot.max.z,
-
-                    firstBVHNodeIndex = bvhOffset,
-                    largestAxis = meshObj.largestAxis,
-                    localToWorld = meshObj.transform.localToWorldMatrix,
-                    worldToLocal = meshObj.transform.worldToLocalMatrix,
-                };
-
-                triOffset += meshObj.buildTriangles.Length;
-                bvhOffset += meshObj.GPUBVH.Count;
-            }
-
-            meshBuffer.SetData(updatedMeshes);
-        }
-
-        rayTracingMaterial.SetBuffer("Meshes", meshBuffer);
-        rayTracingMaterial.SetInt("numMeshes", meshObjects.Length);
+        if (useRedshifting) rayTracingMaterial.EnableKeyword("USE_REDSHIFTING");
+        else rayTracingMaterial.DisableKeyword("USE_REDSHIFTING");
     }
 
     void UpdateShaderValues()
@@ -454,30 +657,15 @@ public class RayTracingManager : MonoBehaviour
             }
 
             if (blackHoles[i].blackHoleMass == 0)
-            {
                 Debug.LogError("BlackHoleMass is 0 for " + blackHoleObjects[i].name);
-            }
         }
 
         if (blackHoleObjects.Length > 0)
-        {
             ApplyBlackHoleLUT(rayTracingMaterial, blackHoleObjects[0]);
-        }
 
         ShaderHelper.CreateStructuredBuffer(ref blackHoleBuffer, blackHoles);
         rayTracingMaterial.SetBuffer("BlackHoles", blackHoleBuffer);
         rayTracingMaterial.SetInt("numBlackHoles", blackHoleObjects.Length);
-    }
-
-    int getTotalBVHNodes(RayTracedMesh[] meshObjects)
-    {
-        int totalBVHNodes = 0;
-        for (int i = 0; i < meshObjects.Length; i++)
-        {
-            if (meshObjects[i] != null && meshObjects[i].GPUBVH != null)
-                totalBVHNodes += meshObjects[i].GPUBVH.Count;
-        }
-        return totalBVHNodes;
     }
 
     void OnEnable()

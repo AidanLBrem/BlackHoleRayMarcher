@@ -79,7 +79,7 @@ public class BLASCreator : MonoBehaviour
         trianglesPerLeaf = 0;
 
         meshObj = transform.GetComponent<RayTracedMesh>();
-        if (meshObj == null || meshObj.buildTriangles == null || meshObj.buildTriangles.Length == 0)
+        if (meshObj == null || meshObj.sharedMesh.buildTriangles == null || meshObj.sharedMesh.buildTriangles.Length == 0)
         {
             return;
         }
@@ -89,13 +89,13 @@ public class BLASCreator : MonoBehaviour
         GatherBLASStatistics();
     }
 
-    void OnDrawGizmosSelected()
+    /*void OnDrawGizmosSelected()
     {
         // Ensure we have data to visualize
-        if (meshObj == null || meshObj.buildTriangles == null || meshObj.buildTriangles.Length == 0 || root == null)
+        if (meshObj == null || meshObj.sharedMesh.buildTriangles == null || meshObj.sharedMesh.buildTriangles.Length == 0 || root == null)
         {
             meshObj = transform.GetComponent<RayTracedMesh>();
-            if (meshObj != null && meshObj.buildTriangles != null && meshObj.buildTriangles.Length > 0)
+            if (meshObj != null && meshObj.sharedMesh.buildTriangles != null && meshObj.sharedMesh.buildTriangles.Length > 0)
             {
                 ConstructBLAS();
             }
@@ -109,10 +109,10 @@ public class BLASCreator : MonoBehaviour
 
         if (drawCentroids)
         {
-            for (int i = 0; i < meshObj.buildTriangles.Length; i++)
+            for (int i = 0; i < meshObj.sharedMesh.buildTriangles.Length; i++)
             {
                 // buildTriangles are in local space; convert to world for visualization
-                var tri = meshObj.buildTriangles[i];
+                var tri = meshObj.sharedMesh.buildTriangles[i];
                 Vector3 worldCentroid = transform.TransformPoint(tri.centroid);
 
                 Bounds localBounds = tri.bounds;
@@ -145,7 +145,7 @@ public class BLASCreator : MonoBehaviour
         }
 
         Gizmos.color = Color.purple;
-    }
+    }*/
 
     // --------- NEW helper: draw a local-space Bounds as a correct world-space AABB ---------
     void DrawBoundsAsWorldAABB(Bounds localBounds)
@@ -348,8 +348,8 @@ public class BLASCreator : MonoBehaviour
 
     void CreateTriIndexArray()
     {
-        triIndexArray = new int[meshObj.buildTriangles.Length];
-        for (int i = 0; i < meshObj.buildTriangles.Length; i++)
+        triIndexArray = new int[meshObj.sharedMesh.buildTriangles.Length];
+        for (int i = 0; i < meshObj.sharedMesh.buildTriangles.Length; i++)
         {
             triIndexArray[i] = i;
         }
@@ -365,13 +365,13 @@ public class BLASCreator : MonoBehaviour
     
     public void ValidateTriangleCoverage()
     {
-        if (meshObj == null || meshObj.buildTriangles == null || root == null || triIndexArray == null)
+        if (meshObj == null || meshObj.sharedMesh.buildTriangles == null || root == null || triIndexArray == null)
         {
             Debug.LogWarning("BVH not ready for validation.");
             return;
         }
 
-        int triCount = meshObj.buildTriangles.Length;
+        int triCount = meshObj.sharedMesh.buildTriangles.Length;
         int[] counts = new int[triCount];
 
         void Walk(BVHNode node)
@@ -462,12 +462,12 @@ public class BLASCreator : MonoBehaviour
     {
         // Seed with first triangle bounds
         int tri0 = triIndexArray[start];
-        Bounds b = meshObj.buildTriangles[tri0].bounds;
+        Bounds b = meshObj.sharedMesh.buildTriangles[tri0].bounds;
 
         for (int k = start + 1; k <= end; k++)
         {
             int triIdx = triIndexArray[k];
-            b.Encapsulate(meshObj.buildTriangles[triIdx].bounds);
+            b.Encapsulate(meshObj.sharedMesh.buildTriangles[triIdx].bounds);
         }
 
         return b;
@@ -504,7 +504,7 @@ public class BLASCreator : MonoBehaviour
             return node;
         }
 
-        int mid = PartitionArray(ref triIndexArray, start, end, triIndex => meshObj.buildTriangles[triIndex].centroid[split.axis] < split.splitPos);
+        int mid = PartitionArray(ref triIndexArray, start, end, triIndex => meshObj.sharedMesh.buildTriangles[triIndex].centroid[split.axis] < split.splitPos);
 
         // If partition failed to produce two non-empty sides, stop splitting.
         if (mid <= start || mid > end)
@@ -562,7 +562,7 @@ public class BLASCreator : MonoBehaviour
             Array.Clear(rightInit, 0, rightInit.Length);
             Array.Clear(leftInit, 0, leftInit.Length);
 
-            var (cmin, cmax) = GetMinMax(triIndexArray, start, end, triIndex => meshObj.buildTriangles[triIndex].centroid[i]);
+            var (cmin, cmax) = GetMinMax(triIndexArray, start, end, triIndex => meshObj.sharedMesh.buildTriangles[triIndex].centroid[i]);
 
             // Degenerate: all centroids same on this axis -> no meaningful split
             if (cmax <= cmin + 1e-8f)
@@ -576,7 +576,7 @@ public class BLASCreator : MonoBehaviour
             float invRange = 1f / (cmax - cmin);
             for (int k = start; k <= end; k++) //note END IS INCLUSIVE
             {
-                ref buildTri tri = ref meshObj.buildTriangles[triIndexArray[k]];
+                ref buildTri tri = ref meshObj.sharedMesh.buildTriangles[triIndexArray[k]];
                 float c = tri.centroid[i];
                 float t = (c - cmin) * invRange;
                 int binIndex = Mathf.Clamp((int)(t * numBins), 0, numBins - 1);

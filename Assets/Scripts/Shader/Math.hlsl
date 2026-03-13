@@ -115,3 +115,8 @@ float3 DebugDirection(float3 dir)
     dir = normalize(dir);
     return 0.5 + 0.5 * dir;
 }
+
+float ComputeGtt(float r, float rs)
+{
+    return 1.0 - rs / r;
+}

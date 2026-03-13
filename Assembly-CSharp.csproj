@@ -63,8 +63,10 @@
     <Compile Include="Assets\Scripts\BVH\BLASBuilder.cs" />
     <Compile Include="Assets\Scripts\BlackHoleCPUPreCalculator.cs" />
     <Compile Include="Assets\Scripts\BVH\BvhBuildSettings.cs" />
+    <Compile Include="Assets\Scripts\BVH\MeshCollector.cs" />
     <Compile Include="Assets\Scripts\Primitives\RayTracedMesh.cs" />
     <Compile Include="Assets\Scripts\BVH\TriangleAdapter.cs" />
+    <Compile Include="Assets\Scripts\Primitives\SharedMeshData.cs" />
     <Compile Include="Assets\TutorialInfo\Scripts\Readme.cs" />
     <Compile Include="Assets\Scripts\Primitives\Triangle.cs" />
     <Compile Include="Assets\Scripts\BVH\BvhNode.cs" />

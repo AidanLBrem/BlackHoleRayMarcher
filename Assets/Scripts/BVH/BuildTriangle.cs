@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-[Serializable]
+
 public struct BuildTriangle
 {
     public Vector3 posA;

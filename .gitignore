@@ -1,3 +1,12 @@
-Library/*
-Logs/*
-*.obj
+# Unity generated
+Library/
+Logs/
+Temp/
+Obj/
+Build/
+Builds/
+
+# Ignore specific large assets
+Assets/Mesh/erato.obj
+Assets/Scenes/ComplexSceneTest.unity
+Assets/Scenes/ComplexSceneTest.unity
