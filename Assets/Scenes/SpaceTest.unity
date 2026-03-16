@@ -286,14 +286,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 0, y: 0, z: 500}
+  m_LocalRotation: {x: 0.03191886, y: -0, z: -0, w: 0.9994905}
+  m_LocalPosition: {x: 0, y: -184, z: 500}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1436880562}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 3.658, y: 0, z: 0}
 --- !u!114 &330585547
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -364,19 +364,32 @@ MonoBehaviour:
   maxBounces: 10
   accumlateInSceneView: 0
   accumulateInGameView: 0
-  blackHoleSOIStepSize: 1
+  blackHoleSOIStepSize: 1.5
+  applyScattering: 1
+  applyRayleigh: 0
+  applyMie: 1
+  applySundisk: 1
+  planetRadius: 6378137
+  atmosphereRadius: 1000
+  framesPerScatter: 10
+  inScatteringPoints: 8
+  densityFalloffRayleigh: 4
+  rayleighScatteringCoefficients: {x: 0.0058, y: 0.0135, z: 0.0331}
+  densityFalloffMie: 4
+  mieForwardScatter: 0.76
+  mieBackwardScatter: -0.5
+  mieScatteringCoefficients: {x: 0.000021, y: 0.000021, z: 0.000021}
+  sunLightColor: {r: 1, g: 1, b: 1, a: 1}
+  sun: {fileID: 0}
   emergencyBreakMaxSteps: 500
   numFrames: 10000
   accumWeight: 0
   renderSphere: 1
   renderTriangles: 1
-  blackHoleBendLUT: {fileID: 2800000, guid: a7fde00753a64674599b589eaf7b5e7a, type: 3}
-  rMinOverRs: 1.001
-  rMaxOverRs: 20
-  logEpsilonOverRs: 0.00000001
-  use_lut: 1
+  use_lut: 0
   enable_lensing: 1
   bendStrength: 1
+  strongFieldRadPerMeterCuttoff: 0.01
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -420,14 +433,14 @@ Light:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 410087039}
   m_Enabled: 1
-  serializedVersion: 11
+  serializedVersion: 12
   m_Type: 1
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_Intensity: 2
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
-  m_CookieSize: 10
+  m_CookieSize2D: {x: 10, y: 10}
   m_Shadows:
     m_Type: 2
     m_Resolution: -1
@@ -729,6 +742,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &948806659
 MeshFilter:
@@ -767,6 +781,7 @@ GameObject:
   - component: {fileID: 1092420452}
   - component: {fileID: 1092420456}
   - component: {fileID: 1092420457}
+  - component: {fileID: 1092420458}
   m_Layer: 0
   m_Name: Black Hole
   m_TagString: Untagged
@@ -842,6 +857,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &1092420454
 MeshFilter:
@@ -897,14 +913,54 @@ MonoBehaviour:
   rMinOverRs: 1.001
   rMaxOverRs: 20
   logEpsilonOverRs: 0.00000001
+  lightLutRadiusResolution: 128
+  lightLutSunAngleResolution: 128
   generateOnStart: 0
-  textureAssetName: BlackHoleBendLUT
   saveAsPNG: 0
   saveAsEXR: 1
   printSampleValues: 0
   previewInScene: 0
   filterMode: 0
+  generatedTexture: {fileID: 0}
+  LightLUT: {fileID: 0}
   regenerate: 0
+--- !u!114 &1092420458
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1092420451}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7d64fd2a85d222748adf289af82b0fbe, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LightLUTVisualizer
+  autoSyncFromSource: 0
+  sourceComponent: {fileID: 1092420457}
+  warnIfSourceFieldsMissing: 1
+  lut: {fileID: 0}
+  bendLutTexture: {fileID: 0}
+  rs: 1000
+  radiusResolution: 128
+  sunAngleResolution: 128
+  logEpsilonOverRs: 0.00000001
+  rMinOverRs: 1.001
+  rMaxOverRs: 20
+  bendRadiusResolution: 5166
+  bendMuResolution: 5096
+  xIndex: -112
+  yIndex: -87
+  drawSteps: 10000000
+  drawScale: 1
+  drawDirectBranch: 1
+  drawIndirectBranch: 1
+  drawSourceDirection: 1
+  drawPhotonSphere: 1
+  drawObserver: 1
+  drawLaunchDirection: 1
+  validationToleranceRad: 1
+  logDecodedValues: 0
 --- !u!1 &1408453339
 GameObject:
   m_ObjectHideFlags: 0
@@ -1075,7 +1131,7 @@ MonoBehaviour:
   tracerProperties: {fileID: 330585546}
   path:
     hitInfos: []
-    time: 0.0015127659
+    time: 0.0012264252
     debugInvalidBelowSurfaceCount: 0
     debugInvalidBRDFCount: 0
 --- !u!4 &1436880562
@@ -1208,6 +1264,7 @@ MonoBehaviour:
   m_VerticalAlignment: 256
   m_textAlignment: 65535
   m_characterSpacing: 0
+  m_characterHorizontalScale: 1
   m_wordSpacing: 0
   m_lineSpacing: 0
   m_lineSpacingMax: 0
@@ -1325,6 +1382,7 @@ MonoBehaviour:
   m_VerticalAlignment: 256
   m_textAlignment: 65535
   m_characterSpacing: 0
+  m_characterHorizontalScale: 1
   m_wordSpacing: 0
   m_lineSpacing: 0
   m_lineSpacingMax: 0
@@ -1382,7 +1440,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -47, y: -26.300003}
+  m_AnchoredPosition: {x: -47, y: -26.300049}
   m_SizeDelta: {x: 200, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1660057539 &9223372036854775807

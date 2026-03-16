@@ -66,7 +66,26 @@ public class RayTracingManager : MonoBehaviour
     [NonSerialized] ComputeBuffer TLASBuffer;
     [NonSerialized] ComputeBuffer TLASRefBuffer;
     [NonSerialized] ComputeBuffer InstanceBuffer;
-
+    [Header("Atmosphere")] 
+    public bool applyScattering = true;
+    public bool applyRayleigh = true;
+    public bool applyMie = true;
+    public bool applySundisk = true;
+    public float planetRadius = 6378137.0f;
+    public float atmosphereRadius = 6538137.0f;
+    public int framesPerScatter = 10;
+    int numOpticalDepthPoints = 8;
+    public int inScatteringPoints = 8;
+    [Header("Rayleigh Scattering")]
+    public float densityFalloffRayleigh = 4f;
+    public Vector3 rayleighScatteringCoefficients = new Vector3(0.0058f, 0.0135f, 0.0331f);
+    [Header("Mie Scattering")] 
+    public float densityFalloffMie = 4f;
+    public float mieForwardScatter = 0.76f;
+    public float mieBackwardScatter = -0.5f;
+    public Vector3 mieScatteringCoefficients = new Vector3(21e-6f, 21e-6f, 21e-6f);
+    public Color sunLightColor = Color.white;
+    public Transform sun;
     RenderTexture resultTexture;
     int numRenderedFrames = 0;
 
@@ -81,6 +100,7 @@ public class RayTracingManager : MonoBehaviour
     public bool use_lut = true;
     public bool enable_lensing = true;
     public float bendStrength = 1.0f;
+    public float strongFieldRadPerMeterCuttoff = 0.01f;
 
     static readonly List<Vector3> tV = new();
     static readonly List<Vector3> tN = new();
@@ -93,6 +113,33 @@ public class RayTracingManager : MonoBehaviour
         public int rootNodeIndex;
     }
 
+    void UpdateAtmosphereParams()
+    {
+        rayTracingMaterial.SetFloat("atmosphereRadius", atmosphereRadius);
+        rayTracingMaterial.SetFloat("planetRadius", planetRadius);
+        rayTracingMaterial.SetFloat("densityFalloffRayleigh", densityFalloffRayleigh);
+        rayTracingMaterial.SetFloat("densityFalloffMie", densityFalloffMie);
+        rayTracingMaterial.SetFloat("mieForwardScatter", mieForwardScatter);
+        rayTracingMaterial.SetFloat("mieBackwardScatter", mieBackwardScatter);
+        rayTracingMaterial.SetInt("numOpticalDepthPoints", numOpticalDepthPoints);
+        rayTracingMaterial.SetInt("inScatteringPoints", inScatteringPoints);
+        rayTracingMaterial.SetVector("rayleighScatteringCoefficients", rayleighScatteringCoefficients);
+        rayTracingMaterial.SetVector("mieScatteringCoefficients", new Vector3(
+            mieScatteringCoefficients.x,
+            mieScatteringCoefficients.y,
+            mieScatteringCoefficients.z));
+        rayTracingMaterial.SetVector("sunLightColor", new Vector3(
+            sunLightColor.r, sunLightColor.g, sunLightColor.b));
+        rayTracingMaterial.SetVector("sunDirection", sun != null ? -sun.forward : Vector3.up);
+        rayTracingMaterial.SetInt("framesPerScatter", framesPerScatter);
+        if (!accumulateInGameView)
+        {
+            rayTracingMaterial.SetInt("framesPerScatter", 1);
+        }
+
+        // Also sync step size to solver
+        DirectionalGeodesic2DLutSolver.StepSize = blackHoleSOIStepSize;
+    }
     List<RayTracedMesh> GetValidMeshInstances()
     {
         RayTracedMesh[] allMeshes = FindObjectsOfType<RayTracedMesh>();
@@ -475,6 +522,7 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetFloat("bendStrength", bendStrength);
         rayTracingMaterial.SetFloat("_BHLUT_Width", gen.generatedTexture.width);
         rayTracingMaterial.SetFloat("_BHLUT_Height", gen.generatedTexture.height);
+        rayTracingMaterial.SetFloat("strongFieldCurvatureRadPetMeterCutoff", strongFieldRadPerMeterCuttoff);
     }
 
     void OnValidate()
@@ -503,6 +551,10 @@ public class RayTracingManager : MonoBehaviour
                 RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
             Graphics.Blit(resultTexture, prevFrame);
 
+            if (!accumulateInGameView)
+            {
+                numRenderedFrames = 0;
+            }
             rayTracingMaterial.SetInt("numRenderedFrames", numRenderedFrames);
             RenderTexture currentFrame =
                 RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
@@ -562,6 +614,7 @@ public class RayTracingManager : MonoBehaviour
         AllocateAccelerationBuffers();
         allocateSphereBuffer();
         allocateBlackHoleBuffer();
+        UpdateAtmosphereParams();
     }
 
     void UpdateCameraParams(Camera camera)
@@ -600,6 +653,18 @@ public class RayTracingManager : MonoBehaviour
         
         if (useRedshifting) rayTracingMaterial.EnableKeyword("USE_REDSHIFTING");
         else rayTracingMaterial.DisableKeyword("USE_REDSHIFTING");
+        
+        if (applyScattering) rayTracingMaterial.EnableKeyword("APPLY_SCATTERING");
+        else rayTracingMaterial.DisableKeyword("APPLY_SCATTERING");
+        
+        if (applyRayleigh) rayTracingMaterial.EnableKeyword("APPLY_RAYLEIGH");
+        else rayTracingMaterial.DisableKeyword("APPLY_RAYLEIGH");
+        
+        if (applyMie) rayTracingMaterial.EnableKeyword("APPLY_MIE");
+        else rayTracingMaterial.DisableKeyword("APPLY_MIE");
+        
+        if (applySundisk) rayTracingMaterial.EnableKeyword("APPLY_SUNDISK");
+        else rayTracingMaterial.DisableKeyword("APPLY_SUNDISK");
     }
 
     void UpdateShaderValues()

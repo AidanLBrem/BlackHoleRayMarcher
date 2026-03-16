@@ -18,8 +18,7 @@ Shader "Custom/RayTracer"
             #include "Math.hlsl"
             #include "StarRenderer.hlsl"
             #include "GGX.hlsl"
-            #include "LUTConversion.hlsl"
-            #include "AtmosphereicScattering.hlsl"
+ 
             #pragma vertex vert
             #pragma fragment frag
             #pragma target 5.0
@@ -30,6 +29,10 @@ Shader "Custom/RayTracer"
             #pragma shader_feature_local ENABLE_LENSING
             #pragma shader_feature_local USE_TLAS
             #pragma shader_feature_local USE_REDSHIFTING
+            #pragma shader_feature_local APPLY_RAYLEIGH
+            #pragma shader_feature_local APPLY_MIE
+            #pragma shader_feature_local APPLY_SUNDISK
+            #pragma shader_feature_local APPLY_SCATTERING
 			struct appdata
 			{
 				float4 vertex : POSITION;
@@ -79,6 +82,10 @@ Shader "Custom/RayTracer"
                 float3 rayColor;
                 uint numBounces;
                 uint triTests;
+                // Add these:
+                float3 lastHitNormal;
+                float3 lastHitAlbedo;
+                bool hasLastHit;
             };
             //cold
             struct Sphere
@@ -147,11 +154,13 @@ Shader "Custom/RayTracer"
             float3 ViewParams;
             float4x4 CameraLocalToWorldMatrix;
             float3 CameraWorldPos;
+            float3 sunDirection;
             float CameraFar;
             float CameraNear;
             float blackHoleSOIMultiplier;
             int MarchStepsCount;
             int RaysPerPixel;
+            int framesPerScatter;
             StructuredBuffer<Sphere> Spheres;
             StructuredBuffer<BlackHole> BlackHoles;
             StructuredBuffer<Mesh> Instances;
@@ -184,14 +193,8 @@ Shader "Custom/RayTracer"
             float  BandSoftDeg      = 6.0;       // feather on both sides
             float  BandBoost        = 3.0;       // how much denser/brighter in the band
             float3 galaxyCenterDir = float3(0.0,0.0,1.0);
-            float _BHLUT_RMinOverRs;
-            float _BHLUT_RMaxOverRs;
-            float _BHLUT_LogEpsilonOverRs;
-            float _BHLUT_MuResolution;
-            sampler2D _BlackHoleBendLUT;
-            float bendStrength = 1.0; //trying to figure out why our estimate is 27% weaker than it should be, for now mess with multiplier
-            float _BHLUT_Width;
-            float _BHLUT_Height;
+            float strongFieldCurvatureRadPetMeterCutoff;
+
             v2f vert (appdata v)
             {
                 v2f o;
@@ -209,28 +212,7 @@ Shader "Custom/RayTracer"
                 float3 weakBentDir;
             };
 
-            float RaySphereEntryDistance(float3 rayOrigin, float3 rayDir, float3 sphereCenter, float sphereRadius)
-            {
-                float3 oc = rayOrigin - sphereCenter;
-                float B = dot(oc, rayDir);
-                float Cq = dot(oc, oc) - sphereRadius * sphereRadius;
-                float disc = B * B - Cq;
-
-                if (disc < 0.0)
-                    return -1.0;
-
-                float s = sqrt(disc);
-                float t0 = -B - s;
-                float t1 = -B + s;
-
-                bool inside = dot(oc, oc) <= sphereRadius * sphereRadius;
-                if (inside)
-                    return 0.0;
-
-                if (t0 >= 0.0) return t0;
-                if (t1 >= 0.0) return t1;
-                return -1.0;
-            }
+            
 
             BlackHoleDecision EvaluateBlackHoleForRay(Ray ray, BlackHole blackHole)
             {
@@ -793,168 +775,6 @@ Shader "Custom/RayTracer"
                 return outColor;
             }
             
-            //Moderate temp. Will run at most numBounces * numRays per pixel
-            PixelMarcher handleReflection(PixelMarcher ray, inout uint rngState, HitInfo hitInfo)
-            {
-
-                ray.numBounces++;
-
-                RayTracingMaterial material = Instances[hitInfo.objectIndex].material;
-                if (material.emissionStrength > 0.0)
-                {
-                    
-                    float g = 1 / ray.ray.energy;
-                    #ifndef USE_REDSHIFTING
-                    g = 1;
-                    #endif
-                    float3 c = ApplyFakeRelativisticToneShift(material.emissiveColor.rgb, g, 1.0);
-                    float3 emittedLight = c * material.emissionStrength * (g * g * g);
-                    ray.incomingLight += emittedLight * ray.rayColor;
-                    ray.rayEarlyKill = true;
-                    return ray;
-                }
-                uint triIndex = hitInfo.triIndex;
-                Triangle tri = Triangles[triIndex];
-                uint index1 = TriangleIndices[tri.baseIndex];
-                uint index2 = TriangleIndices[tri.baseIndex+1];
-                uint index3 = TriangleIndices[tri.baseIndex+2];
-                float3 n1 = Normals[index1];
-                float3 n2 = Normals[index2];
-                float3 n3 = Normals[index3];
-                float3 N = normalize(
-                    n1 * (1 - (hitInfo.u + hitInfo.v)) +
-                    n2 * hitInfo.u +
-                    n3 * hitInfo.v
-                );
-                Mesh mesh = Instances[hitInfo.objectIndex];
-                float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);   
-                N = safeNormalize(mul(nMat, N));
-                float3 geomNormalLocal = normalize(Triangles[hitInfo.triIndex].geometricNormal);
-                float3 Ng = safeNormalize(mul(nMat, geomNormalLocal));
-                if (dot(Ng, ray.ray.direction) >  0)
-                    Ng = -Ng;
-                if (dot(N, Ng) <  0)
-                {
-                    N = -N;
-                }
-                if (bad3(ray.ray.direction) || bad3(ray.rayColor) || bad3(N) || bad3(Ng))
-                {
-                    ray.incomingLight = float3(1,0,1);
-                    ray.rayEarlyKill = true;
-                    return ray;
-                }
-                /*float3 toColor = N;
-                
-                ray.rayColor = float4(toColor * 0.5 + 0.5, 1);
-                ray.incomingLight = ray.rayColor;
-                return ray;*/
-
-                // Standard metallic workflow
-                float3 baseColor = material.color;
-                float metallic = saturate(material.metallicity);
-                float roughness = saturate(material.roughness);
-
-                float3 dielectricF0 = float3(0.04, 0.04, 0.04);
-                float3 F0 = lerp(dielectricF0, baseColor, metallic);
-
-                float3 V = safeNormalize(-ray.ray.direction);
-                float NdotV = saturate(dot(N, V));
-
-                float3 F_pick = FresnelSchlick(NdotV, F0);
-                float3 kd = (1.0 - F_pick) * (1.0 - metallic);
-                float3 diffuseBRDF = kd * baseColor / PI;
-
-                // Branch probability heuristic
-                float specularWeight = saturate(luminance(F_pick));
-                float diffuseWeight = max(luminance(diffuseBRDF), 1e-4);
-
-                float totalWeight = specularWeight + diffuseWeight;
-                if (totalWeight < 0)
-                {
-                    ray.rayEarlyKill = true;
-                    return ray;
-                }
-
-                float specularChance = clamp(specularWeight / totalWeight, 0.001, 0.999);
-
-                float choose = randomValue(rngState);
-
-                if (choose < specularChance)
-                {
-                    float2 xi = float2(randomValue(rngState), randomValue(rngState));
-                    float3 H = sampleGGX_H(xi, roughness, N);
-                    float3 L = reflect(-V, H);
-                    L = safeNormalize(L);
-
-                    float NdotL = saturate(dot(N, L));
-                    float NdotH = saturate(dot(N, H));
-                    float VdotH = saturate(dot(V, H));
-
-                    if (NdotL <= 0 || NdotV <= 0 || VdotH <= 0)
-                    {
-                        ray.rayEarlyKill = true;
-                        return ray;
-                    }
-                    if (dot(L, Ng) <= 0)
-                    {
-                        ray.rayEarlyKill = true;
-                        return ray;
-                    }
-
-                    float3 F_spec = FresnelSchlick(VdotH, F0);
-                    float D = D_GGX(NdotH, roughness);
-                    float G = G_SmithGGX(NdotV, NdotL, roughness);
-
-                    float3 specBRDF = (F_spec * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
-
-                    float pdf_H = D * NdotH;
-                    float pdf_L = pdf_H / max(4.0 * VdotH, 1e-8);
-                    float branchPdf = specularChance * max(pdf_L, 1e-8);
-
-                    ray.ray.direction = L;
-                    ray.rayColor *= specBRDF * NdotL / branchPdf;
-                }
-                else
-                {
-                    // ----- DIFFUSE BRANCH: cosine-weighted hemisphere -----
-                    float2 xi = float2(randomValue(rngState), randomValue(rngState));
-                    float3 L = toWorld(sampleCosineHemisphere(xi), N);
-
-                    float NdotL = saturate(dot(N, L));
-                    if (NdotL <= 0)
-                    {
-                        ray.rayEarlyKill = true;
-                        return ray;
-                    }
-                    if (dot(L, Ng) <= 0)
-                    {
-                        ray.rayEarlyKill = true;
-                        return ray;
-                    }
-                    
-                    float pdf_L = NdotL / PI;
-                    float branchPdf = (1.0 - specularChance) * max(pdf_L, 1e-8);
-
-                    ray.ray.direction = L;
-                    ray.rayColor *= diffuseBRDF * NdotL / branchPdf;
-                }
-
-                ray.ray.direction = safeNormalize(ray.ray.direction);
-                
-                ray.ray.position = hitInfo.hitPoint + (N * 1e-4);
-
-                // Russian roulette
-                
-                float p = saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722)));
-                if (randomValue(rngState) > p) {
-                    ray.rayEarlyKill = true;
-                    return ray;
-                }
-                
-                ray.rayColor /= p;
-
-                return ray;
-            }
             
             
             Sphere checkInsideSphere(float3 position) {
@@ -986,8 +806,178 @@ Shader "Custom/RayTracer"
 
                 return closest;
             }
-            
+            #include "AtmosphereicScattering.hlsl"
+//Moderate temp. Will run at most numBounces * numRays per pixel
+            PixelMarcher handleReflection(PixelMarcher ray, inout uint rngState, HitInfo hitInfo)
+{
+    ray.numBounces++;
 
+    RayTracingMaterial material = Instances[hitInfo.objectIndex].material;
+    if (material.emissionStrength > 0.0)
+    {
+        float g = 1 / ray.ray.energy;
+        #ifndef USE_REDSHIFTING
+        g = 1;
+        #endif
+
+        float3 c = ApplyFakeRelativisticToneShift(material.emissiveColor.rgb, g, 1.0);
+        float3 emittedLight = c * material.emissionStrength * (g * g * g);
+        ray.incomingLight += emittedLight * ray.rayColor;
+        ray.rayEarlyKill = true;
+        return ray;
+    }
+
+    uint triIndex = hitInfo.triIndex;
+    Triangle tri = Triangles[triIndex];
+    uint index1 = TriangleIndices[tri.baseIndex];
+    uint index2 = TriangleIndices[tri.baseIndex + 1];
+    uint index3 = TriangleIndices[tri.baseIndex + 2];
+
+    float3 n1 = Normals[index1];
+    float3 n2 = Normals[index2];
+    float3 n3 = Normals[index3];
+
+    float3 N = normalize(
+        n1 * (1 - (hitInfo.u + hitInfo.v)) +
+        n2 * hitInfo.u +
+        n3 * hitInfo.v
+    );
+
+    ray.lastHitAlbedo = material.color;
+    ray.hasLastHit = true;
+
+    Mesh mesh = Instances[hitInfo.objectIndex];
+    float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
+    N = safeNormalize(mul(nMat, N));
+    ray.lastHitNormal = N;
+
+    float3 geomNormalLocal = normalize(Triangles[hitInfo.triIndex].geometricNormal);
+    float3 Ng = safeNormalize(mul(nMat, geomNormalLocal));
+
+    if (dot(Ng, ray.ray.direction) > 0)
+        Ng = -Ng;
+
+    if (dot(N, Ng) < 0)
+        N = -N;
+
+    if (bad3(ray.ray.direction) || bad3(ray.rayColor) || bad3(N) || bad3(Ng))
+    {
+        ray.incomingLight = float3(1, 0, 1);
+        ray.rayEarlyKill = true;
+        return ray;
+    }
+
+    float3 baseColor = material.color;
+    float metallic = saturate(material.metallicity);
+    float roughness = saturate(material.roughness);
+
+    float3 dielectricF0 = float3(0.04, 0.04, 0.04);
+    float3 F0 = lerp(dielectricF0, baseColor, metallic);
+
+    float3 V = safeNormalize(-ray.ray.direction);
+    float NdotV = saturate(dot(N, V));
+
+    float3 F_pick = FresnelSchlick(NdotV, F0);
+    float3 kd = (1.0 - F_pick) * (1.0 - metallic);
+    float3 diffuseBRDF = kd * baseColor / PI;
+
+    float specularWeight = saturate(luminance(F_pick));
+    float diffuseWeight = max(luminance(diffuseBRDF), 1e-4);
+
+    float totalWeight = specularWeight + diffuseWeight;
+    if (totalWeight <= 1e-8)
+    {
+        ray.rayEarlyKill = true;
+        return ray;
+    }
+
+    #ifdef APPLY_SCATTERING
+    #endif
+
+    // Accurate direct sun at this hit, before sampling the next bounce
+float3 directSun = evaluateDirectSunAtHit(
+    hitInfo.hitPoint, N, Ng, V, baseColor, metallic, roughness, F0);
+
+ray.incomingLight += ray.rayColor * directSun * 10;
+
+    float specularChance = clamp(specularWeight / totalWeight, 0.001, 0.999);
+    float choose = randomValue(rngState);
+
+    if (choose < specularChance)
+    {
+        float2 xi = float2(randomValue(rngState), randomValue(rngState));
+        float3 H = sampleGGX_H(xi, roughness, N);
+        float3 L = reflect(-V, H);
+        L = safeNormalize(L);
+
+        float NdotL = saturate(dot(N, L));
+        float NdotH = saturate(dot(N, H));
+        float VdotH = saturate(dot(V, H));
+
+        if (NdotL <= 0 || NdotV <= 0 || VdotH <= 0)
+        {
+            ray.rayEarlyKill = true;
+            return ray;
+        }
+
+        if (dot(L, Ng) <= 0)
+        {
+            ray.rayEarlyKill = true;
+            return ray;
+        }
+
+        float3 F_spec = FresnelSchlick(VdotH, F0);
+        float D = D_GGX(NdotH, roughness);
+        float G = G_SmithGGX(NdotV, NdotL, roughness);
+
+        float3 specBRDF = (F_spec * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
+
+        float pdf_H = D * NdotH;
+        float pdf_L = pdf_H / max(4.0 * VdotH, 1e-8);
+        float branchPdf = specularChance * max(pdf_L, 1e-8);
+
+        ray.ray.direction = L;
+        ray.rayColor *= specBRDF * NdotL / branchPdf;
+    }
+    else
+    {
+        float2 xi = float2(randomValue(rngState), randomValue(rngState));
+        float3 L = toWorld(sampleCosineHemisphere(xi), N);
+
+        float NdotL = saturate(dot(N, L));
+        if (NdotL <= 0)
+        {
+            ray.rayEarlyKill = true;
+            return ray;
+        }
+
+        if (dot(L, Ng) <= 0)
+        {
+            ray.rayEarlyKill = true;
+            return ray;
+        }
+
+        float pdf_L = NdotL / PI;
+        float branchPdf = (1.0 - specularChance) * max(pdf_L, 1e-8);
+
+        ray.ray.direction = L;
+        ray.rayColor *= diffuseBRDF * NdotL / branchPdf;
+    }
+
+    ray.ray.direction = safeNormalize(ray.ray.direction);
+    ray.ray.position = hitInfo.hitPoint + (Ng * 1e-4);
+
+    float p = max(saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722))), 1e-4);
+    if (randomValue(rngState) > p)
+    {
+        ray.rayEarlyKill = true;
+        return ray;
+    }
+
+    ray.rayColor /= p;
+
+    return ray;
+}
             float estimateNearestCollidableObjectDistance(Ray ray) {
                 float closestDistance = 3.402823e+38;
                 for (int i = 0; i < numSpheres; i++) {
@@ -1030,216 +1020,8 @@ Shader "Custom/RayTracer"
 
                 return coeff * x;
             }
-            float SampleBHLUT_Bilinear(float u, float v)
-            {
-                float2 texSize = float2(_BHLUT_Width, _BHLUT_Height);
-                float2 uv = float2(u, v);
-
-                // Convert uv to texel space, centered so floor() gives texel corner
-                float2 p = uv * texSize - 0.5;
-                float2 i = floor(p);
-                float2 f = frac(p);
-
-                float2 uv00 = (i + float2(0.5, 0.5)) / texSize;
-                float2 uv10 = (i + float2(1.5, 0.5)) / texSize;
-                float2 uv01 = (i + float2(0.5, 1.5)) / texSize;
-                float2 uv11 = (i + float2(1.5, 1.5)) / texSize;
-
-                // Clamp to avoid edge wrap issues
-                float2 halfTexel = 0.5 / texSize;
-                uv00 = clamp(uv00, halfTexel, 1.0 - halfTexel);
-                uv10 = clamp(uv10, halfTexel, 1.0 - halfTexel);
-                uv01 = clamp(uv01, halfTexel, 1.0 - halfTexel);
-                uv11 = clamp(uv11, halfTexel, 1.0 - halfTexel);
-
-                float s00 = tex2Dlod(_BlackHoleBendLUT, float4(uv00, 0, 0)).g;
-                float s10 = tex2Dlod(_BlackHoleBendLUT, float4(uv10, 0, 0)).g;
-                float s01 = tex2Dlod(_BlackHoleBendLUT, float4(uv01, 0, 0)).g;
-                float s11 = tex2Dlod(_BlackHoleBendLUT, float4(uv11, 0, 0)).g;
-
-                float sx0 = lerp(s00, s10, f.x);
-                float sx1 = lerp(s01, s11, f.x);
-                return lerp(sx0, sx1, f.y);
-            }
-            Ray ApplyBlackHoleBendLUT(
-                Ray ray,
-                BlackHole blackHole,
-                float stepLen,
-                out float3 moveDir)
-            {
-                float3 rel = ray.position - blackHole.position;
-                float r = length(rel);
-                moveDir = ray.direction;
-
-                if (r <= 0)
-                    return ray;
-
-                float3 rayDir    = normalize(ray.direction);
-                float3 radialOut = rel / r;
-                float3 radialIn  = -radialOut;
-
-                float mu = dot(rayDir, radialOut);
-
-                float u = RadiusToLUT_U(r, blackHole.SchwartzchildRadius,
-                                        _BHLUT_RMinOverRs, _BHLUT_RMaxOverRs,
-                                        _BHLUT_LogEpsilonOverRs);
-                float v = MuToLUT_V(mu, _BHLUT_MuResolution);
-                
-                float dPhiDs = SampleBHLUT_Bilinear(u, v);
-                
-                float dTheta = dPhiDs * stepLen;
-
-                float3 bendDir = radialIn - dot(radialIn, rayDir) * rayDir;
-                float  bendLen = length(bendDir);
-
-                if (bendLen > 0)
-                {
-                    bendDir /= bendLen;
-
-                    float3 midDir = normalize(rayDir + bendDir * (0.5 * dTheta));
-                    float3 endDir = normalize(rayDir + bendDir * dTheta);
-
-                    moveDir           = midDir;
-                    ray.direction     = endDir;
-                }
-                return ray;
-            }
-
-            Ray blackHoleRK4Check(
-                Ray ray,
-                BlackHole blackHole,
-                float estimatedDistance)
-            {
-                float k = estimatedDistance * stepSize;
-                k = max(k, 0.01);
-
-                float3 pos0 = ray.position;
-                float3 vel0 = ray.direction; // treat direction as geodesic tangent
-                vel0 = normalize(vel0);
-
-                // Conserved h^2 for this geodesic step.
-                // Since |vel0| = 1 here, |x x v| is the flat-space impact parameter.
-                float3 rel0 = pos0 - blackHole.position;
-                float3 L0 = cross(rel0, vel0);
-                float h2 = dot(L0, L0);
-
-                // ----- RK4 on:
-                // p' = v
-                // v' = a(p) = -3 M h^2 x / r^5
-                // -----
-
-                // k1
-                float3 dp1 = vel0;
-                float3 dv1 = schwarzschildGeodesicAccel(pos0, blackHole, h2);
-
-                // k2
-                float3 pos1 = pos0 + dp1 * (0.5 * k);
-                float3 vel1 = vel0 + dv1 * (0.5 * k);
-                float3 dp2 = vel1;
-                float3 dv2 = schwarzschildGeodesicAccel(pos1, blackHole, h2);
-
-                // k3
-                float3 pos2 = pos0 + dp2 * (0.5 * k);
-                float3 vel2 = vel0 + dv2 * (0.5 * k);
-                float3 dp3 = vel2;
-                float3 dv3 = schwarzschildGeodesicAccel(pos2, blackHole, h2);
-
-                // k4
-                float3 pos3 = pos0 + dp3 * k;
-                float3 vel3 = vel0 + dv3 * k;
-                float3 dp4 = vel3;
-                float3 dv4 = schwarzschildGeodesicAccel(pos3, blackHole, h2);
-
-                float3 posEnd = pos0 + (k / 6.0) * (dp1 + 2.0 * dp2 + 2.0 * dp3 + dp4);
-                float3 velEnd = vel0 + (k / 6.0) * (dv1 + 2.0 * dv2 + 2.0 * dv3 + dv4);
-                
-
-                float3 chord = posEnd - pos0;
-                float chordLen = length(chord);
-                float3 chordDir = (chord/chordLen);
-
-                ray.position = pos0;
-                ray.direction = chordDir;
-                
-                return ray;
-            }
             
-            PixelMarcher marchNearBlackHole(PixelMarcher ray, BlackHole blackHole, inout uint rngState)
-            {
-                int emergencyBreak = 0;
-                float rs = blackHole.SchwartzchildRadius;
-
-                // Reused field: now interpreted as impact threshold multiplier.
-                // We use the same value as the handoff shell radius.
-                float marchShellRadius = max(rs * blackHole.blackHoleSOIMultiplier, 4.0 * rs);
-
-                while (true)
-                {
-                    float3 rel = ray.ray.position - blackHole.position;
-                    float distanceToBlackHole = length(rel);
-
-                    if (distanceToBlackHole < rs)
-                    {
-                        ray.hitBlackHole = true;
-                        return ray;
-                    }
-
-                    // Exit once we've escaped beyond the shell and are moving outward.
-                    if (distanceToBlackHole > marchShellRadius)
-                    {
-                        float3 radialOut = rel / max(distanceToBlackHole, 1e-8);
-                        if (dot(ray.ray.direction, radialOut) > 0.0)
-                            break;
-                    }
-
-                    float distFromHorizon = nearestPointOnSphere(ray.ray.position, blackHole.position, rs);
-                    float adaptiveStep = distFromHorizon * stepSize;
-                    float minStep = 0.01;
-                    float stepLen = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
-
-                    float gtt_old = ComputeGtt(distanceToBlackHole, rs);
-
-                    #ifdef ENABLE_LENSING
-                        #ifdef USE_LUT
-                            float3 moveDir;
-                            ray.ray = ApplyBlackHoleBendLUT(ray.ray, blackHole, stepLen, moveDir);
-                        #else
-                            ray.ray = blackHoleRK4Check(ray.ray, blackHole, stepLen);
-                        #endif
-                    #endif
-
-                    HitInfo h = queryCollisions(ray.ray, stepLen);
-
-                    emergencyBreak++;
-                    if (emergencyBreak > emergencyBreakMaxSteps)
-                    {
-                        ray.rayEarlyKill = true;
-                        return ray;
-                    }
-
-                    if (h.didHit)
-                    {
-                        ray = handleReflection(ray, rngState, h);
-                        if (ray.rayEarlyKill)
-                            return ray;
-                    }
-                    else
-                    {
-                        ray.ray.position += ray.ray.direction * stepLen;
-                    }
-
-                    float newDistance = length(ray.ray.position - blackHole.position);
-                    float gtt_new = ComputeGtt(newDistance, rs);
-
-                    #ifdef ENABLE_LENSING
-                        #ifdef USE_REDSHIFTING
-                            ray.ray.energy *= sqrt(gtt_old / gtt_new);
-                        #endif
-                    #endif
-                }
-
-                return ray;
-            }
+            
             float3 getAngularGrid(float3 rayDirection)
             {
                 float3 dir = normalize(rayDirection);
@@ -1268,7 +1050,7 @@ Shader "Custom/RayTracer"
                 return color * line1;
             }
             
-            
+            #include "BlackHoleMarch2D.hlsl"
             float3 trace(float3 viewPoint, inout uint rngState)
             {
                 if (isNan(stepSize)) {
@@ -1346,24 +1128,52 @@ Shader "Custom/RayTracer"
                     // Case 3: nothing hit at all, use background
                     else
                     {
-                        float g = 1.0 / ray.energy;
-                        float3 starColor = getStarField(ray.direction);
+                        #ifdef APPLY_SCATTERING
+                        // Case 3: background miss
+                        if ((numRenderedFrames % framesPerScatter == 0 || numRenderedFrames == 0))
+                        {
+                            float3 rayDir = normalize(ray.direction);
 
-                        #ifndef USE_REDSHIFTING
-                            g = 1.0;
+                            float atmExit = RaySphereExitDistance(
+                                ray.position, rayDir, float3(0,0,0), atmosphereRadius);
+
+                            if (atmExit > 0)
+                            {
+                                pixel_marcher.incomingLight += calculateLight(
+                                    ray.position, rayDir, atmExit, rngState, 64) * framesPerScatter;
+                            }
+                        }
+
                         #endif
 
-                        float3 c = ApplyFakeRelativisticToneShift(starColor, g, 1.0);
-                        pixel_marcher.incomingLight += c * (g * g * g);
+                        pixel_marcher.incomingLight += getStarField(ray.direction);
                         break;
                     }
-                    if (pixel_marcher.rayEarlyKill) {
-                        //return float3(BVHTests / 100, BVHTests / 100, BVHTests / 100);
-                        //return float3(triTests / 1000, triTests / 1000, triTests / 1000);
-                        //return float3(10000,0,10000);
-                        break;
+                    if (pixel_marcher.numBounces >= maxBounces || pixel_marcher.rayEarlyKill)
+                    {
+                        #ifdef APPLY_SCATTERING
+                        /*if (pixel_marcher.hasLastHit && (numRenderedFrames % framesPerScatter == 0 || numRenderedFrames == 0))
+                        {
+                            float3 hitPos = pixel_marcher.ray.position;
+                            float NdotL = saturate(dot(pixel_marcher.lastHitNormal, sunDirection));
+                            if (NdotL > 0)
+                            {
+                                Ray finalSunRay;
+                                finalSunRay.position  = hitPos + pixel_marcher.lastHitNormal * 1e-4;
+                                finalSunRay.direction = sunDirection;
+                                finalSunRay.energy    = 1.0;
+                                float atmExit = RaySphereExitDistance(
+                                ray.position, ray.direction, float3(0,0,0), atmosphereRadius);
+                                if (atmExit > 0)
+                                {
+                                    pixel_marcher.incomingLight += calculateLight(
+                                        ray.position, ray.direction, atmExit, rngState, 8);
+                                }
+                            }
+                        }*/
+                        #endif
+                        break;  // unconditional, outside the ifdef
                     }
-                    
                     iterations++;
 
                     

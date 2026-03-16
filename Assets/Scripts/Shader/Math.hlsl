@@ -120,3 +120,36 @@ float ComputeGtt(float r, float rs)
 {
     return 1.0 - rs / r;
 }
+float RaySphereEntryDistance(float3 rayOrigin, float3 rayDir, float3 sphereCenter, float sphereRadius)
+{
+    float3 oc = rayOrigin - sphereCenter;
+    float B = dot(oc, rayDir);
+    float Cq = dot(oc, oc) - sphereRadius * sphereRadius;
+    float disc = B * B - Cq;
+
+    if (disc < 0.0)
+        return -1.0;
+
+    float s = sqrt(disc);
+    float t0 = -B - s;
+    float t1 = -B + s;
+
+    bool inside = dot(oc, oc) <= sphereRadius * sphereRadius;
+    if (inside)
+        return 0.0;
+
+    if (t0 >= 0.0) return t0;
+    if (t1 >= 0.0) return t1;
+    return -1.0;
+}
+            
+float RaySphereExitDistance(float3 rayOrigin, float3 rayDir,
+                 float3 sphereCenter, float sphereRadius)
+{
+    float3 oc   = rayOrigin - sphereCenter;
+    float  B    = dot(oc, rayDir);
+    float  Cq   = dot(oc, oc) - sphereRadius * sphereRadius;
+    float  disc = B * B - Cq;
+    if (disc < 0.0) return 0.0;
+    return -B + sqrt(disc);
+}
