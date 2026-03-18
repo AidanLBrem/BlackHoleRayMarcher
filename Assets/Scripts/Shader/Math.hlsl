@@ -143,13 +143,30 @@ float RaySphereEntryDistance(float3 rayOrigin, float3 rayDir, float3 sphereCente
     return -1.0;
 }
             
-float RaySphereExitDistance(float3 rayOrigin, float3 rayDir,
-                 float3 sphereCenter, float sphereRadius)
+float RaySphereExitDistance(
+    float3 rayOrigin,
+    float3 rayDirection,
+    float3 sphereCenter,
+    float sphereRadius)
 {
-    float3 oc   = rayOrigin - sphereCenter;
-    float  B    = dot(oc, rayDir);
-    float  Cq   = dot(oc, oc) - sphereRadius * sphereRadius;
-    float  disc = B * B - Cq;
-    if (disc < 0.0) return 0.0;
-    return -B + sqrt(disc);
+    float3 oc = rayOrigin - sphereCenter;
+    float b = dot(oc, rayDirection);
+    float c = dot(oc, oc) - sphereRadius * sphereRadius;
+    float h = b * b - c;
+
+    if (h < 0.0)
+        return -1.0;
+
+    float s = sqrt(h);
+    float t0 = -b - s;
+    float t1 = -b + s;
+
+    // If inside sphere, t1 is the forward exit.
+    bool inside = (dot(oc, oc) < sphereRadius * sphereRadius);
+
+    if (inside)
+        return t1;
+    
+
+    return -1.0;
 }

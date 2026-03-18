@@ -5,31 +5,13 @@
 // Atmospheric scattering for a spherical planet where local surface origin is
 // at y = 0 and planet center is at (0, -planetRadius, 0).
 //
-// This fixes the "slab" bug: rays near the horizon now naturally climb into
-// thinner atmosphere because the atmosphere is a sphere shell, not a flat box.
+// Key fix:
+//   Sun/shadow rays now use distance-to-atmosphere-exit only.
+//   View rays use min(atmosphere exit, ground hit).
 //
-// Required uniforms from the main shader:
-//   float planetRadius;
-//   float atmosphereRadius;
-//   float densityFalloffRayleigh;
-//   float densityFalloffMie;
-//   int   numOpticalDepthPoints;
-//   float3 rayleighScatteringCoefficients;
-//   float3 mieScatteringCoefficients;
-//   float3 sunLightColor;
-//   float3 sunDirection;
-//   float mieForwardScatter;
-//   float mieBackwardScatter;
-//
-// Assumes these exist elsewhere in your shader project:
-//   randomValue(inout uint rngState)
-//   safeNormalize(float3)
-//   HitInfo queryCollisions(Ray ray, float tMax)
-//
-// Optional compile flags already used by your shader:
-//   APPLY_RAYLEIGH
-//   APPLY_MIE
-//   APPLY_SUNDISK
+// This prevents the bug where a sun ray that should be blocked by the planet
+// can accidentally be treated as visible because the segment length had already
+// been clamped to the ground hit.
 // -----------------------------------------------------------------------------
 
 float atmosphereRadius;
@@ -49,13 +31,7 @@ uniform int applySunDisk;
 // Keep this if other files reference it.
 float atmosphereHeight;
 
-// Surface origin convention:
-//   local surface point at sea level = (0, 0, 0)
-//   therefore planet center is one radius below that
-static const float3 kPlanetCenter = float3(0.0, -planetRadius, 0.0);
-
-// Small epsilon helpers
-static const float ATM_EPS = 10;
+static const float ATM_EPS = 5;
 static const float ATM_BIG = 3.402823e+38;
 
 // -----------------------------------------------------------------------------
@@ -94,7 +70,12 @@ bool IsInsidePlanet(float3 worldPos)
     float3 center = PlanetCenter();
     return length(worldPos - center) < planetRadius;
 }
-float RaySphereNearestForwardHit(float3 rayOrigin, float3 rayDirection, float3 sphereCenter, float sphereRadius)
+
+float RaySphereNearestForwardHit(
+    float3 rayOrigin,
+    float3 rayDirection,
+    float3 sphereCenter,
+    float sphereRadius)
 {
     float3 oc = rayOrigin - sphereCenter;
     float b = dot(oc, rayDirection);
@@ -113,19 +94,29 @@ float RaySphereNearestForwardHit(float3 rayOrigin, float3 rayDirection, float3 s
     return -1.0;
 }
 
-// Distance the ray can travel through the atmosphere before either:
+
+// Distance to atmosphere exit only.
+// Use this for sun/shadow rays.
+float AtmosphereExitDistance(float3 rayOrigin, float3 rayDirection)
+{
+    float3 center = PlanetCenter();
+    float tAtm = RaySphereExitDistance(rayOrigin, rayDirection, center, atmosphereRadius);
+    return (tAtm > ATM_EPS) ? tAtm : -1.0;
+}
+
+// Distance the view ray can travel before either:
 // 1) hitting the ground, or
 // 2) leaving the atmosphere.
-float AtmosphereSegmentLength(float3 rayOrigin, float3 rayDirection)
+float ViewAtmosphereSegmentLength(float3 rayOrigin, float3 rayDirection)
 {
     float3 center = PlanetCenter();
 
     float tAtm = RaySphereExitDistance(rayOrigin, rayDirection, center, atmosphereRadius);
-    if (tAtm <= 0.0)
+    if (tAtm <= ATM_EPS)
         return -1.0;
 
     float tGround = RaySphereNearestForwardHit(rayOrigin, rayDirection, center, planetRadius);
-    if (tGround > 0.0)
+    if (tGround > ATM_EPS)
         return min(tAtm, tGround);
 
     return tAtm;
@@ -215,7 +206,6 @@ float3 transmittanceFromOpticalDepth(float tauR, float tauM)
 }
 
 // Preserved convenience function in case other files call it.
-// This returns Rayleigh-only optical depth, matching the old signature.
 float opticalDepth(float3 rayOrigin, float3 rayDirection, float rayLength)
 {
     float tauR, tauM;
@@ -274,11 +264,9 @@ float3 calculateLight(
     [loop]
     for (int i = 0; i < sampleCount; i++)
     {
-        // Midpoint sampling is more stable than endpoint sampling here.
         float t = ((float)i + 0.5) * ds;
         float3 samplePoint = rayOrigin + rayDirection * t;
 
-        // Skip anything below ground.
         if (IsInsidePlanet(samplePoint))
             continue;
 
@@ -286,34 +274,22 @@ float3 calculateLight(
         float tauViewR, tauViewM;
         opticalDepthRM(rayOrigin, rayDirection, t, tauViewR, tauViewM);
 
-        // Distance from sample to atmosphere exit toward sun.
-        float sunSegment = AtmosphereSegmentLength(samplePoint, dirToSun);
-        if (sunSegment <= 0.0)
+        // Sun ray uses exit distance only.
+        float sunSegment = AtmosphereExitDistance(samplePoint, dirToSun);
+        if (sunSegment <= ATM_EPS)
             continue;
 
-        // Planet occlusion of sun.
+        // Ground occlusion by planet.
         if (SunRayHitsGround(samplePoint, dirToSun, sunSegment))
-        {
-            if (i == 0)
-            {
-                Ray shadowRay;
-                shadowRay.position  = samplePoint;
-                shadowRay.direction = dirToSun;
-                shadowRay.energy    = 1.0;
-                firstSunDiskOccluder.didHit = true;
-            }
             continue;
-        }
 
-        // Scene-object occlusion of sun.
+        // Scene-object occlusion.
         Ray shadowRay;
         shadowRay.position  = samplePoint;
         shadowRay.direction = dirToSun;
         shadowRay.energy    = 1.0;
 
         HitInfo h = queryCollisions(shadowRay, sunSegment);
-        if (i == 0)
-            firstSunDiskOccluder = h;
 
         if (h.didHit)
             continue;
@@ -328,7 +304,7 @@ float3 calculateLight(
         #ifdef APPLY_RAYLEIGH
         {
             float dR = densityAtPointRayleigh(samplePoint);
-            accumR += dR * rayleighScatteringCoefficients * T * sunLightColor * ds * 10;
+            accumR += dR * rayleighScatteringCoefficients * T * sunLightColor * ds;
         }
         #endif
 
@@ -350,8 +326,11 @@ float3 calculateLight(
 
     #ifdef APPLY_SUNDISK
     {
-        float sunSegment = AtmosphereSegmentLength(rayOrigin, dirToSun);
-        bool sunVisible = (sunSegment > 0.0) && !SunRayHitsGround(rayOrigin, dirToSun, sunSegment) && !firstSunDiskOccluder.didHit;
+        float sunSegment = AtmosphereExitDistance(rayOrigin, dirToSun);
+        bool sunVisible =
+            (sunSegment > ATM_EPS) &&
+            !SunRayHitsGround(rayOrigin, dirToSun, sunSegment) &&
+            !firstSunDiskOccluder.didHit;
 
         if (sunVisible)
         {
@@ -359,9 +338,8 @@ float3 calculateLight(
             opticalDepthRM(rayOrigin, dirToSun, sunSegment, tauSunR, tauSunM);
             float3 Tsun = transmittanceFromOpticalDepth(tauSunR, tauSunM);
 
-            // Disk sharpness
             float sunDisk = pow(max(dot(rayDirection, dirToSun), 0.0), 5096.0);
-            result += sunDisk * Tsun * sunLightColor * 100.0;
+            result += sunDisk * Tsun * sunLightColor;
         }
     }
     #endif
@@ -369,8 +347,7 @@ float3 calculateLight(
     return result;
 }
 
-// Convenience overload matching your existing callsite:
-//   calculateLight(ray, atmExit, rngState, 8)
+// Convenience overload matching your existing callsite.
 float3 calculateLight(Ray ray, float rayLength, inout uint rngState, int inScatteringPoints)
 {
     return calculateLight(ray.position, ray.direction, rayLength, rngState, inScatteringPoints);
@@ -403,12 +380,12 @@ float3 evaluateDirectSunAtHit(
 
     float3 shadowOrigin = hitPoint + Ng * 1e-4;
 
-    // Distance from hit point to atmosphere exit in sun direction.
-    float sunSegment = AtmosphereSegmentLength(shadowOrigin, L);
-    if (sunSegment <= 0.0)
+    // Sun/shadow ray: use atmosphere exit distance only.
+    float sunSegment = AtmosphereExitDistance(shadowOrigin, L);
+    if (sunSegment <= ATM_EPS)
         return float3(0.0, 0.0, 0.0);
 
-    // Ground occlusion by the planet itself.
+    // Ground occlusion by planet.
     if (SunRayHitsGround(shadowOrigin, L, sunSegment))
         return float3(0.0, 0.0, 0.0);
 
@@ -422,7 +399,6 @@ float3 evaluateDirectSunAtHit(
     if (shadowHit.didHit)
         return float3(0.0, 0.0, 0.0);
 
-    // Proper sun-path transmittance through the atmosphere.
     float tauSunR, tauSunM;
     opticalDepthRM(shadowOrigin, L, sunSegment, tauSunR, tauSunM);
     float3 Tsun = transmittanceFromOpticalDepth(tauSunR, tauSunM);

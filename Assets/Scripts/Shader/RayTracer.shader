@@ -898,7 +898,21 @@ Shader "Custom/RayTracer"
                 float3 directSun = evaluateDirectSunAtHit(
                 hitInfo.hitPoint, N, Ng, V, baseColor, metallic, roughness, F0);
 
-                ray.incomingLight += ray.rayColor * directSun * 10;
+                if (ray.numBounces == 1)
+                {
+                    float tauViewR, tauViewM;
+                    opticalDepthRM(ray.ray.position, ray.ray.direction, hitInfo.distance, tauViewR, tauViewM);
+                    float3 Tview = transmittanceFromOpticalDepth(tauViewR, tauViewM);
+
+                    ray.incomingLight += ray.rayColor * directSun * Tview;
+                    ray.incomingLight += calculateLight(ray.ray.position, ray.ray.direction, hitInfo.distance, rngState, 1);
+                }
+                
+                else
+                {
+                    ray.incomingLight += ray.rayColor * directSun;
+                }
+
 
                 float specularChance = clamp(specularWeight / totalWeight, 0.001, 0.999);
                 float choose = randomValue(rngState);
@@ -1106,7 +1120,7 @@ Shader "Custom/RayTracer"
                     ray = pixel_marcher.ray;
 
                     // Only look for object hits up to the nearest BH march handoff, if any.
-                    float sceneTMax = (nearestMarchBH != -1) ? nearestMarchT : 100000.0;
+                    float sceneTMax = (nearestMarchBH != -1) ? nearestMarchT : 3.402823e+38;
                     HitInfo objectHitInfo = queryCollisions(ray, sceneTMax);
 
                     // Case 1: object hit before any BH handoff
@@ -1134,12 +1148,11 @@ Shader "Custom/RayTracer"
                             float3 rayDir = normalize(ray.direction);
 
                             float atmExit = RaySphereExitDistance(
-                                ray.position, rayDir, float3(0,0,0), atmosphereRadius);
-
+                                ray.position, rayDir, PlanetCenter(), atmosphereRadius);
                             if (atmExit > 0)
                             {
                                 pixel_marcher.incomingLight += calculateLight(
-                                    ray.position, rayDir, atmExit, rngState, 64) * framesPerScatter;
+                                    ray.position, rayDir, atmExit, rngState, 32);
                             }
                         }
 

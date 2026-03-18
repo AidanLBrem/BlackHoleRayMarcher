@@ -74,7 +74,7 @@ public class RayTracingManager : MonoBehaviour
     public float planetRadius = 6378137.0f;
     public float atmosphereRadius = 6538137.0f;
     public int framesPerScatter = 10;
-    int numOpticalDepthPoints = 8;
+    public int numOpticalDepthPoints = 8;
     public int inScatteringPoints = 8;
     [Header("Rayleigh Scattering")]
     public float densityFalloffRayleigh = 4f;
@@ -85,6 +85,7 @@ public class RayTracingManager : MonoBehaviour
     public float mieBackwardScatter = -0.5f;
     public Vector3 mieScatteringCoefficients = new Vector3(21e-6f, 21e-6f, 21e-6f);
     public Color sunLightColor = Color.white;
+    public float sunLightIntensity = 1;
     public Transform sun;
     RenderTexture resultTexture;
     int numRenderedFrames = 0;
@@ -129,7 +130,7 @@ public class RayTracingManager : MonoBehaviour
             mieScatteringCoefficients.y,
             mieScatteringCoefficients.z));
         rayTracingMaterial.SetVector("sunLightColor", new Vector3(
-            sunLightColor.r, sunLightColor.g, sunLightColor.b));
+            sunLightColor.r * sunLightIntensity, sunLightColor.g* sunLightIntensity, sunLightColor.b* sunLightIntensity));
         rayTracingMaterial.SetVector("sunDirection", sun != null ? -sun.forward : Vector3.up);
         rayTracingMaterial.SetInt("framesPerScatter", framesPerScatter);
         if (!accumulateInGameView)
