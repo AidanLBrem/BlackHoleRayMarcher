@@ -55,7 +55,7 @@ float atmosphereHeight;
 static const float3 kPlanetCenter = float3(0.0, -planetRadius, 0.0);
 
 // Small epsilon helpers
-static const float ATM_EPS = 1e-5;
+static const float ATM_EPS = 10;
 static const float ATM_BIG = 3.402823e+38;
 
 // -----------------------------------------------------------------------------

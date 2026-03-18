@@ -809,175 +809,175 @@ Shader "Custom/RayTracer"
             #include "AtmosphereicScattering.hlsl"
 //Moderate temp. Will run at most numBounces * numRays per pixel
             PixelMarcher handleReflection(PixelMarcher ray, inout uint rngState, HitInfo hitInfo)
-{
-    ray.numBounces++;
+            {
+                ray.numBounces++;
 
-    RayTracingMaterial material = Instances[hitInfo.objectIndex].material;
-    if (material.emissionStrength > 0.0)
-    {
-        float g = 1 / ray.ray.energy;
-        #ifndef USE_REDSHIFTING
-        g = 1;
-        #endif
+                RayTracingMaterial material = Instances[hitInfo.objectIndex].material;
+                if (material.emissionStrength > 0.0)
+                {
+                    float g = 1 / ray.ray.energy;
+                    #ifndef USE_REDSHIFTING
+                    g = 1;
+                    #endif
 
-        float3 c = ApplyFakeRelativisticToneShift(material.emissiveColor.rgb, g, 1.0);
-        float3 emittedLight = c * material.emissionStrength * (g * g * g);
-        ray.incomingLight += emittedLight * ray.rayColor;
-        ray.rayEarlyKill = true;
-        return ray;
-    }
+                    float3 c = ApplyFakeRelativisticToneShift(material.emissiveColor.rgb, g, 1.0);
+                    float3 emittedLight = c * material.emissionStrength * (g * g * g);
+                    ray.incomingLight += emittedLight * ray.rayColor;
+                    ray.rayEarlyKill = true;
+                    return ray;
+                }
 
-    uint triIndex = hitInfo.triIndex;
-    Triangle tri = Triangles[triIndex];
-    uint index1 = TriangleIndices[tri.baseIndex];
-    uint index2 = TriangleIndices[tri.baseIndex + 1];
-    uint index3 = TriangleIndices[tri.baseIndex + 2];
+                uint triIndex = hitInfo.triIndex;
+                Triangle tri = Triangles[triIndex];
+                uint index1 = TriangleIndices[tri.baseIndex];
+                uint index2 = TriangleIndices[tri.baseIndex + 1];
+                uint index3 = TriangleIndices[tri.baseIndex + 2];
 
-    float3 n1 = Normals[index1];
-    float3 n2 = Normals[index2];
-    float3 n3 = Normals[index3];
+                float3 n1 = Normals[index1];
+                float3 n2 = Normals[index2];
+                float3 n3 = Normals[index3];
 
-    float3 N = normalize(
-        n1 * (1 - (hitInfo.u + hitInfo.v)) +
-        n2 * hitInfo.u +
-        n3 * hitInfo.v
-    );
+                float3 N = normalize(
+                    n1 * (1 - (hitInfo.u + hitInfo.v)) +
+                    n2 * hitInfo.u +
+                    n3 * hitInfo.v
+                );
 
-    ray.lastHitAlbedo = material.color;
-    ray.hasLastHit = true;
+                ray.lastHitAlbedo = material.color;
+                ray.hasLastHit = true;
 
-    Mesh mesh = Instances[hitInfo.objectIndex];
-    float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
-    N = safeNormalize(mul(nMat, N));
-    ray.lastHitNormal = N;
+                Mesh mesh = Instances[hitInfo.objectIndex];
+                float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
+                N = safeNormalize(mul(nMat, N));
+                ray.lastHitNormal = N;
 
-    float3 geomNormalLocal = normalize(Triangles[hitInfo.triIndex].geometricNormal);
-    float3 Ng = safeNormalize(mul(nMat, geomNormalLocal));
+                float3 geomNormalLocal = normalize(Triangles[hitInfo.triIndex].geometricNormal);
+                float3 Ng = safeNormalize(mul(nMat, geomNormalLocal));
 
-    if (dot(Ng, ray.ray.direction) > 0)
-        Ng = -Ng;
+                if (dot(Ng, ray.ray.direction) > 0)
+                    Ng = -Ng;
 
-    if (dot(N, Ng) < 0)
-        N = -N;
+                if (dot(N, Ng) < 0)
+                    N = -N;
 
-    if (bad3(ray.ray.direction) || bad3(ray.rayColor) || bad3(N) || bad3(Ng))
-    {
-        ray.incomingLight = float3(1, 0, 1);
-        ray.rayEarlyKill = true;
-        return ray;
-    }
+                if (bad3(ray.ray.direction) || bad3(ray.rayColor) || bad3(N) || bad3(Ng))
+                {
+                    ray.incomingLight = float3(1, 0, 1);
+                    ray.rayEarlyKill = true;
+                    return ray;
+                }
 
-    float3 baseColor = material.color;
-    float metallic = saturate(material.metallicity);
-    float roughness = saturate(material.roughness);
+                float3 baseColor = material.color;
+                float metallic = saturate(material.metallicity);
+                float roughness = saturate(material.roughness);
 
-    float3 dielectricF0 = float3(0.04, 0.04, 0.04);
-    float3 F0 = lerp(dielectricF0, baseColor, metallic);
+                float3 dielectricF0 = float3(0.04, 0.04, 0.04);
+                float3 F0 = lerp(dielectricF0, baseColor, metallic);
 
-    float3 V = safeNormalize(-ray.ray.direction);
-    float NdotV = saturate(dot(N, V));
+                float3 V = safeNormalize(-ray.ray.direction);
+                float NdotV = saturate(dot(N, V));
 
-    float3 F_pick = FresnelSchlick(NdotV, F0);
-    float3 kd = (1.0 - F_pick) * (1.0 - metallic);
-    float3 diffuseBRDF = kd * baseColor / PI;
+                float3 F_pick = FresnelSchlick(NdotV, F0);
+                float3 kd = (1.0 - F_pick) * (1.0 - metallic);
+                float3 diffuseBRDF = kd * baseColor / PI;
 
-    float specularWeight = saturate(luminance(F_pick));
-    float diffuseWeight = max(luminance(diffuseBRDF), 1e-4);
+                float specularWeight = saturate(luminance(F_pick));
+                float diffuseWeight = max(luminance(diffuseBRDF), 1e-4);
 
-    float totalWeight = specularWeight + diffuseWeight;
-    if (totalWeight <= 1e-8)
-    {
-        ray.rayEarlyKill = true;
-        return ray;
-    }
+                float totalWeight = specularWeight + diffuseWeight;
+                if (totalWeight <= 1e-8)
+                {
+                    ray.rayEarlyKill = true;
+                    return ray;
+                }
 
-    #ifdef APPLY_SCATTERING
-    #endif
+                #ifdef APPLY_SCATTERING
+                #endif
 
-    // Accurate direct sun at this hit, before sampling the next bounce
-float3 directSun = evaluateDirectSunAtHit(
-    hitInfo.hitPoint, N, Ng, V, baseColor, metallic, roughness, F0);
+                // Accurate direct sun at this hit, before sampling the next bounce
+                float3 directSun = evaluateDirectSunAtHit(
+                hitInfo.hitPoint, N, Ng, V, baseColor, metallic, roughness, F0);
 
-ray.incomingLight += ray.rayColor * directSun * 10;
+                ray.incomingLight += ray.rayColor * directSun * 10;
 
-    float specularChance = clamp(specularWeight / totalWeight, 0.001, 0.999);
-    float choose = randomValue(rngState);
+                float specularChance = clamp(specularWeight / totalWeight, 0.001, 0.999);
+                float choose = randomValue(rngState);
 
-    if (choose < specularChance)
-    {
-        float2 xi = float2(randomValue(rngState), randomValue(rngState));
-        float3 H = sampleGGX_H(xi, roughness, N);
-        float3 L = reflect(-V, H);
-        L = safeNormalize(L);
+                if (choose < specularChance)
+                {
+                    float2 xi = float2(randomValue(rngState), randomValue(rngState));
+                    float3 H = sampleGGX_H(xi, roughness, N);
+                    float3 L = reflect(-V, H);
+                    L = safeNormalize(L);
 
-        float NdotL = saturate(dot(N, L));
-        float NdotH = saturate(dot(N, H));
-        float VdotH = saturate(dot(V, H));
+                    float NdotL = saturate(dot(N, L));
+                    float NdotH = saturate(dot(N, H));
+                    float VdotH = saturate(dot(V, H));
 
-        if (NdotL <= 0 || NdotV <= 0 || VdotH <= 0)
-        {
-            ray.rayEarlyKill = true;
-            return ray;
-        }
+                    if (NdotL <= 0 || NdotV <= 0 || VdotH <= 0)
+                    {
+                        ray.rayEarlyKill = true;
+                        return ray;
+                    }
 
-        if (dot(L, Ng) <= 0)
-        {
-            ray.rayEarlyKill = true;
-            return ray;
-        }
+                    if (dot(L, Ng) <= 0)
+                    {
+                        ray.rayEarlyKill = true;
+                        return ray;
+                    }
 
-        float3 F_spec = FresnelSchlick(VdotH, F0);
-        float D = D_GGX(NdotH, roughness);
-        float G = G_SmithGGX(NdotV, NdotL, roughness);
+                    float3 F_spec = FresnelSchlick(VdotH, F0);
+                    float D = D_GGX(NdotH, roughness);
+                    float G = G_SmithGGX(NdotV, NdotL, roughness);
 
-        float3 specBRDF = (F_spec * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
+                    float3 specBRDF = (F_spec * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
 
-        float pdf_H = D * NdotH;
-        float pdf_L = pdf_H / max(4.0 * VdotH, 1e-8);
-        float branchPdf = specularChance * max(pdf_L, 1e-8);
+                    float pdf_H = D * NdotH;
+                    float pdf_L = pdf_H / max(4.0 * VdotH, 1e-8);
+                    float branchPdf = specularChance * max(pdf_L, 1e-8);
 
-        ray.ray.direction = L;
-        ray.rayColor *= specBRDF * NdotL / branchPdf;
-    }
-    else
-    {
-        float2 xi = float2(randomValue(rngState), randomValue(rngState));
-        float3 L = toWorld(sampleCosineHemisphere(xi), N);
+                    ray.ray.direction = L;
+                    ray.rayColor *= specBRDF * NdotL / branchPdf;
+                }
+                else
+                {
+                    float2 xi = float2(randomValue(rngState), randomValue(rngState));
+                    float3 L = toWorld(sampleCosineHemisphere(xi), N);
 
-        float NdotL = saturate(dot(N, L));
-        if (NdotL <= 0)
-        {
-            ray.rayEarlyKill = true;
-            return ray;
-        }
+                    float NdotL = saturate(dot(N, L));
+                    if (NdotL <= 0)
+                    {
+                        ray.rayEarlyKill = true;
+                        return ray;
+                    }
 
-        if (dot(L, Ng) <= 0)
-        {
-            ray.rayEarlyKill = true;
-            return ray;
-        }
+                    if (dot(L, Ng) <= 0)
+                    {
+                        ray.rayEarlyKill = true;
+                        return ray;
+                    }
 
-        float pdf_L = NdotL / PI;
-        float branchPdf = (1.0 - specularChance) * max(pdf_L, 1e-8);
+                    float pdf_L = NdotL / PI;
+                    float branchPdf = (1.0 - specularChance) * max(pdf_L, 1e-8);
 
-        ray.ray.direction = L;
-        ray.rayColor *= diffuseBRDF * NdotL / branchPdf;
-    }
+                    ray.ray.direction = L;
+                    ray.rayColor *= diffuseBRDF * NdotL / branchPdf;
+                }
 
-    ray.ray.direction = safeNormalize(ray.ray.direction);
-    ray.ray.position = hitInfo.hitPoint + (Ng * 1e-4);
+                ray.ray.direction = safeNormalize(ray.ray.direction);
+                ray.ray.position = hitInfo.hitPoint + (Ng * 1e-4);
 
-    float p = max(saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722))), 1e-4);
-    if (randomValue(rngState) > p)
-    {
-        ray.rayEarlyKill = true;
-        return ray;
-    }
+                float p = max(saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722))), 1e-4);
+                if (randomValue(rngState) > p)
+                {
+                    ray.rayEarlyKill = true;
+                    return ray;
+                }
 
-    ray.rayColor /= p;
+                ray.rayColor /= p;
 
-    return ray;
-}
+                return ray;
+            }
             float estimateNearestCollidableObjectDistance(Ray ray) {
                 float closestDistance = 3.402823e+38;
                 for (int i = 0; i < numSpheres; i++) {
@@ -1087,7 +1087,6 @@ ray.incomingLight += ray.rayColor * directSun * 10;
 
                         if (!bhDecision.affectsRay)
                             continue;
-
                         if (bhDecision.shouldMarch)
                         {
                             if (bhDecision.marchEntryT < nearestMarchT)
