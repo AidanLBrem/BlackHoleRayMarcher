@@ -71,6 +71,7 @@ public class RayTracingManager : MonoBehaviour
     public bool applyRayleigh = true;
     public bool applyMie = true;
     public bool applySundisk = true;
+    public bool applySunLighting = true;
     public float planetRadius = 6378137.0f;
     public float atmosphereRadius = 6538137.0f;
     public int framesPerScatter = 10;
@@ -98,14 +99,15 @@ public class RayTracingManager : MonoBehaviour
     public bool renderSphere = true;
     public bool renderTriangles = true;
     
-    public bool use_lut = true;
-    public bool enable_lensing = true;
-    public float bendStrength = 1.0f;
     public float strongFieldRadPerMeterCuttoff = 0.01f;
 
     static readonly List<Vector3> tV = new();
     static readonly List<Vector3> tN = new();
-
+    
+    [Header("Black Hole Lensing Debug Options")]
+    public bool enable_lensing = true;
+    public float bendStrength = 1.0f;
+    public bool impactParameterDebug = false;
     struct MeshOffsets
     {
         public int vertexOffset;
@@ -513,16 +515,7 @@ public class RayTracingManager : MonoBehaviour
 
     void ApplyBlackHoleLUT(Material rayTracingMaterial, RayTracedBlackHole blackHole)
     {
-        BlackHoleBendLUTGenerator gen = blackHole.transform.GetComponent<BlackHoleBendLUTGenerator>();
-        rayTracingMaterial.SetTexture("_BlackHoleBendLUT", gen.generatedTexture);
-        rayTracingMaterial.SetFloat("_BHLUT_MuResolution", gen.muResolution);
-        rayTracingMaterial.SetFloat("_BHLUT_RadiusResolution", gen.radiusResolution);
-        rayTracingMaterial.SetFloat("_BHLUT_RMinOverRs", gen.rMinOverRs);
-        rayTracingMaterial.SetFloat("_BHLUT_RMaxOverRs", gen.rMaxOverRs);
-        rayTracingMaterial.SetFloat("_BHLUT_LogEpsilonOverRs", gen.logEpsilonOverRs);
         rayTracingMaterial.SetFloat("bendStrength", bendStrength);
-        rayTracingMaterial.SetFloat("_BHLUT_Width", gen.generatedTexture.width);
-        rayTracingMaterial.SetFloat("_BHLUT_Height", gen.generatedTexture.height);
         rayTracingMaterial.SetFloat("strongFieldCurvatureRadPetMeterCutoff", strongFieldRadPerMeterCuttoff);
     }
 
@@ -642,9 +635,7 @@ public class RayTracingManager : MonoBehaviour
 
         if (renderTriangles) rayTracingMaterial.EnableKeyword("TEST_TRIANGLE");
         else rayTracingMaterial.DisableKeyword("TEST_TRIANGLE");
-
-        if (use_lut) rayTracingMaterial.EnableKeyword("USE_LUT");
-        else rayTracingMaterial.DisableKeyword("USE_LUT");
+        
 
         if (enable_lensing) rayTracingMaterial.EnableKeyword("ENABLE_LENSING");
         else rayTracingMaterial.DisableKeyword("ENABLE_LENSING");
@@ -666,6 +657,12 @@ public class RayTracingManager : MonoBehaviour
         
         if (applySundisk) rayTracingMaterial.EnableKeyword("APPLY_SUNDISK");
         else rayTracingMaterial.DisableKeyword("APPLY_SUNDISK");
+        
+        if (applySunLighting) rayTracingMaterial.EnableKeyword("APPLY_DIRECT_SUN_LIGHTING");
+        else rayTracingMaterial.DisableKeyword("APPLY_DIRECT_SUN_LIGHTING");
+        
+        if (impactParameterDebug) rayTracingMaterial.EnableKeyword("IMPACT_PARAMETER_DEBUG");
+        else rayTracingMaterial.DisableKeyword("IMPACT_PARAMETER_DEBUG");
     }
 
     void UpdateShaderValues()

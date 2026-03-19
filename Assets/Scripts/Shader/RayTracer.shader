@@ -33,6 +33,8 @@ Shader "Custom/RayTracer"
             #pragma shader_feature_local APPLY_MIE
             #pragma shader_feature_local APPLY_SUNDISK
             #pragma shader_feature_local APPLY_SCATTERING
+            #pragma shader_feature_local APPLY_SUN_LIGHTING
+            #pragma shader_feature_local IMPACT_PARAMETER_DEBUG
 			struct appdata
 			{
 				float4 vertex : POSITION;
@@ -218,9 +220,9 @@ Shader "Custom/RayTracer"
             {
                 BlackHoleDecision result = (BlackHoleDecision)0;
                 result.marchEntryT = 3.402823e+38;
-                result.weakBentDir = normalize(ray.direction);
+                result.weakBentDir = ray.direction;
 
-                float3 d = normalize(ray.direction);
+                float3 d = ray.direction;
                 float3 rel = ray.position - blackHole.position;
                 float rs = blackHole.SchwartzchildRadius;
 
@@ -235,7 +237,9 @@ Shader "Custom/RayTracer"
                     result.affectsRay = true;
                     result.shouldMarch = true;
                     result.marchEntryT = 0.0;
-                    result.impactParameter = length(cross(rel, d));
+                    float tClosestInside = -dot(rel, d);
+                    float3 closestVecInside = rel + d * tClosestInside;
+                    result.impactParameter = length(closestVecInside); // consistent with outside path
                     result.deflectionAngle = 0.0;
                     result.weakBentDir = d;
                     return result;
@@ -264,7 +268,7 @@ Shader "Custom/RayTracer"
                 if (b < marchImpactThreshold)
                 {
                     result.shouldMarch = true;
-
+                    result.weakBentDir = d;
                     float tEntry = RaySphereEntryDistance(ray.position, d, blackHole.position, marchImpactThreshold);
                     result.marchEntryT = (tEntry >= 0.0) ? tEntry : 0.0;
                 }
@@ -874,7 +878,7 @@ Shader "Custom/RayTracer"
                 float3 dielectricF0 = float3(0.04, 0.04, 0.04);
                 float3 F0 = lerp(dielectricF0, baseColor, metallic);
 
-                float3 V = safeNormalize(-ray.ray.direction);
+                float3 V = -ray.ray.direction;
                 float NdotV = saturate(dot(N, V));
 
                 float3 F_pick = FresnelSchlick(NdotV, F0);
@@ -890,28 +894,19 @@ Shader "Custom/RayTracer"
                     ray.rayEarlyKill = true;
                     return ray;
                 }
-
+                
+                #ifdef APPLY_DIRECT_SUN_LIGHTING
+                float tauViewR, tauViewM;
+                opticalDepthRM(ray.ray.position, ray.ray.direction, hitInfo.distance, tauViewR, tauViewM);
+                float3 Tview = transmittanceFromOpticalDepth(tauViewR, tauViewM);
+                ray.incomingLight += ray.rayColor * directSun * Tview;
+                #endif 
                 #ifdef APPLY_SCATTERING
-                #endif
-
-                // Accurate direct sun at this hit, before sampling the next bounce
-                float3 directSun = evaluateDirectSunAtHit(
-                hitInfo.hitPoint, N, Ng, V, baseColor, metallic, roughness, F0);
-
                 if (ray.numBounces == 1)
                 {
-                    float tauViewR, tauViewM;
-                    opticalDepthRM(ray.ray.position, ray.ray.direction, hitInfo.distance, tauViewR, tauViewM);
-                    float3 Tview = transmittanceFromOpticalDepth(tauViewR, tauViewM);
-
-                    ray.incomingLight += ray.rayColor * directSun * Tview;
                     ray.incomingLight += calculateLight(ray.ray.position, ray.ray.direction, hitInfo.distance, rngState, 1);
                 }
-                
-                else
-                {
-                    ray.incomingLight += ray.rayColor * directSun;
-                }
+                #endif
 
 
                 float specularChance = clamp(specularWeight / totalWeight, 0.001, 0.999);
@@ -922,7 +917,6 @@ Shader "Custom/RayTracer"
                     float2 xi = float2(randomValue(rngState), randomValue(rngState));
                     float3 H = sampleGGX_H(xi, roughness, N);
                     float3 L = reflect(-V, H);
-                    L = safeNormalize(L);
 
                     float NdotL = saturate(dot(N, L));
                     float NdotH = saturate(dot(N, H));
@@ -977,8 +971,7 @@ Shader "Custom/RayTracer"
                     ray.ray.direction = L;
                     ray.rayColor *= diffuseBRDF * NdotL / branchPdf;
                 }
-
-                ray.ray.direction = safeNormalize(ray.ray.direction);
+                
                 ray.ray.position = hitInfo.hitPoint + (Ng * 1e-4);
 
                 float p = max(saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722))), 1e-4);
@@ -1063,7 +1056,31 @@ Shader "Custom/RayTracer"
 
                 return color * line1;
             }
-            
+            float3 DebugRayBending(PixelMarcher before, PixelMarcher after, BlackHole blackHole)
+            {
+                float3 dirBefore = before.ray.direction;
+                float3 dirAfter  = after.ray.direction;
+
+                // Angle between entry and exit direction in degrees
+                float cosAngle = clamp(dot(dirBefore, dirAfter), -1.0, 1.0);
+                float bendAngleDeg = acos(cosAngle) * (180.0 / UNITY_PI);
+
+                // Radial distance before and after
+                float rBefore = length(before.ray.position - blackHole.position);
+                float rAfter  = length(after.ray.position  - blackHole.position);
+
+                float rs = blackHole.SchwartzchildRadius;
+                float marchShell = max(rs * blackHole.blackHoleSOIMultiplier, 4.0 * rs);
+
+                // Visualize bend angle — map 0-180 degrees to a color
+                // Blue  = small bend (< 10 deg)
+                // Green = moderate bend (10-90 deg)
+                // Red   = large bend (> 90 deg) — likely orbiting
+                float t = saturate(bendAngleDeg / 180.0);
+                float3 color = lerp(float3(0,0,1), lerp(float3(0,1,0), float3(1,0,0), t*2), step(0.5, t));
+
+                return color;
+            }
             #include "BlackHoleMarch2D.hlsl"
             float3 trace(float3 viewPoint, inout uint rngState)
             {
@@ -1087,7 +1104,6 @@ Shader "Custom/RayTracer"
                 //ray.debugSOISteps = 0;
                 //ray.maxNumTriangleTests = 0;
                 while (pixel_marcher.numBounces < maxBounces && iterations < maxIterations) {
-                    Ray ray = pixel_marcher.ray;
 
                     // First: compute weak-field bends and decide whether any BH requires marching.
                     float nearestMarchT = 3.402823e+38;
@@ -1095,10 +1111,11 @@ Shader "Custom/RayTracer"
 
                     // Apply weak-field bends for BHs that do NOT require marching.
                     // For BHs that DO require marching, keep track of the earliest handoff point.
+                    #ifdef ENABLE_LENSING
                     for (int bh = 0; bh < numBlackHoles; bh++)
                     {
-                        BlackHoleDecision bhDecision = EvaluateBlackHoleForRay(ray, BlackHoles[bh]);
-
+                        BlackHoleDecision bhDecision = EvaluateBlackHoleForRay(pixel_marcher.ray, BlackHoles[bh]);
+                        
                         if (!bhDecision.affectsRay)
                             continue;
                         if (bhDecision.shouldMarch)
@@ -1108,20 +1125,48 @@ Shader "Custom/RayTracer"
                                 nearestMarchT = bhDecision.marchEntryT;
                                 nearestMarchBH = bh;
                             }
+                            //return float3(1,0,0);
                         }
                         else
                         {
-                            ray.direction = bhDecision.weakBentDir;
+                            pixel_marcher.ray.direction = bhDecision.weakBentDir;
+                        }
+
+                        // DEBUG: visualize impact parameter
+                        // Return this from trace() instead of normal color to see b/rs map
+                        // Shadow boundary should appear at b/rs ≈ 2.598
+                        #ifdef IMPACT_PARAMETER_DEBUG
+                        float b_over_rs = bhDecision.impactParameter / BlackHoles[bh].SchwartzchildRadius;
+                        float3 debugColor = float3(
+                            saturate(b_over_rs / 6.0),           // red channel: 0 at center, 1 at b=6rs
+                            saturate((b_over_rs - 2.5980762114) / 0.05),   // green channel: lights up right at shadow boundary
+                            0
+                        );
+                        return debugColor;
+                        #endif
+                    }
+                    #endif
+                    /*#ifndef APPLY_LENSING
+                    for (int i = 0; i < numBlackHoles; i++)
+                    {
+                        if (RaySphereEntryDistance(ray.position, ray.direction, BlackHoles[i].position, BlackHoles[i].SchwartzchildRadius) > 0)
+                        {
+                            return float3(0,0,0);
                         }
                     }
+                    #endif*/
 
                     // Commit the weak-field bent direction before collision tests
-                    pixel_marcher.ray.direction = normalize(ray.direction);
-                    ray = pixel_marcher.ray;
+                    pixel_marcher.ray.direction = normalize(pixel_marcher.ray.direction);
 
                     // Only look for object hits up to the nearest BH march handoff, if any.
                     float sceneTMax = (nearestMarchBH != -1) ? nearestMarchT : 3.402823e+38;
-                    HitInfo objectHitInfo = queryCollisions(ray, sceneTMax);
+                    // Only check geometry before march if we're outside the SOI
+                    HitInfo objectHitInfo = (HitInfo)0;
+                    objectHitInfo.distance = 3.402823e+38;
+
+                    if (nearestMarchBH == -1 || nearestMarchT > 1e-4)
+                        objectHitInfo = queryCollisions(pixel_marcher.ray, sceneTMax);
 
                     // Case 1: object hit before any BH handoff
                     if (objectHitInfo.didHit)
@@ -1131,8 +1176,9 @@ Shader "Custom/RayTracer"
                     // Case 2: no object hit, but a BH needs strong-field marching
                     else if (nearestMarchBH != -1)
                     {
-                        //pixel_marcher.incomingLight += float3(0.1, 0, 0);
-                        pixel_marcher.ray.position = ray.position + ray.direction * max(nearestMarchT, 1e-4);
+                        if (nearestMarchT > 1e-4)
+                            pixel_marcher.ray.position = pixel_marcher.ray.position + pixel_marcher.ray.direction * nearestMarchT;
+
                         pixel_marcher = marchNearBlackHole(pixel_marcher, BlackHoles[nearestMarchBH], rngState);
 
                         if (pixel_marcher.hitBlackHole)
@@ -1145,20 +1191,20 @@ Shader "Custom/RayTracer"
                         // Case 3: background miss
                         if ((numRenderedFrames % framesPerScatter == 0 || numRenderedFrames == 0))
                         {
-                            float3 rayDir = normalize(ray.direction);
+                            float3 rayDir = (pixel_marcher.ray.direction);
 
                             float atmExit = RaySphereExitDistance(
-                                ray.position, rayDir, PlanetCenter(), atmosphereRadius);
+                                pixel_marcher.ray.position, rayDir, PlanetCenter(), atmosphereRadius);
                             if (atmExit > 0)
                             {
                                 pixel_marcher.incomingLight += calculateLight(
-                                    ray.position, rayDir, atmExit, rngState, 32);
+                                    pixel_marcher.ray.position, rayDir, atmExit, rngState, 32);
                             }
                         }
 
                         #endif
 
-                        pixel_marcher.incomingLight += getStarField(ray.direction);
+                        pixel_marcher.incomingLight += getAngularGrid(pixel_marcher.ray.direction);
                         break;
                     }
                     if (pixel_marcher.numBounces >= maxBounces || pixel_marcher.rayEarlyKill)

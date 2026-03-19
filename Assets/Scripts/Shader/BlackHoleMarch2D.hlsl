@@ -64,11 +64,13 @@ PixelMarcher marchNearBlackHole(PixelMarcher ray, BlackHole blackHole, inout uin
     int   emergencyBreak   = 0;
     float rs               = blackHole.SchwartzchildRadius;
     float marchShellRadius = max(rs * blackHole.blackHoleSOIMultiplier, 4.0 * rs);
+    // Add a small entry tolerance so rays that start just outside don't immediately exit
+    float exitThreshold = marchShellRadius * 1.001;
 
     // ── Build orbital plane basis ────────────────────────────────────────────
     // The geodesic stays in the plane spanned by rel and rayDir at entry.
     float3 rel0    = ray.ray.position - blackHole.position;
-    float3 dir0    = normalize(ray.ray.direction);
+    float3 dir0    = ray.ray.direction;
 
     float3 orbitNormal = cross(rel0, dir0);
     float  onLen       = length(orbitNormal);
@@ -97,19 +99,19 @@ PixelMarcher marchNearBlackHole(PixelMarcher ray, BlackHole blackHole, inout uin
     float dirX = dot(dir0, tangentX);
     float dirY = dot(dir0, tangentY);
     float theta = atan2(dirY, dirX);
-
+    float phaseOffset = randomValue(rngState);
     // ── March loop ───────────────────────────────────────────────────────────
     while (true)
     {
+        
         if (r < rs)
         {
             ray.hitBlackHole = true;
             return ray;
         }
 
-        if (r > marchShellRadius)
+        if (r > exitThreshold)
         {
-            // Check if moving outward — reconstruct 3D dir to test
             float localAlpha = WrapSigned2D(theta - phi);
             float cosA = cos(localAlpha);
             if (cosA > 0.0)
@@ -117,9 +119,19 @@ PixelMarcher marchNearBlackHole(PixelMarcher ray, BlackHole blackHole, inout uin
         }
 
         float distFromHorizon = max(r - rs, 0.0);
-        float adaptiveStep    = distFromHorizon * stepSize;
-        float minStep         = 0.01;
-        float stepLen         = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
+        float adaptiveStep = distFromHorizon * stepSize;
+        float minStep = 0.01;
+        float stepLen = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
+        if (emergencyBreak == 0)
+        {
+            float localAlpha = WrapSigned2D(theta - phi);
+            float cosA = cos(localAlpha);
+            float sinA = sin(localAlpha);
+            r   += phaseOffset * stepLen * cosA;
+            phi += phaseOffset * stepLen * sinA / max(r, 1e-6);
+            theta += phaseOffset * stepLen * AnalyticBendRate(r, sinA, rs);
+        }
+        float3 prevPos3D = ray.ray.position;
 
         float gtt_old = ComputeGtt(r, rs);
 
@@ -164,14 +176,15 @@ PixelMarcher marchNearBlackHole(PixelMarcher ray, BlackHole blackHole, inout uin
 
         // Update ray position and direction for collision query
         Ray testRay;
-        testRay.position  = pos3D;
-        testRay.direction = dir3D;
+        float3 stepDir = normalize(pos3D - prevPos3D);
+        float actualStepDist = length(pos3D - prevPos3D);
+        testRay.position  = prevPos3D;
+        testRay.direction = stepDir;
         testRay.energy    = ray.ray.energy;
 
         float newR   = length(pos3D - blackHole.position);
         float gtt_new = ComputeGtt(newR, rs);
-
-        HitInfo h = queryCollisions(testRay, stepLen);
+        HitInfo h = queryCollisions(testRay, actualStepDist);
 
         emergencyBreak++;
         if (emergencyBreak > emergencyBreakMaxSteps)
@@ -191,7 +204,7 @@ PixelMarcher marchNearBlackHole(PixelMarcher ray, BlackHole blackHole, inout uin
 
             // Re-initialise polar state from the post-reflection 3D ray
             float3 relNew    = ray.ray.position - blackHole.position;
-            float3 dirNew    = normalize(ray.ray.direction);
+            float3 dirNew    = ray.ray.direction;
 
             // Recompute orbital plane for the new ray direction after bounce
             orbitNormal = cross(relNew, dirNew);
