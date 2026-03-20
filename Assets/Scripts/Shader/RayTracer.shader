@@ -196,7 +196,7 @@ Shader "Custom/RayTracer"
             float  BandBoost        = 3.0;       // how much denser/brighter in the band
             float3 galaxyCenterDir = float3(0.0,0.0,1.0);
             float strongFieldCurvatureRadPetMeterCutoff;
-
+            float inScatteringPoints;
             v2f vert (appdata v)
             {
                 v2f o;
@@ -384,7 +384,7 @@ Shader "Custom/RayTracer"
 
                 return closest;
             }
-            HitInfo TraverseInstanceBLAS(Ray ray, uint instanceIndex, float worldTMax)
+            HitInfo TraverseInstanceBLAS(Ray ray, uint instanceIndex, float worldTMax, bool findClosestCollisionOnly)
             {
                 HitInfo closest = (HitInfo)0;
                 float bestWorldT = 3.402823e+38;
@@ -448,6 +448,10 @@ Shader "Custom/RayTracer"
                             closest.distance = worldT;
                             closest.objectType = 2;
                             closest.objectIndex = instanceIndex;
+                            if (findClosestCollisionOnly)
+                            {
+                                return closest;
+                            }
                         }
 
                         if (sp == 0) break;
@@ -537,7 +541,7 @@ Shader "Custom/RayTracer"
             
             
                         
-            HitInfo checkMeshCollisions(Ray ray, float worldTMax)
+            HitInfo checkMeshCollisions(Ray ray, float worldTMax, bool findClosestCollisionOnly)
             {
                 HitInfo closest = (HitInfo)0;
                 if (numMeshes <= 0 || numInstances <= 0 || numTLASNodes <= 0 || TLASRootIndex < 0)
@@ -571,11 +575,15 @@ Shader "Custom/RayTracer"
                         for (uint j = node.firstIndex; j < node.firstIndex + node.count; j++)
                         {
                             uint instanceIndex = TLASRefs[j];
-                            HitInfo h = TraverseInstanceBLAS(ray, instanceIndex, min(worldTMax, bestWorldT));
+                            HitInfo h = TraverseInstanceBLAS(ray, instanceIndex, min(worldTMax, bestWorldT), findClosestCollisionOnly);
                             if (h.didHit && h.distance < bestWorldT)
                             {
                                 bestWorldT = h.distance;
                                 closest = h;
+                                if (findClosestCollisionOnly)
+                                {
+                                    return closest;
+                                }
                             }
                         }
 
@@ -792,17 +800,21 @@ Shader "Custom/RayTracer"
             }
             
 
-            HitInfo queryCollisions(Ray ray, float tMax) {
+            HitInfo queryCollisions(Ray ray, float tMax, bool findFirstCollisionOnly) {
                 HitInfo closest = (HitInfo)0;
                 closest.distance = 3.402823e+38;
                 #ifdef TEST_SPHERE
                 HitInfo s = checkSphereCollisions(ray);
                 if (s.didHit && s.distance <= tMax && s.distance < closest.distance) {
                     closest = s;
+                    if (findFirstCollisionOnly)
+                    {
+                        return s;
+                    }
                 }
                 #endif
                 #ifdef TEST_TRIANGLE
-                HitInfo m = checkMeshCollisions(ray, tMax);
+                HitInfo m = checkMeshCollisions(ray, tMax, findFirstCollisionOnly);
                 if (m.didHit && m.distance <= tMax && m.distance < closest.distance) {
                     closest = m;
                 }
@@ -895,12 +907,9 @@ Shader "Custom/RayTracer"
                     return ray;
                 }
                 
-                #ifdef APPLY_DIRECT_SUN_LIGHTING
-                float tauViewR, tauViewM;
-                opticalDepthRM(ray.ray.position, ray.ray.direction, hitInfo.distance, tauViewR, tauViewM);
-                float3 Tview = transmittanceFromOpticalDepth(tauViewR, tauViewM);
-                ray.incomingLight += ray.rayColor * directSun * Tview;
-                #endif 
+                #ifdef APPLY_SUN_LIGHTING
+                ray.incomingLight += evaluateDirectSunAtHit(hitInfo.hitPoint, N, Ng, V, material.color, material.metallicity, material.roughness, F0);
+                #endif
                 #ifdef APPLY_SCATTERING
                 if (ray.numBounces == 1)
                 {
@@ -1166,7 +1175,7 @@ Shader "Custom/RayTracer"
                     objectHitInfo.distance = 3.402823e+38;
 
                     if (nearestMarchBH == -1 || nearestMarchT > 1e-4)
-                        objectHitInfo = queryCollisions(pixel_marcher.ray, sceneTMax);
+                        objectHitInfo = queryCollisions(pixel_marcher.ray, sceneTMax, false);
 
                     // Case 1: object hit before any BH handoff
                     if (objectHitInfo.didHit)
@@ -1185,26 +1194,22 @@ Shader "Custom/RayTracer"
                             return float3(0,0,0);
                     }
                     // Case 3: nothing hit at all, use background
-                    else
+                   else // Case 3: miss
                     {
-                        #ifdef APPLY_SCATTERING
-                        // Case 3: background miss
-                        if ((numRenderedFrames % framesPerScatter == 0 || numRenderedFrames == 0))
-                        {
-                            float3 rayDir = (pixel_marcher.ray.direction);
+                        float3 rayDir = pixel_marcher.ray.direction;
+                        float atmExit = RaySphereExitDistance(
+                            pixel_marcher.ray.position, rayDir, PlanetCenter(), atmosphereRadius);
 
-                            float atmExit = RaySphereExitDistance(
-                                pixel_marcher.ray.position, rayDir, PlanetCenter(), atmosphereRadius);
-                            if (atmExit > 0)
+                        if (atmExit > 0)
+                        {
+                            #ifdef APPLY_SCATTERING
+                            if ((numRenderedFrames % framesPerScatter == 0 || numRenderedFrames == 0))
                             {
                                 pixel_marcher.incomingLight += calculateLight(
-                                    pixel_marcher.ray.position, rayDir, atmExit, rngState, 32);
+                                    pixel_marcher.ray.position, rayDir, atmExit, rngState, inScatteringPoints);
                             }
+                            #endif
                         }
-
-                        #endif
-
-                        pixel_marcher.incomingLight += getAngularGrid(pixel_marcher.ray.direction);
                         break;
                     }
                     if (pixel_marcher.numBounces >= maxBounces || pixel_marcher.rayEarlyKill)

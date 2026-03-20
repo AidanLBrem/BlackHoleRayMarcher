@@ -133,7 +133,7 @@ public class RayTracingManager : MonoBehaviour
             mieScatteringCoefficients.z));
         rayTracingMaterial.SetVector("sunLightColor", new Vector3(
             sunLightColor.r * sunLightIntensity, sunLightColor.g* sunLightIntensity, sunLightColor.b* sunLightIntensity));
-        rayTracingMaterial.SetVector("sunDirection", sun != null ? -sun.forward : Vector3.up);
+        rayTracingMaterial.SetVector("sunDirection", sun != null ? Vector3.Normalize(-sun.forward) : Vector3.up);
         rayTracingMaterial.SetInt("framesPerScatter", framesPerScatter);
         if (!accumulateInGameView)
         {
@@ -658,8 +658,8 @@ public class RayTracingManager : MonoBehaviour
         if (applySundisk) rayTracingMaterial.EnableKeyword("APPLY_SUNDISK");
         else rayTracingMaterial.DisableKeyword("APPLY_SUNDISK");
         
-        if (applySunLighting) rayTracingMaterial.EnableKeyword("APPLY_DIRECT_SUN_LIGHTING");
-        else rayTracingMaterial.DisableKeyword("APPLY_DIRECT_SUN_LIGHTING");
+        if (applySunLighting) rayTracingMaterial.EnableKeyword("APPLY_SUN_LIGHTING");
+        else rayTracingMaterial.DisableKeyword("APPLY_SUN_LIGHTING");
         
         if (impactParameterDebug) rayTracingMaterial.EnableKeyword("IMPACT_PARAMETER_DEBUG");
         else rayTracingMaterial.DisableKeyword("IMPACT_PARAMETER_DEBUG");

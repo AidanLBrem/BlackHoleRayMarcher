@@ -286,14 +286,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.03191886, y: -0, z: -0, w: 0.9994905}
-  m_LocalPosition: {x: 0, y: -184, z: 500}
+  m_LocalRotation: {x: 0.0075282166, y: -0.9712932, z: -0.031018384, w: 0.23573467}
+  m_LocalPosition: {x: 0, y: -221, z: 4034}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1436880562}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 3.658, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: -3.251, y: -152.668, z: -1.679}
 --- !u!114 &330585547
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -895,7 +895,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3cc941bf852a29147828067a31630d7a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedBlackHole
-  blackHoleSOIMultiplier: 1
+  blackHoleSOIMultiplier: 100
 --- !u!1 &1408453339
 GameObject:
   m_ObjectHideFlags: 0
@@ -1066,7 +1066,7 @@ MonoBehaviour:
   tracerProperties: {fileID: 330585546}
   path:
     hitInfos: []
-    time: 0.00013589859
+    time: 0.00015425682
     debugInvalidBelowSurfaceCount: 0
     debugInvalidBRDFCount: 0
 --- !u!4 &1436880562

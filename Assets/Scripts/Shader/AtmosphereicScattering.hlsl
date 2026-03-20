@@ -205,14 +205,6 @@ float3 transmittanceFromOpticalDepth(float tauR, float tauM)
                  mieScatteringCoefficients      * tauM));
 }
 
-// Preserved convenience function in case other files call it.
-float opticalDepth(float3 rayOrigin, float3 rayDirection, float rayLength)
-{
-    float tauR, tauM;
-    opticalDepthRM(rayOrigin, rayDirection, rayLength, tauR, tauM);
-    return tauR;
-}
-
 // -----------------------------------------------------------------------------
 // Phase functions
 // -----------------------------------------------------------------------------
@@ -240,18 +232,14 @@ float3 calculateLight(
     float rayLength,
     inout uint rngState,
     int inScatteringPoints)
-{
+{   //should never happen
     if (rayLength <= 0.0)
         return float3(0.0, 0.0, 0.0);
 
     float3 result = float3(0.0, 0.0, 0.0);
+    //sunDirection should be normalized
+    float3 dirToSun = sunDirection;
 
-    float3 dirToSun = safeNormalize(sunDirection);
-    float cosTheta = dot(rayDirection, dirToSun);
-
-    float phaseRayleigh = phaseRayleighFunc(cosTheta);
-    float phaseMieFwd   = phaseMieFunc(cosTheta, mieForwardScatter);
-    float phaseMieBack  = phaseMieFunc(dot(rayDirection, -dirToSun), mieBackwardScatter);
 
     float3 accumR = 0.0;
     float3 accumM = 0.0;
@@ -264,11 +252,12 @@ float3 calculateLight(
     [loop]
     for (int i = 0; i < sampleCount; i++)
     {
+        //sample at midpoint along each segment of ray
         float t = ((float)i + 0.5) * ds;
         float3 samplePoint = rayOrigin + rayDirection * t;
-
+        //if any point is in the planet, we are occluded and break
         if (IsInsidePlanet(samplePoint))
-            continue;
+            return float3(0,0,0);
 
         // Optical depth from camera to this sample.
         float tauViewR, tauViewM;
@@ -283,24 +272,30 @@ float3 calculateLight(
         if (SunRayHitsGround(samplePoint, dirToSun, sunSegment))
             continue;
 
-        // Scene-object occlusion.
+        // Scene-object occlusion, check to see if a sun ray can scatter into us
         Ray shadowRay;
         shadowRay.position  = samplePoint;
         shadowRay.direction = dirToSun;
         shadowRay.energy    = 1.0;
-
-        HitInfo h = queryCollisions(shadowRay, sunSegment);
-
+        //TODO: probably want to replace this with a cheaper, return if we hit ANYTHING check
+        HitInfo h = queryCollisions(shadowRay, sunSegment, true);
+        if (i == 0)
+        {
+            firstSunDiskOccluder = h; 
+        }
+        //if we hit something, break
         if (h.didHit)
             continue;
 
         float tauSunR, tauSunM;
+        //get optical depth from the sample point to the sun
         opticalDepthRM(samplePoint, dirToSun, sunSegment, tauSunR, tauSunM);
 
         float3 Tview = transmittanceFromOpticalDepth(tauViewR, tauViewM);
         float3 Tsun  = transmittanceFromOpticalDepth(tauSunR, tauSunM);
         float3 T = Tview * Tsun;
-
+        //get density at point for rayleigh and mie and attenuate
+        //TODO: replace these with a LUT
         #ifdef APPLY_RAYLEIGH
         {
             float dR = densityAtPointRayleigh(samplePoint);
@@ -315,7 +310,12 @@ float3 calculateLight(
         }
         #endif
     }
-
+    float cosTheta = dot(rayDirection, dirToSun);
+    //set up phase multipliers
+    float phaseRayleigh = phaseRayleighFunc(cosTheta);
+    float phaseMieFwd   = phaseMieFunc(cosTheta, mieForwardScatter);
+    float phaseMieBack  = phaseMieFunc(dot(rayDirection, -dirToSun), mieBackwardScatter);
+    //accumulate
     #ifdef APPLY_RAYLEIGH
     result += accumR * phaseRayleigh;
     #endif
@@ -323,7 +323,7 @@ float3 calculateLight(
     #ifdef APPLY_MIE
     result += accumM * (phaseMieFwd + phaseMieBack);
     #endif
-
+    //see if we hit the sun disk, using the FIRST occlusion check
     #ifdef APPLY_SUNDISK
     {
         float sunSegment = AtmosphereExitDistance(rayOrigin, dirToSun);
@@ -331,7 +331,7 @@ float3 calculateLight(
             (sunSegment > ATM_EPS) &&
             !SunRayHitsGround(rayOrigin, dirToSun, sunSegment) &&
             !firstSunDiskOccluder.didHit;
-
+        //if visible, do ANOTHER optical depth check
         if (sunVisible)
         {
             float tauSunR, tauSunM;
@@ -367,7 +367,7 @@ float3 evaluateDirectSunAtHit(
     float roughness,
     float3 F0)
 {
-    float3 L = safeNormalize(sunDirection);
+    float3 L = (sunDirection);
 
     float NdotL = saturate(dot(N, L));
     float NdotV = saturate(dot(N, V));
@@ -395,7 +395,7 @@ float3 evaluateDirectSunAtHit(
     shadowRay.direction = L;
     shadowRay.energy    = 1.0;
 
-    HitInfo shadowHit = queryCollisions(shadowRay, sunSegment);
+    HitInfo shadowHit = queryCollisions(shadowRay, sunSegment, true);
     if (shadowHit.didHit)
         return float3(0.0, 0.0, 0.0);
 
@@ -419,5 +419,121 @@ float3 evaluateDirectSunAtHit(
 
     return (diffuseBRDF + specBRDF) * NdotL * sunRadianceAtHit;
 }
+//helper function to check if sun is occluded
+bool IsUnoccludedToSun(float3 origin, float3 normalOffsetDir, out float3 outTsun)
+{
+    outTsun = float3(0.0, 0.0, 0.0);
 
+    float3 Lsun = sunDirection;
+
+    Ray shadowRay;
+    shadowRay.position  = origin + normalOffsetDir * 1e-4;
+    shadowRay.direction = Lsun;
+    shadowRay.energy    = 1.0;
+    //TODO: add overload for queryCollisions to ONLY find first hit
+    HitInfo shadowHit = queryCollisions(shadowRay, 3.402823e+38, true);
+    if (shadowHit.didHit)
+        return false;
+    //if no hit, find out how far we move through atmosphere
+    float sunExit = RaySphereExitDistance(
+        shadowRay.position,
+        Lsun,
+        PlanetCenter(),
+        atmosphereRadius
+    );
+    //attenuate
+    float3 Tsun = float3(1.0, 1.0, 1.0);
+    if (sunExit > 0.0)
+    {
+        float tauSunR = 0.0;
+        float tauSunM = 0.0;
+        opticalDepthRM(shadowRay.position, Lsun, sunExit, tauSunR, tauSunM);
+        Tsun = transmittanceFromOpticalDepth(tauSunR, tauSunM);
+    }
+
+    outTsun = Tsun;
+    return true;
+}
+
+float3 EvaluateDirectSunSurface(
+    float3 rayOrigin,
+    float3 rayDir,
+    float3 throughput,
+    float hitDistance,
+    float3 hitPoint,
+    float3 N,
+    float3 Ng,
+    float roughness,
+    float3 F0,
+    float3 diffuseBRDF
+)
+{
+    float3 Lsun = sunDirection;
+    float3 V    = -rayDir;
+
+    float NdotL = saturate(dot(N, Lsun));
+    float NdotV = saturate(dot(N, V));
+
+    if (NdotL <= 0.0 || NdotV <= 0.0)
+        return float3(0.0, 0.0, 0.0);
+
+    float3 Tsun;
+    if (!IsUnoccludedToSun(hitPoint, Ng, Tsun))
+        return float3(0.0, 0.0, 0.0);
+
+    float tauViewR = 0.0;
+    float tauViewM = 0.0;
+    opticalDepthRM(rayOrigin, rayDir, hitDistance, tauViewR, tauViewM);
+    float3 Tview = transmittanceFromOpticalDepth(tauViewR, tauViewM);
+    
+
+    float3 H = normalize(V + Lsun);
+    float NdotH = saturate(dot(N, H));
+    float VdotH = saturate(dot(V, H));
+
+    if (NdotH > 0.0 && VdotH > 0.0)
+    {
+        float3 F = FresnelSchlick(VdotH, F0);
+        float  D = D_GGX(NdotH, roughness);
+        float  G = G_SmithGGX(NdotV, NdotL, roughness);
+
+        float3 specBRDF = (F * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
+        diffuseBRDF += specBRDF;
+    }
+
+    return throughput * sunLightColor * Tview * Tsun * diffuseBRDF * NdotL;
+}
+
+float3 EvaluateDirectSunMiss(
+    float3 rayOrigin,
+    float3 rayDir,
+    float3 throughput
+)
+{
+    float3 Lsun = (sunDirection);
+
+    float sunAlign = dot((rayDir), Lsun);
+    float sunDiskCosThreshold = 0.9998;
+
+    if (sunAlign < sunDiskCosThreshold)
+        return float3(0.0, 0.0, 0.0);
+
+    float atmExit = RaySphereExitDistance(
+        rayOrigin,
+        rayDir,
+        PlanetCenter(),
+        atmosphereRadius
+    );
+
+    float3 Tview = float3(1.0, 1.0, 1.0);
+    if (atmExit > 0.0)
+    {
+        float tauViewR = 0.0;
+        float tauViewM = 0.0;
+        opticalDepthRM(rayOrigin, rayDir, atmExit, tauViewR, tauViewM);
+        Tview = transmittanceFromOpticalDepth(tauViewR, tauViewM);
+    }
+
+    return throughput * sunLightColor * Tview;
+}
 #endif // ATMOSPHEREIC_SCATTERING_INCLUDED

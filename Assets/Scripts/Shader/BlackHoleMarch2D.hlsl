@@ -184,7 +184,7 @@ PixelMarcher marchNearBlackHole(PixelMarcher ray, BlackHole blackHole, inout uin
 
         float newR   = length(pos3D - blackHole.position);
         float gtt_new = ComputeGtt(newR, rs);
-        HitInfo h = queryCollisions(testRay, actualStepDist);
+        HitInfo h = queryCollisions(testRay, actualStepDist, false);
 
         emergencyBreak++;
         if (emergencyBreak > emergencyBreakMaxSteps)
