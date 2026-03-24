@@ -1,3 +1,9 @@
+// SUMMARY
+//Final pass of pipeline - provides TAA
+//If weight is set to 0, full TAA, image converges to average of all simulations
+//Otherwise, just merge previous and current frame, using w to decide which one is weighted more
+//TODO: Look into velocity buffers to improve TAA
+
 Shader "Custom/Accumulator"
 {
 	Properties

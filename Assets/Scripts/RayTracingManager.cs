@@ -6,7 +6,7 @@ using Unity.Mathematics;
 using Debug = UnityEngine.Debug;
 using UnityEngine.Profiling;
 using static RaytracerCPURay;
-
+//TODO: Look into wavefromt pipelining? This file is a mess
 public static class SharedMeshRegistry
 {
     private static Dictionary<Mesh, SharedMeshData> cache = new();

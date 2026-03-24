@@ -6,7 +6,7 @@ using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
-
+//TODO: Comment this. Most of it is AI generated because I couldn't be bothered to rewrite everything for the CPU
 public static class DirectionalGeodesic2DLutSolver
 {
 
@@ -14,21 +14,13 @@ public static class DirectionalGeodesic2DLutSolver
     public static float StepRadialFrac  = 1.0f;          // GPU multiplies by 1.0
     public static float StepMin         = 0.01f;         // GPU hardcoded 0.01, absolute
     public static float StepMax         = float.MaxValue; // GPU has no cap
-
-    // Keep old names as aliases so external callers don't break.
-    public static float MarchStepMax        { get => StepMax;        set => StepMax = value; }
-    public static float MarchStepMin        { get => StepMin;        set => StepMin = value; }
-    public static float MarchStepRadialFrac { get => StepRadialFrac; set => StepRadialFrac = value; }
+    
 
     public static int MarchMaxSteps = 50_000;
     
     public static int MarchMaxStepsIndirect = 500_000;
 
     public static int BisectIterations = 48;
-
-    // -------------------------------------------------------------------------
-    // Bend LUT data — kept for API compatibility, no longer used by marcher
-    // -------------------------------------------------------------------------
 
     public readonly struct BendLutData
     {
@@ -65,13 +57,7 @@ public static class DirectionalGeodesic2DLutSolver
             MuResolution     > 1 &&
             Rs > 0f;
     }
-
-    /// <summary>
-    /// Copies the green channel of the supplied bend LUT texture into a plain
-    /// float array so it can be sampled safely from worker threads.
-    /// The returned struct is only needed if external code still uses
-    /// SampleBendRate; the marcher itself now uses the analytic formula.
-    /// </summary>
+    
     public static BendLutData CreateBendLutData(
         Texture2D bendLutTexture,
         float rs,
@@ -99,11 +85,7 @@ public static class DirectionalGeodesic2DLutSolver
             rs, rMinOverRs, rMaxOverRs, logEpsilonOverRs,
             bendRates);
     }
-
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
-
+    
     public static Texture2D BakeLut(
         BendLutData bendLut,          // kept for signature compat; not used by marcher
         int   radiusResolution,
@@ -471,16 +453,7 @@ public static class DirectionalGeodesic2DLutSolver
         points.Add((r, phi));
         return false;
     }
-
-    // -------------------------------------------------------------------------
-    // FIX 3: Analytic bend rate (exact Schwarzschild formula)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// dθ/ds for a photon in the Schwarzschild metric.
-    /// Equivalent to the JS:
-    ///   sa * (1/r + (1.5*rs - r) / (r*r*sqrt(1 - rs/r)))
-    /// </summary>
+    
     private static float AnalyticBendRate(float r, float sinAlpha, float rs)
     {
         float f = 1f - rs / r;
@@ -680,11 +653,7 @@ public static class DirectionalGeodesic2DLutSolver
 
         return Mathf.InverseLerp(a, b, v) * (radiusResolution - 1);
     }
-
-    // -------------------------------------------------------------------------
-    // Utility
-    // -------------------------------------------------------------------------
-
+    
     private static float WrapSigned(float a)
     {
         float t = (a + Mathf.PI) % (2f * Mathf.PI);

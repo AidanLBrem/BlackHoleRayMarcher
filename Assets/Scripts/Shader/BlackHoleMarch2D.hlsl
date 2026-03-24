@@ -1,8 +1,3 @@
-// ============================================================================
-// Multi-black-hole marcher
-// Geometric shell entry/exit + segment horizon capture
-// Now using RK4 integration instead of RK2 midpoint
-// ============================================================================
 
 bool PointInsideSphere(float3 p, float3 center, float radius)
 {
@@ -60,7 +55,7 @@ float3 ComputeTotalAccel(float3 pos, float3 dir)
 
     return total;
 }
-
+//for redshifting
 float ComputeGttMulti(float3 pos)
 {
     float potential = 0.0;
@@ -75,7 +70,7 @@ float ComputeGttMulti(float3 pos)
     return max(1.0 - potential, 0.0001);
 }
 
-// True if the point is inside any BH horizon.
+//True if the point is inside any BH horizon.
 bool IsInsideAnyHorizon(float3 pos)
 {
     for (int i = 0; i < numBlackHoles; i++)
@@ -87,7 +82,7 @@ bool IsInsideAnyHorizon(float3 pos)
     return false;
 }
 
-// True if the point is inside any BH march shell.
+//True if the point is inside any BH march shell.
 bool IsInsideAnyMarchShell(float3 pos)
 {
     for (int i = 0; i < numBlackHoles; i++)
@@ -99,7 +94,7 @@ bool IsInsideAnyMarchShell(float3 pos)
     return false;
 }
 
-// True if the ray from pos along dir will enter any march shell.
+//True if the ray from pos along dir will enter any march shell.
 bool RayWillEnterAnyMarchShell(float3 pos, float3 dir)
 {
     for (int i = 0; i < numBlackHoles; i++)
@@ -181,7 +176,8 @@ void IntegrateRK4(float3 pos, float3 dir, float stepLen, out float3 newPos, out 
     newDir = dir + (stepLen / 6.0) * (k1_dir + 2.0 * k2_dir + 2.0 * k3_dir + k4_dir);
     newDir = normalize(newDir);
 }
-
+//Parent march loop
+//upon completion, we should either be outside the SOI, in the event horizon, or reached maxBounces
 PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
 {
     if (numBlackHoles == 0)
@@ -192,23 +188,20 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
     float3 pos = ray.ray.position;
     float3 dir = normalize(ray.ray.direction);
 
-    // Immediate capture if somehow already inside a horizon.
+    //Immediate capture if somehow already inside a horizon.
     if (IsInsideAnyHorizon(pos))
     {
         ray.hitBlackHole = true;
         return ray;
     }
 
-    // Only enter the marcher if we are already in a shell
-    // or will geometrically enter one.
+    // Only enter the marcher if we are already in a shell or is about to enter one
     if (!IsInsideAnyMarchShell(pos) && !RayWillEnterAnyMarchShell(pos, dir))
         return ray;
 
     while (true)
     {
-        // --------------------------------------------------------------------
-        // Adaptive step size based on nearest horizon distance
-        // --------------------------------------------------------------------
+        //calculate adaptive step size - closer to the horizon = more bending = more steps needed
         float minDistFromHorizon = 3.402823e+38;
 
         for (int i = 0; i < numBlackHoles; i++)
@@ -221,28 +214,21 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
         float adaptiveStep = minDistFromHorizon * stepSize;
         float minStep = stepSize / 100.0;
         float stepLen = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
-
-        // Optional clamp if you want more stability:
-        // stepLen = min(stepLen, maxBlackHoleStepLength);
-
-        // --------------------------------------------------------------------
-        // RK4 integration
-        // --------------------------------------------------------------------
+        
+        //RK4
         float3 newPos, newDir;
         IntegrateRK4(pos, dir, stepLen, newPos, newDir);
 
-        // --------------------------------------------------------------------
-        // Horizon capture must be geometric, not endpoint-only
-        // --------------------------------------------------------------------
+        //We need to check to see if we intersect the black hole at any point along the chord
+        //TODO: Merge this with queryCollisions
         if (SegmentHitsAnyHorizon(pos, newPos))
         {
             ray.hitBlackHole = true;
             return ray;
         }
 
-        // --------------------------------------------------------------------
-        // Collision test along this bent segment approximation
-        // --------------------------------------------------------------------
+        //See if we collide with anything along this chord, we use testRay because we don't want to write to the actual ray until we confirm where we are going
+        //TODO: It might be faster to use the ray itself. 
         Ray testRay;
         testRay.position  = pos;
         testRay.direction = normalize(newPos - pos);
@@ -253,31 +239,35 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
         float gtt_old = ComputeGttMulti(pos);
 
         HitInfo h = queryCollisions(testRay, actualStepDist, false);
-
+        //We did collide with something. Move to the collision site and reflect
         if (h.didHit)
         {
             ray.ray.position  = pos;
             ray.ray.direction = normalize(newPos - pos);
 
             ray = handleReflection(ray, rngState, h);
+            //Make sure to redshift!
+            #ifdef USE_REDSHIFTING
+            float gtt_new = ComputeGttMulti(newPos);
+            ray.ray.energy *= sqrt(gtt_old / gtt_new);
+            #endif
+            //if we are at max reflections or russian roulette killed, return. classifier will handle it from there
             if (ray.rayEarlyKill)
                 return ray;
 
             pos = ray.ray.position;
             dir = normalize(ray.ray.direction);
-
+            //should never happen, but eh
             if (IsInsideAnyHorizon(pos))
             {
                 ray.hitBlackHole = true;
                 return ray;
             }
 
+
             continue;
         }
-
-        // --------------------------------------------------------------------
-        // Commit step
-        // --------------------------------------------------------------------
+        //no hit, we march instead
         #ifdef ENABLE_LENSING
         #ifdef USE_REDSHIFTING
         float gtt_new = ComputeGttMulti(newPos);
@@ -291,20 +281,14 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
         ray.ray.position  = pos;
         ray.ray.direction = dir;
 
-        // --------------------------------------------------------------------
-        // Geometric exit only
-        // --------------------------------------------------------------------
+        //check to see if we have exited SOI
         if (IsSafeToExitMarch(pos, dir))
             return ray;
-
-        // --------------------------------------------------------------------
-        // Emergency break
-        // --------------------------------------------------------------------
+        
+        //emergency break to stop weird photon sphere crashes
         emergencyBreak++;
         if (emergencyBreak > emergencyBreakMaxSteps)
         {
-            // Conservative choice:
-            // if we got stuck near BH dynamics too long, count as captured.
             ray.hitBlackHole = true;
             return ray;
         }

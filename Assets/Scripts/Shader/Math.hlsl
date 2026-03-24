@@ -155,7 +155,6 @@ float RaySphereExitDistance(
         return -1.0;
 
     float s = sqrt(h);
-    float t0 = -b - s;
     float t1 = -b + s;
 
     // If inside sphere, t1 is the forward exit.

@@ -2,29 +2,8 @@ using System;
 using System.IO;
 using UnityEngine;
 
-/// <summary>
-/// Generates a 2D LUT of Schwarzschild photon geodesic bend rates.
-///
-/// Axes:
-///   X  = radius r,  log-spaced above the horizon from rMinOverRs to rMaxOverRs
-///   Y  = mu = cos(alpha), where alpha is the angle between the ray and the
-///        outward radial direction.  Sampled at cell centres (y+0.5)/muResolution
-///        so mu is in (0, 1) exclusive — purely radial rays are never sampled.
-///
-/// The green channel stores dPhi/dr: how many radians of orbital-plane deflection
-/// the photon accumulates per unit coordinate radius travelled.  This is derived
-/// analytically from the Schwarzschild null geodesic first integral, so there
-/// are no integration sign issues, no step-size sensitivity, and no instability
-/// near the photon sphere (r = 1.5 rs).
-///
-/// dPhi/dr = (b / r²) / sqrt( 1 - b²(1 - rs/r) / r² )
-///
-/// where b = r * sin(alpha) / sqrt(1 - rs/r) is the conserved impact parameter.
-///
-/// The formula diverges as the photon approaches its turning point
-/// (denominator → 0). We clamp to a finite ceiling rather than let it blow up,
-/// because the shader only needs a finite, smooth table.
-/// </summary>
+//We dont use this anymore because it turns out it's genuinely more performant to do calculation at each step rather than do the manipulation to find the actual value
+//It might be possible that if we use a second lookup table that takes in r and spits out exponentially normalized x, it might be faster, but that's 2 layers of approx
 [ExecuteAlways]
 public class BlackHoleBendLUTGenerator : MonoBehaviour
 {
@@ -61,25 +40,13 @@ public class BlackHoleBendLUTGenerator : MonoBehaviour
     public Texture2D LightLUT;
     public bool regenerate = false;
 
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    /// Bakes the directional geodesic LUT (direct + indirect ray angles).
-    ///
-    /// This no longer requires generatedTexture to exist — the marcher uses the
-    /// analytic Schwarzschild formula directly, so the bend LUT texture is not
-    /// needed. schwarzschildRadius is read from the inspector field (not from
-    /// transform.localScale, which was silently corrupting rs when scale != 1).
-    /// </summary>
     [ContextMenu("Bake Light LUT")]
     public void BakeLightLut()
     {
         ValidateSettings();
 
-        // Use the inspector field directly.
-        // The old code did  schwarzschildRadius = transform.localScale.x  here,
-        // which silently overwrote a carefully-set rs with whatever the object
-        // happened to be scaled to. Removed.
+
         float rs = schwarzschildRadius;
 
         Debug.Log($"[BakeLightLut] Starting bake (analytic): " +

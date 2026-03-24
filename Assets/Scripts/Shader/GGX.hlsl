@@ -1,4 +1,6 @@
 // GGX / Trowbridge-Reitz half-vector sampling
+//To be honest, this stuff was mostly taken from a paper
+//TODO: Try to understand what is actually going on here
 float3 sampleGGX_H(float2 xi, float roughness, float3 N)
 {
     // Clamp to avoid singular behavior at 0
