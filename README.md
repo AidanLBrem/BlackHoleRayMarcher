@@ -3,5 +3,4 @@
 
 This is a GPU accelerated Raymarcher that implements BVH (Bounded Volume Hierarchy) and stochastic path tracing to visualize black hole relativistic light bending in everyday scenes in the Unity editor. Currently, spheres and custom .obj models are supported, along with Specular reflections. 
 
-Installation: launch in the Unity Editor, Version 6 or higher.
-TODO: Caustics, further optimization, multiple black hole support.
+A very special thanks to Sebastian Lague - the bones of the ray tracer come from his phenomenal raytracing series on YouTube! 
