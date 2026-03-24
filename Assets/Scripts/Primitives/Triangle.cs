@@ -11,6 +11,4 @@ public struct Triangle
     public Vector3 edgeAB;
     public Vector3 edgeAC;
 
-    public Vector3 normal;
-
 }

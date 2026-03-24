@@ -116,10 +116,7 @@ float3 DebugDirection(float3 dir)
     return 0.5 + 0.5 * dir;
 }
 
-float ComputeGtt(float r, float rs)
-{
-    return 1.0 - rs / r;
-}
+
 float RaySphereEntryDistance(float3 rayOrigin, float3 rayDir, float3 sphereCenter, float sphereRadius)
 {
     float3 oc = rayOrigin - sphereCenter;

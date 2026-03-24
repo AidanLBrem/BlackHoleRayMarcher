@@ -60,13 +60,14 @@ public class RayTracingManager : MonoBehaviour
     [NonSerialized] ComputeBuffer MeshVerticesBuffer;
     [NonSerialized] ComputeBuffer MeshNormalsBuffer;
     [NonSerialized] ComputeBuffer MeshIndicesBuffer;
-    [NonSerialized]ComputeBuffer TriangleBuffer;
+    [NonSerialized] ComputeBuffer TriangleBuffer;
     [NonSerialized] ComputeBuffer BVHBuffer;
 
     [NonSerialized] ComputeBuffer TLASBuffer;
     [NonSerialized] ComputeBuffer TLASRefBuffer;
     [NonSerialized] ComputeBuffer InstanceBuffer;
-    [Header("Atmosphere")] 
+
+    [Header("Atmosphere")]
     public bool applyScattering = true;
     public bool applyRayleigh = true;
     public bool applyMie = true;
@@ -77,17 +78,21 @@ public class RayTracingManager : MonoBehaviour
     public int framesPerScatter = 10;
     public int numOpticalDepthPoints = 8;
     public int inScatteringPoints = 8;
+
     [Header("Rayleigh Scattering")]
     public float densityFalloffRayleigh = 4f;
     public Vector3 rayleighScatteringCoefficients = new Vector3(0.0058f, 0.0135f, 0.0331f);
-    [Header("Mie Scattering")] 
+
+    [Header("Mie Scattering")]
     public float densityFalloffMie = 4f;
     public float mieForwardScatter = 0.76f;
     public float mieBackwardScatter = -0.5f;
     public Vector3 mieScatteringCoefficients = new Vector3(21e-6f, 21e-6f, 21e-6f);
+
     public Color sunLightColor = Color.white;
     public float sunLightIntensity = 1;
     public Transform sun;
+
     RenderTexture resultTexture;
     int numRenderedFrames = 0;
 
@@ -98,16 +103,42 @@ public class RayTracingManager : MonoBehaviour
 
     public bool renderSphere = true;
     public bool renderTriangles = true;
-    
+
     public float strongFieldRadPerMeterCuttoff = 0.01f;
 
     static readonly List<Vector3> tV = new();
     static readonly List<Vector3> tN = new();
-    
+
     [Header("Black Hole Lensing Debug Options")]
     public bool enable_lensing = true;
     public float bendStrength = 1.0f;
     public bool impactParameterDebug = false;
+    public bool useOrbitalPlaneCullingIfAble = true;
+
+    public bool displayTriTests = false;
+    public int triTestFullSaturationValue = 1000;
+
+    public bool displayBVHNodeTests = false;
+    public int BVHNodeTestSaturationValue = 10;
+
+    public bool displayTLASNodeVisits = false;
+    public int TLASNodeVisitsSaturationValue = 1000;
+
+    public bool displayBLASNodeVisits = false;
+    public int BLASNodeVisitsSaturationValue = 1000;
+
+    public bool displayInstanceBLASTraversals = false;
+    public int InstanceBLASTraversalsSaturationValue = 1000;
+
+    public bool displayTLASLeafRefs = false;
+    public int TLASLeafRefsSaturationValue = 1000;
+    // --- Accumulation tracking ---
+    Vector3 lastCameraPosition;
+    Quaternion lastCameraRotation;
+    float lastCameraFov;
+    int lastScreenWidth;
+    int lastScreenHeight;
+    bool historyInitialized = false;
     struct MeshOffsets
     {
         public int vertexOffset;
@@ -115,7 +146,41 @@ public class RayTracingManager : MonoBehaviour
         public int blasNodeOffset;
         public int rootNodeIndex;
     }
+    bool ShouldResetAccumulation(Camera cam)
+    {
+        if (!historyInitialized)
+        {
+            lastCameraPosition = cam.transform.position;
+            lastCameraRotation = cam.transform.rotation;
+            lastCameraFov = cam.fieldOfView;
+            lastScreenWidth = Screen.width;
+            lastScreenHeight = Screen.height;
+            historyInitialized = true;
+            return true;
+        }
 
+        float posDelta = Vector3.Distance(cam.transform.position, lastCameraPosition);
+        float rotDelta = Quaternion.Angle(cam.transform.rotation, lastCameraRotation);
+        float fovDelta = Mathf.Abs(cam.fieldOfView - lastCameraFov);
+
+        bool changed =
+            posDelta > 0.0005f ||
+            rotDelta > 0.05f ||
+            fovDelta > 0.01f ||
+            Screen.width != lastScreenWidth ||
+            Screen.height != lastScreenHeight;
+
+        if (changed)
+        {
+            lastCameraPosition = cam.transform.position;
+            lastCameraRotation = cam.transform.rotation;
+            lastCameraFov = cam.fieldOfView;
+            lastScreenWidth = Screen.width;
+            lastScreenHeight = Screen.height;
+        }
+
+        return changed;
+    }
     void UpdateAtmosphereParams()
     {
         rayTracingMaterial.SetFloat("atmosphereRadius", atmosphereRadius);
@@ -132,17 +197,20 @@ public class RayTracingManager : MonoBehaviour
             mieScatteringCoefficients.y,
             mieScatteringCoefficients.z));
         rayTracingMaterial.SetVector("sunLightColor", new Vector3(
-            sunLightColor.r * sunLightIntensity, sunLightColor.g* sunLightIntensity, sunLightColor.b* sunLightIntensity));
+            sunLightColor.r * sunLightIntensity,
+            sunLightColor.g * sunLightIntensity,
+            sunLightColor.b * sunLightIntensity));
         rayTracingMaterial.SetVector("sunDirection", sun != null ? Vector3.Normalize(-sun.forward) : Vector3.up);
         rayTracingMaterial.SetInt("framesPerScatter", framesPerScatter);
+
         if (!accumulateInGameView)
         {
             rayTracingMaterial.SetInt("framesPerScatter", 1);
         }
 
-        // Also sync step size to solver
         DirectionalGeodesic2DLutSolver.StepSize = blackHoleSOIStepSize;
     }
+
     List<RayTracedMesh> GetValidMeshInstances()
     {
         RayTracedMesh[] allMeshes = FindObjectsOfType<RayTracedMesh>();
@@ -205,6 +273,7 @@ public class RayTracingManager : MonoBehaviour
         }
         return false;
     }
+
     void BindDummyAccelerationBuffers()
     {
         ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, new Triangle[1]);
@@ -231,6 +300,7 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("numInstances", 0);
         rayTracingMaterial.SetInt("TLASRootIndex", 0);
     }
+
     void AllocateAccelerationBuffers()
     {
         List<RayTracedMesh> validInstances = GetValidMeshInstances();
@@ -334,7 +404,6 @@ public class RayTracingManager : MonoBehaviour
             }
             else
             {
-                // Fallback so buffer sizes always match vertex indexing.
                 for (int n = 0; n < tV.Count; n++)
                     normals.Add(Vector3.up);
             }
@@ -365,10 +434,10 @@ public class RayTracingManager : MonoBehaviour
 
                 Vector3 edgeAB = bt.posB - bt.posA;
                 Vector3 edgeAC = bt.posC - bt.posA;
-                Vector3 geometricNormal = Vector3.Cross(edgeAB, edgeAC);
+                //Vector3 geometricNormal = Vector3.Cross(edgeAB, edgeAC);
 
-                if (geometricNormal.sqrMagnitude <= 1e-16f)
-                    degenerateTriangles++;
+                /*if (geometricNormal.sqrMagnitude <= 1e-16f)
+                    degenerateTriangles++;*/
 
                 int globalTriIndex = off.triangleOffset + t;
                 int triIndexBase = globalTriIndex * 3;
@@ -378,7 +447,7 @@ public class RayTracingManager : MonoBehaviour
                     baseIndex = (uint)triIndexBase,
                     edgeAB = edgeAB,
                     edgeAC = edgeAC,
-                    normal = geometricNormal
+                    //normal = geometricNormal
                 };
 
                 triangleIndices[triIndexBase + 0] = (uint)(off.vertexOffset + v1);
@@ -485,6 +554,13 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("numTLASNodes", tlasNodes.Length);
         rayTracingMaterial.SetInt("numInstances", gpuInstances.Length);
         rayTracingMaterial.SetInt("TLASRootIndex", tlasBuilder.RootIndex);
+
+        rayTracingMaterial.SetInt("BVHTestsSaturation", BVHNodeTestSaturationValue);
+        rayTracingMaterial.SetInt("triTestsSaturation", triTestFullSaturationValue);
+        rayTracingMaterial.SetInt("TLASNodeVisitsSaturation", TLASNodeVisitsSaturationValue);
+        rayTracingMaterial.SetInt("BLASNodeVisitsSaturation", BLASNodeVisitsSaturationValue);
+        rayTracingMaterial.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
+        rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation", TLASLeafRefsSaturationValue);
     }
 
     static GPUBVHNode[] PackNodes(BvhNode[] nodes)
@@ -535,6 +611,15 @@ public class RayTracingManager : MonoBehaviour
         if (Camera.current.name != "SceneCamera" || useShaderInSceneView)
         {
             InitFrame();
+
+            // --- Reset accumulation if camera changed ---
+            Camera cam = GetComponent<Camera>();
+            if (ShouldResetAccumulation(cam))
+            {
+                Debug.Log("Moving!");
+                numRenderedFrames = 0;
+                stopRendering = false;
+            }
             if (stopRendering)
             {
                 Graphics.Blit(resultTexture, target);
@@ -549,7 +634,9 @@ public class RayTracingManager : MonoBehaviour
             {
                 numRenderedFrames = 0;
             }
+
             rayTracingMaterial.SetInt("numRenderedFrames", numRenderedFrames);
+
             RenderTexture currentFrame =
                 RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
 
@@ -603,18 +690,19 @@ public class RayTracingManager : MonoBehaviour
             "Result"
         );
 
-        UpdateCameraParams(Camera.current);
         UpdateShaderValues();
         AllocateAccelerationBuffers();
         allocateSphereBuffer();
         allocateBlackHoleBuffer();
         UpdateAtmosphereParams();
+        UpdateCameraParams(Camera.current);
     }
 
     void UpdateCameraParams(Camera camera)
     {
         float planeHeight = camera.nearClipPlane * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad) * 2f;
         float planeWidth = planeHeight * camera.aspect;
+
         rayTracingMaterial.SetVector("ViewParams", new Vector3(planeWidth, planeHeight, camera.nearClipPlane));
         rayTracingMaterial.SetMatrix("CameraLocalToWorldMatrix", camera.transform.localToWorldMatrix);
         rayTracingMaterial.SetFloat("CameraNear", camera.nearClipPlane);
@@ -630,39 +718,68 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("emergencyBreakMaxSteps", emergencyBreakMaxSteps);
         accumulatorMaterial.SetFloat("accumWeight", accumWeight);
 
+        rayTracingMaterial.SetInt("triTestsSaturation", triTestFullSaturationValue);
+        rayTracingMaterial.SetInt("BVHTestsSaturation", BVHNodeTestSaturationValue);
+        rayTracingMaterial.SetInt("TLASNodeVisitsSaturation", TLASNodeVisitsSaturationValue);
+        rayTracingMaterial.SetInt("BLASNodeVisitsSaturation", BLASNodeVisitsSaturationValue);
+        rayTracingMaterial.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
+        rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation", TLASLeafRefsSaturationValue);
+
         if (renderSphere) rayTracingMaterial.EnableKeyword("TEST_SPHERE");
         else rayTracingMaterial.DisableKeyword("TEST_SPHERE");
 
         if (renderTriangles) rayTracingMaterial.EnableKeyword("TEST_TRIANGLE");
         else rayTracingMaterial.DisableKeyword("TEST_TRIANGLE");
-        
 
         if (enable_lensing) rayTracingMaterial.EnableKeyword("ENABLE_LENSING");
         else rayTracingMaterial.DisableKeyword("ENABLE_LENSING");
 
         if (useTlas) rayTracingMaterial.EnableKeyword("USE_TLAS");
         else rayTracingMaterial.DisableKeyword("USE_TLAS");
-        
+
         if (useRedshifting) rayTracingMaterial.EnableKeyword("USE_REDSHIFTING");
         else rayTracingMaterial.DisableKeyword("USE_REDSHIFTING");
-        
+
         if (applyScattering) rayTracingMaterial.EnableKeyword("APPLY_SCATTERING");
         else rayTracingMaterial.DisableKeyword("APPLY_SCATTERING");
-        
+
         if (applyRayleigh) rayTracingMaterial.EnableKeyword("APPLY_RAYLEIGH");
         else rayTracingMaterial.DisableKeyword("APPLY_RAYLEIGH");
-        
+
         if (applyMie) rayTracingMaterial.EnableKeyword("APPLY_MIE");
         else rayTracingMaterial.DisableKeyword("APPLY_MIE");
-        
+
         if (applySundisk) rayTracingMaterial.EnableKeyword("APPLY_SUNDISK");
         else rayTracingMaterial.DisableKeyword("APPLY_SUNDISK");
-        
+
         if (applySunLighting) rayTracingMaterial.EnableKeyword("APPLY_SUN_LIGHTING");
         else rayTracingMaterial.DisableKeyword("APPLY_SUN_LIGHTING");
-        
+
         if (impactParameterDebug) rayTracingMaterial.EnableKeyword("IMPACT_PARAMETER_DEBUG");
         else rayTracingMaterial.DisableKeyword("IMPACT_PARAMETER_DEBUG");
+
+        if (useOrbitalPlaneCullingIfAble && blackHoleBuffer.count == 1)
+            rayTracingMaterial.EnableKeyword("ORBITAL_PLANE_TEST_POSSIBLE");
+        else
+            rayTracingMaterial.DisableKeyword("ORBITAL_PLANE_TEST_POSSIBLE");
+
+        if (displayTriTests) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_TRIANGLE_TESTS");
+        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_TRIANGLE_TESTS");
+
+        if (displayBVHNodeTests) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_BVH_NODES_VISITED");
+        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_BVH_NODES_VISITED");
+
+        if (displayTLASNodeVisits) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_TLAS_NODE_VISITS");
+        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_TLAS_NODE_VISITS");
+
+        if (displayBLASNodeVisits) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_BLAS_NODE_VISITS");
+        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_BLAS_NODE_VISITS");
+
+        if (displayInstanceBLASTraversals) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS");
+        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS");
+
+        if (displayTLASLeafRefs) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_TLAS_LEAF_REFS");
+        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_TLAS_LEAF_REFS");
     }
 
     void UpdateShaderValues()
@@ -702,7 +819,6 @@ public class RayTracingManager : MonoBehaviour
                 position = blackHoleObjects[i].transform.position,
                 radius = blackHoleObjects[i].transform.localScale.x * 0.5f,
                 blackHoleSOIMultiplier = blackHoleObjects[i].blackHoleSOIMultiplier,
-                blackHoleMass = blackHoleObjects[i].transform.localScale.x * 0.5f,
             };
 
             if (blackHoles[i].blackHoleSOIMultiplier <= 0)
@@ -710,9 +826,7 @@ public class RayTracingManager : MonoBehaviour
                 Debug.LogError("BlackHoleSOIMultiplier is less than or equal to 0 for " + blackHoleObjects[i].name);
                 blackHoles[i].blackHoleSOIMultiplier = 1.0f;
             }
-
-            if (blackHoles[i].blackHoleMass == 0)
-                Debug.LogError("BlackHoleMass is 0 for " + blackHoleObjects[i].name);
+            
         }
 
         if (blackHoleObjects.Length > 0)

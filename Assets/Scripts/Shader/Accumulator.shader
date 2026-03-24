@@ -24,6 +24,7 @@ Shader "Custom/Accumulator"
 				float2 uv : TEXCOORD0;
 				float4 vertex : SV_POSITION;
 			};
+
 			struct appdata
 			{
 				float4 vertex : POSITION;
@@ -33,12 +34,8 @@ Shader "Custom/Accumulator"
 			sampler2D _MainTexOld;
 			sampler2D _MainTex;
 
-			// Provide either accumWeight from C#, or numRenderedFrames (fallback)
-			float accumWeight;          // expected in (0,1]; set from C#
-			int   numRenderedFrames;    // fallback if accumWeight <= 0
-
-			// Halton base-2/base-3 (returns [0,1) for each component)
-
+			float accumWeight;       // recommended: 0.05 to 0.2
+			int   numRenderedFrames; // no longer used for primary weighting
 
 			v2f vert (appdata v)
 			{
@@ -50,15 +47,32 @@ Shader "Custom/Accumulator"
 
 			float4 frag (v2f i) : SV_Target
 			{
+
 				float4 oldRender = tex2D(_MainTexOld, i.uv);
 				float4 newRender = tex2D(_MainTex, i.uv);
+				if (numRenderedFrames == 0)
+				{
+					return newRender;
+				}
+				float w = accumWeight;
+				float4 accumulated = oldRender;
+				if (w <= 0.0)
+				{
+						// If accumWeight not set (>0), fall back to 1/(N+1)
+					w = 1.0 / (numRenderedFrames + 1.0);
 
-				// If accumWeight not set (>0), fall back to 1/(N+1)
-				float w = 1.0 / (numRenderedFrames + 1.0);
-
-				// Standard exponential moving average
-				float4 accumulated = saturate(oldRender * (1 - w) + newRender * w);
+					// Standard exponential moving average
+					accumulated = saturate(oldRender * (1 - w) + newRender * w);
+				}
+				else
+				{
+					accumulated = lerp(oldRender, newRender, w);
+				}
+				
 				return accumulated;
+					
+
+				
 			}
 			ENDHLSL
 		}

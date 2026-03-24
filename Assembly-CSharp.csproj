@@ -59,12 +59,10 @@
     <Compile Include="Assets\Scripts\Primitives\BuildTri.cs" />
     <Compile Include="Assets\Scripts\ShaderHelper.cs" />
     <Compile Include="Assets\Scripts\BlackHoleLutHelpers.cs" />
-    <Compile Include="Assets\Scripts\BlackHoleBendingLUT1.cs" />
     <Compile Include="Assets\Scripts\FPSDisplay.cs" />
     <Compile Include="Assets\Scripts\BVH\IBVHAdapter.cs" />
     <Compile Include="Assets\Scripts\BVH\GpuBvhNode.cs" />
     <Compile Include="Assets\Scripts\BVH\BLASBuilder.cs" />
-    <Compile Include="Assets\Scripts\BlackHoleCPUPreCalculator.cs" />
     <Compile Include="Assets\Scripts\BVH\BvhBuildSettings.cs" />
     <Compile Include="Assets\Scripts\BVH\MeshCollector.cs" />
     <Compile Include="Assets\Scripts\Primitives\RayTracedMesh.cs" />
@@ -72,6 +70,8 @@
     <Compile Include="Assets\Scripts\Primitives\SharedMeshData.cs" />
     <Compile Include="Assets\TutorialInfo\Scripts\Readme.cs" />
     <Compile Include="Assets\Scripts\Primitives\Triangle.cs" />
+    <Compile Include="Assets\Scripts\LightLUTVisualizor.cs" />
+    <Compile Include="Assets\Scripts\BVH\BLASCreator.cs" />
     <Compile Include="Assets\Scripts\BVH\BvhNode.cs" />
     <Compile Include="Assets\Scripts\BVH\BuildTriangle.cs" />
     <Compile Include="Assets\Scripts\RaytracerCPURay.cs" />
@@ -81,11 +81,10 @@
     <Compile Include="Assets\Scripts\BVH\TLASBuilder.cs" />
     <Compile Include="Assets\Scripts\Primitives\RayTracedBlackHole.cs" />
     <Compile Include="Assets\Scripts\Primitives\Mesh.cs" />
+    <Compile Include="Assets\Scripts\BlackHoleNEEPreComputer.cs" />
     <Compile Include="Assets\Scripts\BVH\BVHUtils.cs" />
-    <Compile Include="Assets\Scripts\LightLUTVIsualizor.cs" />
     <Compile Include="Assets\Scripts\Primitives\Sphere.cs" />
     <Compile Include="Assets\Scripts\FlyControls.cs" />
-    <Compile Include="Assets\Scripts\BLASCreator.cs" />
     <Compile Include="Assets\Scripts\BVH\InstanceAdapter.cs" />
     <Compile Include="Assets\Scripts\RayTracingManager.cs" />
     <None Include="Assets\TextMesh Pro\Shaders\TMPro.cginc" />

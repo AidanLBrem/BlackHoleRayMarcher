@@ -431,27 +431,21 @@ bool IsUnoccludedToSun(float3 origin, float3 normalOffsetDir, out float3 outTsun
     shadowRay.direction = Lsun;
     shadowRay.energy    = 1.0;
     //TODO: add overload for queryCollisions to ONLY find first hit
-    HitInfo shadowHit = queryCollisions(shadowRay, 3.402823e+38, true);
+    float sunSegment = AtmosphereExitDistance(shadowRay.position, Lsun);
+    if (sunSegment <= ATM_EPS)
+        return false;
+
+    if (SunRayHitsGround(shadowRay.position, Lsun, sunSegment))
+        return false;
+
+    HitInfo shadowHit = queryCollisions(shadowRay, sunSegment, true);
     if (shadowHit.didHit)
         return false;
-    //if no hit, find out how far we move through atmosphere
-    float sunExit = RaySphereExitDistance(
-        shadowRay.position,
-        Lsun,
-        PlanetCenter(),
-        atmosphereRadius
-    );
-    //attenuate
-    float3 Tsun = float3(1.0, 1.0, 1.0);
-    if (sunExit > 0.0)
-    {
-        float tauSunR = 0.0;
-        float tauSunM = 0.0;
-        opticalDepthRM(shadowRay.position, Lsun, sunExit, tauSunR, tauSunM);
-        Tsun = transmittanceFromOpticalDepth(tauSunR, tauSunM);
-    }
 
-    outTsun = Tsun;
+    float tauSunR = 0.0;
+    float tauSunM = 0.0;
+    opticalDepthRM(shadowRay.position, Lsun, sunSegment, tauSunR, tauSunM);
+    outTsun = transmittanceFromOpticalDepth(tauSunR, tauSunM);
     return true;
 }
 

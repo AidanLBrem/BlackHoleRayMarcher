@@ -35,14 +35,21 @@ Shader "Custom/RayTracer"
             #pragma shader_feature_local APPLY_SCATTERING
             #pragma shader_feature_local APPLY_SUN_LIGHTING
             #pragma shader_feature_local IMPACT_PARAMETER_DEBUG
+            #pragma shader_feature_local ORBITAL_PLANE_TEST_POSSIBLE
+            #pragma shader_feature_local DEBUG_DISPLAY_TRIANGLE_TESTS
+            #pragma shader_feature_local DEBUG_DISPLAY_BVH_NODES_VISITED
+            #pragma shader_feature_local DEBUG_DISPLAY_TLAS_NODE_VISITS
+            #pragma shader_feature_local DEBUG_DISPLAY_BLAS_NODE_VISITS
+            #pragma shader_feature_local DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS
+            #pragma shader_feature_local DEBUG_DISPLAY_TLAS_LEAF_REFS
+
 			struct appdata
 			{
 				float4 vertex : POSITION;
 				float2 uv : TEXCOORD0;
 			};
             
-            //Cold, though be careful about storing it
-			struct RayTracingMaterial
+            struct RayTracingMaterial
 			{
 				float4 color;
                 float4 emissiveColor;
@@ -51,7 +58,7 @@ Shader "Custom/RayTracer"
                 float roughness;
 			    float metallicity;
 			};
-            //hot - used a lot for collision detection. 
+
             struct HitInfo 
             {
                 bool didHit;
@@ -64,17 +71,18 @@ Shader "Custom/RayTracer"
                 int objectIndex;
             };
             
-            //Medium, used for node distance calculations
             struct AABBHitInfo {
                 bool didHit;
                 float distance;
             };
+
             struct Ray
             {
                 float3 position;
                 float3 direction; 
                 float energy;
             };
+
             struct PixelMarcher
             {
                 Ray ray;
@@ -83,29 +91,27 @@ Shader "Custom/RayTracer"
                 float3 incomingLight;
                 float3 rayColor;
                 uint numBounces;
-                uint triTests;
-                // Add these:
+
                 float3 lastHitNormal;
                 float3 lastHitAlbedo;
                 bool hasLastHit;
             };
-            //cold
+
             struct Sphere
 			{
 				float3 position;
 				float radius;
 				RayTracingMaterial material;
 			};
-            //EXTREMELY HOT. Keep as SMALL AS POSSIBLE
-            struct Triangle {
+
+            struct Triangle
+            {
                 uint baseIndex;
-                
                 float3 edgeAB;
                 float3 edgeAC;
-                float3 geometricNormal;
+                //float3 geometricNormal;
             };
 
-            //Cold, only a few allocated
             struct Mesh
             {
                 float4x4 localToWorldMatrix;
@@ -122,9 +128,8 @@ Shader "Custom/RayTracer"
                 float AABBRightZ;
             };
 
-           
-            //Medium, many thousands allocated, used during BVH traversal
-            struct BVHNode {
+            struct BVHNode
+            {
                 int left;
                 int right;
                 uint firstIndex;
@@ -137,13 +142,12 @@ Shader "Custom/RayTracer"
                 float AABBRightY;
                 float AABBRightZ;
             };
-            //Cold
+
             struct BlackHole
             {
                 float3 position;
                 float SchwartzchildRadius;
                 float blackHoleSOIMultiplier;
-                float blackHoleMass;
             };
 
             struct v2f
@@ -151,8 +155,10 @@ Shader "Custom/RayTracer"
                 float2 uv : TEXCOORD0;
                 float4 vertex : SV_POSITION;
             };
+
             #define debug_steps 100
-            #define MAX_MESHES 64 //change this based on scenes!
+            #define MAX_MESHES 64
+
             float3 ViewParams;
             float4x4 CameraLocalToWorldMatrix;
             float3 CameraWorldPos;
@@ -163,6 +169,7 @@ Shader "Custom/RayTracer"
             int MarchStepsCount;
             int RaysPerPixel;
             int framesPerScatter;
+
             StructuredBuffer<Sphere> Spheres;
             StructuredBuffer<BlackHole> BlackHoles;
             StructuredBuffer<Mesh> Instances;
@@ -173,30 +180,50 @@ Shader "Custom/RayTracer"
             StructuredBuffer<BVHNode> BVHNodes;
             StructuredBuffer<BVHNode> TLASNodes;
             StructuredBuffer<uint> TLASRefs;
+
             int TLASRootIndex;
             int numTLASNodes;
             int numInstances;
             int numSpheres;
             int numBlackHoles;
-            //int numTriangles;
             int maxBounces;
             int numMeshes;
+
             sampler2D _MainTexOld;
             int numRenderedFrames;
             float stepSize;
             int emergencyBreakMaxSteps;
+
             const float G = 1.975813844e-32;
             const float C = 0.430467210276;
-            float triTests = 0;
-            float BVHTests = 0;
-             // Params (set from C#)
-            float3 GalaxyNormal = float3(0.0,1.0,0.0); // unit normal to Milky Way plane
-            float  BandHalfAngleDeg = 12.0;      // half-width of the band in degrees
-            float  BandSoftDeg      = 6.0;       // feather on both sides
-            float  BandBoost        = 3.0;       // how much denser/brighter in the band
-            float3 galaxyCenterDir = float3(0.0,0.0,1.0);
+
+            int triTests = 0;
+            int triTestsSaturation = 1;
+
+            int BVHTests = 0;
+            int BVHTestsSaturation = 1;
+
+            int TLASNodeVisits = 0;
+            int TLASNodeVisitsSaturation = 1;
+
+            int BLASNodeVisits = 0;
+            int BLASNodeVisitsSaturation = 1;
+
+            int InstanceBLASTraversals = 0;
+            int InstanceBLASTraversalsSaturation = 1;
+
+            int TLASLeafRefsVisited = 0;
+            int TLASLeafRefsVisitedSaturation = 1;
+
             float strongFieldCurvatureRadPetMeterCutoff;
             float inScatteringPoints;
+
+            struct OrbitalPlaneParameters
+            {
+                float3 localOrbitalPlaneNormal;
+                float localPlaneD;
+            };
+            
             v2f vert (appdata v)
             {
                 v2f o;
@@ -204,6 +231,16 @@ Shader "Custom/RayTracer"
                 o.uv = v.uv;
                 return o;
             }
+
+            struct MultiBlackHoleDecision
+            {
+                float3 weakBendDirection;
+                float nearestMarchDist;
+                bool insideAnySOI;
+                int activeStrongFieldMarchCount;
+                int activeStrongFieldMarchers[32];
+            };
+
             struct BlackHoleDecision
             {
                 bool affectsRay;
@@ -213,8 +250,31 @@ Shader "Custom/RayTracer"
                 float deflectionAngle;
                 float3 weakBentDir;
             };
-
             
+            OrbitalPlaneParameters GetLocalOrbitalPlaneParameters(float3 rayPosition, float3 bhPosition, float3 rayDirection, float4x4 worldToLocalMatrix)
+            {
+                float3 orbitalPlaneNormal = normalize(cross(rayTo(rayPosition, bhPosition), rayDirection));
+                float3 orbitalPlaneNormalLocal = normalize(mul((float3x3)worldToLocalMatrix, orbitalPlaneNormal));
+                    
+                float3 localOrigin = mul(worldToLocalMatrix, float4(rayPosition, 1.0)).xyz;
+                float planeD = dot(orbitalPlaneNormalLocal, localOrigin);
+
+                OrbitalPlaneParameters result;
+                result.localOrbitalPlaneNormal = orbitalPlaneNormalLocal;
+                result.localPlaneD = planeD;
+                return result;
+            }
+            
+            OrbitalPlaneParameters GetWorldOrbitalPlaneParameters(float3 rayPosition, float3 bhPosition, float3 rayDirection)
+            {
+                float3 orbitalPlaneNormal = normalize(cross(rayTo(rayPosition, bhPosition), rayDirection));
+                float planeD = dot(orbitalPlaneNormal, rayPosition);
+
+                OrbitalPlaneParameters result;
+                result.localOrbitalPlaneNormal = orbitalPlaneNormal;
+                result.localPlaneD = planeD;
+                return result;
+            }
 
             BlackHoleDecision EvaluateBlackHoleForRay(Ray ray, BlackHole blackHole)
             {
@@ -231,7 +291,6 @@ Shader "Custom/RayTracer"
                 float r0 = length(rel);
                 bool startInsideMarchRegion = (r0 < marchImpactThreshold);
 
-                // MUST come before tClosest early-out
                 if (startInsideMarchRegion)
                 {
                     result.affectsRay = true;
@@ -239,7 +298,7 @@ Shader "Custom/RayTracer"
                     result.marchEntryT = 0.0;
                     float tClosestInside = -dot(rel, d);
                     float3 closestVecInside = rel + d * tClosestInside;
-                    result.impactParameter = length(closestVecInside); // consistent with outside path
+                    result.impactParameter = length(closestVecInside);
                     result.deflectionAngle = 0.0;
                     result.weakBentDir = d;
                     return result;
@@ -275,107 +334,162 @@ Shader "Custom/RayTracer"
 
                 return result;
             }
-            AABBHitInfo RayAABB(float3 rayOrigin, float3 rayDirection, float3 inverseDirection, float AABBLeftX, float AABBLeftY, float AABBLeftZ, float AABBRightX, float AABBRightY, float AABBRightZ, float distanceToBeat) {
+            
+            MultiBlackHoleDecision FindAllStrongFieldMarchers(Ray ray, MultiBlackHoleDecision result, int indexStart)
+            {
+                for (int i = indexStart + 1; i < numBlackHoles; i++)
+                {
+                    BlackHoleDecision d = EvaluateBlackHoleForRay(ray, BlackHoles[i]);
+                    if (!d.affectsRay)
+                        continue;
+
+                    if (d.marchEntryT == 0 && d.shouldMarch)
+                    {
+                        result.activeStrongFieldMarchers[result.activeStrongFieldMarchCount++] = i;   
+                    }
+                }
+                
+                return result;
+            }
+            
+            AABBHitInfo RayAABB(float3 rayOrigin, float3 rayDirection, float3 inverseDirection, float3 boxMin, float3 boxMax, float distanceToBeat)
+            {
                 float3 invDir = inverseDirection;
-                float3 boxMin = float3(AABBLeftX,  AABBLeftY,  AABBLeftZ);
-                float3 boxMax = float3(AABBRightX, AABBRightY, AABBRightZ);
                 float3 tMin = (boxMin - rayOrigin) * invDir;
                 float3 tMax = (boxMax - rayOrigin) * invDir;
                 float3 t1 = min(tMin, tMax);
                 float3 t2 = max(tMin, tMax);
                 float tNear = max(max(t1.x, t1.y), t1.z);
                 float tFar = min(min(t2.x, t2.y), t2.z);
+
                 AABBHitInfo hitInfo = (AABBHitInfo)0;
                 hitInfo.didHit = (tNear <= tFar) && (tFar >= 0.0) && (tNear <= distanceToBeat);
                 hitInfo.distance = max(tNear, 0.0);
                 return hitInfo;
             }
-            HitInfo raySphere(Ray ray, float3 sphereCenter, float sphereRadius) {
+
+            bool BoxLiesWithinOrbitalPlane(OrbitalPlaneParameters orbitalPlaneParameters, float3 boxMin, float3 boxMax)
+            {
+                float3 boxCenter = (boxMin + boxMax) * 0.5;
+                float3 boxHalfExtents = (boxMax - boxMin) * 0.5;
+                float d = dot(orbitalPlaneParameters.localOrbitalPlaneNormal, boxCenter) - orbitalPlaneParameters.localPlaneD;
+                float r = dot(abs(orbitalPlaneParameters.localOrbitalPlaneNormal), boxHalfExtents);
+                return abs(d) <= r;
+            }
+
+            AABBHitInfo RayHitsBox(
+                OrbitalPlaneParameters orbitalPlaneParameters,
+                float3 rayOrigin,
+                float3 rayDirection,
+                float3 inverseDirection,
+                float AABBLeftX,
+                float AABBLeftY,
+                float AABBLeftZ,
+                float AABBRightX,
+                float AABBRightY,
+                float AABBRightZ,
+                float distanceToBeat)
+            {
+                float3 boxMin = float3(AABBLeftX,  AABBLeftY,  AABBLeftZ);
+                float3 boxMax = float3(AABBRightX, AABBRightY, AABBRightZ);
+
+                if (!BoxLiesWithinOrbitalPlane(orbitalPlaneParameters, boxMin, boxMax))
+                    return (AABBHitInfo)0;
+                
+                return RayAABB(rayOrigin, rayDirection, inverseDirection, boxMin, boxMax, distanceToBeat);
+            }
+
+            AABBHitInfo RayHitsBox(
+                float3 rayOrigin,
+                float3 rayDirection,
+                float3 inverseDirection,
+                float AABBLeftX,
+                float AABBLeftY,
+                float AABBLeftZ,
+                float AABBRightX,
+                float AABBRightY,
+                float AABBRightZ,
+                float distanceToBeat)
+            {
+                float3 boxMin = float3(AABBLeftX,  AABBLeftY,  AABBLeftZ);
+                float3 boxMax = float3(AABBRightX, AABBRightY, AABBRightZ);
+                return RayAABB(rayOrigin, rayDirection, inverseDirection, boxMin, boxMax, distanceToBeat);
+            }
+
+            HitInfo raySphere(Ray ray, float3 sphereCenter, float sphereRadius)
+            {
 				HitInfo hitInfo = (HitInfo)0;
 				float3 offsetRayOrigin = ray.position - sphereCenter;
-				// From the equation: sqrLength(rayOrigin + rayDir * dst) = radius^2
-				// Solving for dst results in a quadratic equation with coefficients:
-				float a = dot(ray.direction, ray.direction); // a = 1 (assuming unit vector)
+
+				float a = dot(ray.direction, ray.direction);
 				float b = 2 * dot(offsetRayOrigin, ray.direction);
 				float c = dot(offsetRayOrigin, offsetRayOrigin) - sphereRadius * sphereRadius;
-				// Quadratic discriminant
-				float discriminant = b * b - 4 * a * c; 
+				float discriminant = b * b - 4 * a * c;
 
-				// No solution when d < 0 (ray misses sphere)
-				if (discriminant >=  0) {
-					// Distance to nearest intersection point (from quadratic formula)
+				if (discriminant >=  0)
+                {
 					float dst = (-b - sqrt(discriminant)) / (2 * a);
 
-					// Ignore intersections that occur behind the ray
-					if (dst >= 0) {
+					if (dst >= 0)
+                    {
 						hitInfo.didHit = true;
 						hitInfo.distance = dst;
 						hitInfo.hitPoint = ray.position + ray.direction * dst;
 					}
 				}
+
 				return hitInfo;
             }
-            //EXTREMELY HOT. Most runtime is spent in rayTriangle!
+
 			HitInfo rayTriangle(Ray ray, Triangle tri)
 			{
-				//float3 ao = ray.position - Vertices[tri.vertexIndex1];
-                //float3 edgeAB = v1 - v0;
-                //float3 edgeAC = v2 - v0;
-                
                 float3 edgeAB = tri.edgeAB;
                 float3 edgeAC = tri.edgeAC;
-				float3 geometricNormal = tri.geometricNormal;
+				float3 geometricNormal = cross(tri.edgeAB, tri.edgeAC);
 
-                /*float3 v1 = Vertices[TriangleIndices[tri.baseIndex]];
-                float3 v2 = Vertices[TriangleIndices[tri.baseIndex+1]];
-                float3 v3 = Vertices[TriangleIndices[tri.baseIndex+2]];
-                float3 edgeAB = v2 - v1;
-                float3 edgeAC = v3 - v1;
-                float3 geometricNormal = cross(edgeAB, edgeAC);*/
 				float determinant = -dot(ray.direction, geometricNormal);
-                if (determinant <=  0) {
+                if (determinant <=  0)
                     return (HitInfo)0;
-                }
+
 				float invDet = 1 / determinant;
-				// Calculate dst to triangle & barycentric coordinates of intersection point
                 uint vertex1 = TriangleIndices[tri.baseIndex];
 				float3 ao = ray.position - Vertices[vertex1];
 				float dst = dot(ao, geometricNormal) * invDet;
-                if (dst <  0) {
+                if (dst <  0)
                     return (HitInfo)0;
-                }
+
                 float3 dao = cross(ao, ray.direction);
 				float u = dot(edgeAC, dao) * invDet;
-                if (u <  0) {
+                if (u <  0)
                     return (HitInfo)0;
-                }
+
 				float v = -dot(edgeAB, dao) * invDet;
-                if (v < 0) {
+                if (v < 0)
                     return (HitInfo)0;
-                }
-                if (u + v > 1.0) {
+
+                if (u + v > 1.0)
                     return (HitInfo)0;
-                }
-				// Initialize hit info
+
 				HitInfo hitInfo = (HitInfo)0;
 				hitInfo.didHit = true;
 				hitInfo.hitPoint = ray.position + ray.direction * dst;
-                
 				hitInfo.distance = dst;
                 hitInfo.u = u;
                 hitInfo.v = v;
 				return hitInfo;
 			}
             
-            HitInfo checkSphereCollisions(Ray ray) {
+            HitInfo checkSphereCollisions(Ray ray)
+            {
                 HitInfo closest = (HitInfo)0;
-
                 closest.distance = 3.402823e+38;
 
-                for (int i = 0; i < numSpheres; i++) {
+                for (int i = 0; i < numSpheres; i++)
+                {
                     Sphere sphere = Spheres[i];
                     HitInfo hit = raySphere(ray, sphere.position, sphere.radius);
-                    if (hit.didHit && hit.distance < closest.distance) {
+                    if (hit.didHit && hit.distance < closest.distance)
+                    {
                         closest = hit;
                         closest.objectType = 0;
                         closest.objectIndex = -1;
@@ -384,12 +498,20 @@ Shader "Custom/RayTracer"
 
                 return closest;
             }
+
             HitInfo TraverseInstanceBLAS(Ray ray, uint instanceIndex, float worldTMax, bool findClosestCollisionOnly)
             {
+                InstanceBLASTraversals++;
+
                 HitInfo closest = (HitInfo)0;
                 float bestWorldT = 3.402823e+38;
 
                 Mesh mesh = Instances[instanceIndex];
+
+                #ifdef ORBITAL_PLANE_TEST_POSSIBLE
+                    OrbitalPlaneParameters orbitalPlaneParameters =
+                        GetLocalOrbitalPlaneParameters(ray.position, BlackHoles[0].position, ray.direction, mesh.worldToLocalMatrix);
+                #endif
 
                 Ray localRay = ray;
                 localRay.position = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
@@ -403,8 +525,8 @@ Shader "Custom/RayTracer"
                 float3 inverseDirection = 1 / localRay.direction;
                 float bestLocalT = min(worldTMax, bestWorldT) * dirScale;
 
-                int stack[64];
-                float stackT[64];
+                int stack[32];
+                float stackT[32];
                 int sp = 0;
 
                 uint nodeIdx = mesh.firstBVHNodeIndex;
@@ -412,6 +534,9 @@ Shader "Custom/RayTracer"
         
                 for (;;)
                 {
+                    BVHTests++;
+                    BLASNodeVisits++;
+
                     if (currentTNear > bestLocalT)
                     {
                         if (sp == 0) break;
@@ -430,6 +555,7 @@ Shader "Custom/RayTracer"
                         {
                             Triangle tri = Triangles[j];
                             HitInfo h = rayTriangle(localRay, tri);
+                            triTests++;
                             if (!h.didHit) continue;
 
                             h.triIndex = j;
@@ -448,10 +574,9 @@ Shader "Custom/RayTracer"
                             closest.distance = worldT;
                             closest.objectType = 2;
                             closest.objectIndex = instanceIndex;
+
                             if (findClosestCollisionOnly)
-                            {
                                 return closest;
-                            }
                         }
 
                         if (sp == 0) break;
@@ -463,20 +588,34 @@ Shader "Custom/RayTracer"
 
                     BVHNode leftNode = BVHNodes[node.left];
                     BVHNode rightNode = BVHNodes[node.right];
-                    
-                    AABBHitInfo lh = RayAABB(
-                        localRay.position, localRay.direction, inverseDirection,
+
+                    #ifdef ORBITAL_PLANE_TEST_POSSIBLE
+                    AABBHitInfo lh = RayHitsBox(
+                        orbitalPlaneParameters,
+                        localRay.position, localRay.direction, inverseDirection, 
                         leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
                         leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
-                        bestLocalT
-                    );
+                        bestLocalT);
 
-                    AABBHitInfo rh = RayAABB(
-                        localRay.position, localRay.direction, inverseDirection,
+                    AABBHitInfo rh = RayHitsBox(
+                        orbitalPlaneParameters,
+                        localRay.position, localRay.direction, inverseDirection, 
                         rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
                         rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
-                        bestLocalT
-                    );
+                        bestLocalT);
+                    #else
+                    AABBHitInfo lh = RayHitsBox(
+                        localRay.position, localRay.direction, inverseDirection, 
+                        leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
+                        leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
+                        bestLocalT);
+
+                    AABBHitInfo rh = RayHitsBox(
+                        localRay.position, localRay.direction, inverseDirection, 
+                        rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
+                        rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
+                        bestLocalT);
+                    #endif
 
                     if (!lh.didHit && !rh.didHit)
                     {
@@ -495,7 +634,7 @@ Shader "Custom/RayTracer"
                     float farT   = leftFirst ? rh.distance : lh.distance;
                     bool farHit  = leftFirst ? rh.didHit : lh.didHit;
 
-                    if (farHit && sp < 64)
+                    if (farHit && sp < 32)
                     {
                         stack[sp] = farIdx;
                         stackT[sp] = farT;
@@ -508,56 +647,36 @@ Shader "Custom/RayTracer"
 
                 return closest;
             }
-            bool IntersectInstanceRootTight(Ray worldRay, Mesh mesh, float worldTMax, out Ray localRay, out float rootWorldT)
-            {
-                localRay = (Ray)0;
-                rootWorldT = 0.0;
-
-                localRay.position = mul(mesh.worldToLocalMatrix, float4(worldRay.position, 1)).xyz;
-
-                float3 localDirUn = mul(mesh.worldToLocalMatrix, float4(worldRay.direction, 0)).xyz;
-                float dirScale = length(localDirUn);
-                if (dirScale < 1e-12)
-                    return false;
-
-                localRay.direction = localDirUn / dirScale;
-                float3 inverseDirection = sign(localRay.direction) / max(abs(localRay.direction), 1e-8);
-
-                BVHNode root = BVHNodes[mesh.firstBVHNodeIndex];
-
-                AABBHitInfo rootHit = RayAABB(
-                    localRay.position, localRay.direction, inverseDirection,
-                    root.AABBLeftX, root.AABBLeftY, root.AABBLeftZ,
-                    root.AABBRightX, root.AABBRightY, root.AABBRightZ,
-                    worldTMax * dirScale
-                );
-
-                if (!rootHit.didHit)
-                    return false;
-
-                rootWorldT = rootHit.distance / dirScale;
-                return rootWorldT <= worldTMax;
-            }
             
-            
-                        
             HitInfo checkMeshCollisions(Ray ray, float worldTMax, bool findClosestCollisionOnly)
             {
                 HitInfo closest = (HitInfo)0;
+
                 if (numMeshes <= 0 || numInstances <= 0 || numTLASNodes <= 0 || TLASRootIndex < 0)
                     return closest;
+
                 #ifdef USE_TLAS
+
                 float bestWorldT = 3.402823e+38;
 
-                int stack[64];
-                float stackT[64];
+                int stack[32];
+                float stackT[32];
                 int sp = 0;
 
                 uint nodeIdx = TLASRootIndex;
                 float currentTNear = -1.0;
                 float3 inverseDirection = 1 / ray.direction;
+
+                #ifdef ORBITAL_PLANE_TEST_POSSIBLE
+                    OrbitalPlaneParameters orbitalPlaneParameters =
+                        GetWorldOrbitalPlaneParameters(ray.position, BlackHoles[0].position, ray.direction);
+                #endif
+
                 for (;;)
                 {
+                    BVHTests++;
+                    TLASNodeVisits++;
+
                     if (currentTNear > bestWorldT || currentTNear > worldTMax)
                     {
                         if (sp == 0) break;
@@ -574,16 +693,17 @@ Shader "Custom/RayTracer"
                     {
                         for (uint j = node.firstIndex; j < node.firstIndex + node.count; j++)
                         {
+                            TLASLeafRefsVisited++;
+
                             uint instanceIndex = TLASRefs[j];
                             HitInfo h = TraverseInstanceBLAS(ray, instanceIndex, min(worldTMax, bestWorldT), findClosestCollisionOnly);
+
                             if (h.didHit && h.distance < bestWorldT)
                             {
                                 bestWorldT = h.distance;
                                 closest = h;
                                 if (findClosestCollisionOnly)
-                                {
                                     return closest;
-                                }
                             }
                         }
 
@@ -597,19 +717,33 @@ Shader "Custom/RayTracer"
                     BVHNode leftNode = TLASNodes[node.left];
                     BVHNode rightNode = TLASNodes[node.right];
 
-                    AABBHitInfo lh = RayAABB(
-                        ray.position, ray.direction, inverseDirection,
+                    #ifdef ORBITAL_PLANE_TEST_POSSIBLE
+                    AABBHitInfo lh = RayHitsBox(
+                        orbitalPlaneParameters,
+                        ray.position, ray.direction, inverseDirection, 
                         leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
                         leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
-                        min(worldTMax, bestWorldT)
-                    );
+                        bestWorldT);
 
-                    AABBHitInfo rh = RayAABB(
-                        ray.position, ray.direction, inverseDirection,
+                    AABBHitInfo rh = RayHitsBox(
+                        orbitalPlaneParameters,
+                        ray.position, ray.direction, inverseDirection, 
                         rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
                         rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
-                        min(worldTMax, bestWorldT)
-                    );
+                        bestWorldT);
+                    #else
+                    AABBHitInfo lh = RayHitsBox(
+                        ray.position, ray.direction, inverseDirection, 
+                        leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
+                        leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
+                        bestWorldT);
+
+                    AABBHitInfo rh = RayHitsBox(
+                        ray.position, ray.direction, inverseDirection, 
+                        rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
+                        rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
+                        bestWorldT);
+                    #endif
 
                     if (!lh.didHit && !rh.didHit)
                     {
@@ -628,7 +762,7 @@ Shader "Custom/RayTracer"
                     float farT   = leftFirst ? rh.distance : lh.distance;
                     bool farHit  = leftFirst ? rh.didHit : lh.didHit;
 
-                    if (farHit && sp < 64)
+                    if (farHit && sp < 32)
                     {
                         stack[sp] = farIdx;
                         stackT[sp] = farT;
@@ -640,41 +774,42 @@ Shader "Custom/RayTracer"
                 }
 
                 return closest;
-                #endif
-                #ifndef USE_TLAS
+
+                #else
                
-                //the closest distance against ALL meshes, world space
                 float bestWorldT = 3.402823e+38;
                 
                 for (int i = 0; i < numMeshes; i++)
                 {
                     Mesh mesh = Instances[i];
-
-                    // Build local ray
                     Ray localRay = ray;
-                    localRay.position = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
 
                     float3 localDirUn = mul(mesh.worldToLocalMatrix, float4(ray.direction, 0));
-                    float  dirScale   = length(localDirUn);
-                    if (dirScale <  1e-12) continue;
+                    float dirScale = length(localDirUn);
+                    if (dirScale < 1e-12) continue;
 
-                    localRay.direction       = localDirUn / dirScale;
+                    localRay.direction = localDirUn / dirScale;
                     float3 inverseDirection = 1.0 / localRay.direction;
-                    
-                    //the best candidate in this mesh, local space
                     float bestLocalT = min(worldTMax, bestWorldT) * dirScale;
 
-                    // Stack traversal (local-t!)
-                    int  stack[64];
-                    float stackT[64];
+                    int stack[32];
+                    float stackT[32];
                     int sp = 0;
 
                     uint nodeIdx = mesh.firstBVHNodeIndex;
                     float currentTNear = -1.0;
+                    localRay.position = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
+
+                    #ifdef ORBITAL_PLANE_TEST_POSSIBLE
+                        OrbitalPlaneParameters orbitalPlaneParameters =
+                            GetLocalOrbitalPlaneParameters(ray.position, BlackHoles[0].position, ray.direction, mesh.worldToLocalMatrix);
+                    #endif
 
                     for (;;)
                     {
-                        // prune against bestLocalT/localTMax
+                        BVHTests++;
+                        BLASNodeVisits++;
+
                         if (currentTNear > bestLocalT)
                         {
                             if (sp == 0) break;
@@ -692,18 +827,15 @@ Shader "Custom/RayTracer"
                             for (uint j = node.firstIndex; j < node.firstIndex + node.count; j++)
                             {
                                 Triangle tri = Triangles[j];
-                                HitInfo h = rayTriangle(localRay, tri);     // h.distance is LOCAL t
+                                HitInfo h = rayTriangle(localRay, tri);
                                 h.triIndex = j;
                                 triTests++;
                                 if (!h.didHit) continue;
-                                //first, check to make sure that this is the best local candidate
+
                                 float localT = h.distance;
                                 if (localT > bestLocalT) continue;
 
-                                // Convert to world t, no need to guard because if localT < bestLocalT, localT / dirScale should be < worldT
                                 float worldT = localT / dirScale;
-
-                                // Compute world hitpoint consistently
                                 float3 hitWorld = ray.position + ray.direction * worldT;
 
                                 bestWorldT = worldT;
@@ -723,21 +855,37 @@ Shader "Custom/RayTracer"
                             continue;
                         }
 
-                        // Internal: test children AABBs in LOCAL t
                         BVHNode leftNode  = BVHNodes[node.left];
                         BVHNode rightNode = BVHNodes[node.right];
-                        
 
-                        AABBHitInfo lh = RayAABB(localRay.position, localRay.direction, inverseDirection,
-                                                 leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
-                                                 leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
-                                                 bestLocalT);
+                        #ifdef ORBITAL_PLANE_TEST_POSSIBLE
+                        AABBHitInfo lh = RayHitsBox(
+                            orbitalPlaneParameters,
+                            localRay.position, localRay.direction, inverseDirection, 
+                            leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
+                            leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
+                            bestLocalT);
 
-                        AABBHitInfo rh = RayAABB(localRay.position, localRay.direction, inverseDirection,
-                                                 rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
-                                                 rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
-                                                 bestLocalT);
-                        BVHTests += 2;
+                        AABBHitInfo rh = RayHitsBox(
+                            orbitalPlaneParameters,
+                            localRay.position, localRay.direction, inverseDirection, 
+                            rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
+                            rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
+                            bestLocalT);
+                        #else
+                        AABBHitInfo lh = RayHitsBox(
+                            localRay.position, localRay.direction, inverseDirection, 
+                            leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
+                            leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
+                            bestLocalT);
+
+                        AABBHitInfo rh = RayHitsBox(
+                            localRay.position, localRay.direction, inverseDirection, 
+                            rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
+                            rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
+                            bestLocalT);
+                        #endif
+
                         if (!lh.didHit && !rh.didHit)
                         {
                             if (sp == 0) break;
@@ -747,16 +895,15 @@ Shader "Custom/RayTracer"
                             continue;
                         }
 
-                        // nearer-first
                         bool leftFirst = lh.didHit && (!rh.didHit || lh.distance <= rh.distance);
 
                         int nearIdx  = leftFirst ? node.left  : node.right;
-                        float nearT   = leftFirst ? lh.distance : rh.distance;
+                        float nearT  = leftFirst ? lh.distance : rh.distance;
                         int farIdx   = leftFirst ? node.right : node.left;
-                        float farT    = leftFirst ? rh.distance : lh.distance;
-                        bool farHit   = leftFirst ? rh.didHit : lh.didHit;
+                        float farT   = leftFirst ? rh.distance : lh.distance;
+                        bool farHit  = leftFirst ? rh.didHit : lh.didHit;
 
-                        if (farHit && sp < 64)
+                        if (farHit && sp < 32)
                         {
                             stack[sp] = farIdx;
                             stackT[sp] = farT;
@@ -766,7 +913,6 @@ Shader "Custom/RayTracer"
                         nodeIdx = nearIdx;
                         currentTNear = nearT;
                     }
-                    
                 }
 
                 return closest;
@@ -787,43 +933,43 @@ Shader "Custom/RayTracer"
                 return outColor;
             }
             
-            
-            
-            Sphere checkInsideSphere(float3 position) {
-                for (int i = 0; i < numSpheres; i++) {
+            Sphere checkInsideSphere(float3 position)
+            {
+                for (int i = 0; i < numSpheres; i++)
+                {
                     Sphere sphere = Spheres[i];
-                    if (length(position - sphere.position) < sphere.radius / 2) {
+                    if (length(position - sphere.position) < sphere.radius / 2)
                         return sphere;
-                    }   
                 }
                 return (Sphere)0;
             }
             
-
-            HitInfo queryCollisions(Ray ray, float tMax, bool findFirstCollisionOnly) {
+            HitInfo queryCollisions(Ray ray, float tMax, bool findFirstCollisionOnly)
+            {
                 HitInfo closest = (HitInfo)0;
                 closest.distance = 3.402823e+38;
+
                 #ifdef TEST_SPHERE
                 HitInfo s = checkSphereCollisions(ray);
-                if (s.didHit && s.distance <= tMax && s.distance < closest.distance) {
+                if (s.didHit && s.distance <= tMax && s.distance < closest.distance)
+                {
                     closest = s;
                     if (findFirstCollisionOnly)
-                    {
                         return s;
-                    }
                 }
                 #endif
+
                 #ifdef TEST_TRIANGLE
                 HitInfo m = checkMeshCollisions(ray, tMax, findFirstCollisionOnly);
-                if (m.didHit && m.distance <= tMax && m.distance < closest.distance) {
+                if (m.didHit && m.distance <= tMax && m.distance < closest.distance)
                     closest = m;
-                }
                 #endif
 
                 return closest;
             }
+
             #include "AtmosphereicScattering.hlsl"
-//Moderate temp. Will run at most numBounces * numRays per pixel
+
             PixelMarcher handleReflection(PixelMarcher ray, inout uint rngState, HitInfo hitInfo)
             {
                 ray.numBounces++;
@@ -867,7 +1013,8 @@ Shader "Custom/RayTracer"
                 N = safeNormalize(mul(nMat, N));
                 ray.lastHitNormal = N;
 
-                float3 geomNormalLocal = normalize(Triangles[hitInfo.triIndex].geometricNormal);
+                //float3 geomNormalLocal = normalize(Triangles[hitInfo.triIndex].geometricNormal);
+                float3 geomNormalLocal = normalize(cross(Triangles[hitInfo.triIndex].edgeAB, Triangles[hitInfo.triIndex].edgeAC));
                 float3 Ng = safeNormalize(mul(nMat, geomNormalLocal));
 
                 if (dot(Ng, ray.ray.direction) > 0)
@@ -910,13 +1057,13 @@ Shader "Custom/RayTracer"
                 #ifdef APPLY_SUN_LIGHTING
                 ray.incomingLight += evaluateDirectSunAtHit(hitInfo.hitPoint, N, Ng, V, material.color, material.metallicity, material.roughness, F0);
                 #endif
+
                 #ifdef APPLY_SCATTERING
                 if (ray.numBounces == 1)
                 {
                     ray.incomingLight += calculateLight(ray.ray.position, ray.ray.direction, hitInfo.distance, rngState, 1);
                 }
                 #endif
-
 
                 float specularChance = clamp(specularWeight / totalWeight, 0.001, 0.999);
                 float choose = randomValue(rngState);
@@ -994,49 +1141,29 @@ Shader "Custom/RayTracer"
 
                 return ray;
             }
-            float estimateNearestCollidableObjectDistance(Ray ray) {
+
+            float estimateNearestCollidableObjectDistance(Ray ray)
+            {
                 float closestDistance = 3.402823e+38;
-                for (int i = 0; i < numSpheres; i++) {
+
+                for (int i = 0; i < numSpheres; i++)
+                {
                     Sphere sphere = Spheres[i];
                     float distance = nearestPointOnSphere(ray.position, sphere.position, sphere.radius);
-                    if (distance < closestDistance) {
+                    if (distance < closestDistance)
                         closestDistance = distance;
-                    }
                 }
-                for (int j = 0; j < numBlackHoles; j++) {
+
+                for (int j = 0; j < numBlackHoles; j++)
+                {
                     BlackHole blackHole = BlackHoles[j];
                     float distance = nearestPointOnSphere(ray.position, blackHole.position, blackHole.SchwartzchildRadius);
-                    if (distance < closestDistance) {
+                    if (distance < closestDistance)
                         closestDistance = distance;
-                    }
                 }
-                //float meshDistance = nearestAlongRayAABB_BVH(ray, closestDistance);
-                //if (meshDistance < closestDistance) {
-                //    closestDistance = meshDistance;
-                //}
+
                 return closestDistance;
             }
-
-            float3 schwarzschildGeodesicAccel(float3 worldPos, BlackHole blackHole, float h2)
-            {
-                float3 x = worldPos - blackHole.position;   // BH -> photon
-                float r2 = dot(x, x);
-                float r = sqrt(r2);
-
-                // Avoid singular blow-up exactly at / inside horizon.
-                float rs = blackHole.SchwartzchildRadius;
-                r = max(r, rs * 1.0001);
-                r2 = r * r;
-
-                float M = blackHole.blackHoleMass;
-
-                // x'' = -3 M h^2 x / r^5
-                float r5 = r2 * r2 * r;
-                float coeff = -3.0 * M * h2 / r5;
-
-                return coeff * x;
-            }
-            
             
             float3 getAngularGrid(float3 rayDirection)
             {
@@ -1045,249 +1172,181 @@ Shader "Custom/RayTracer"
                 float phi = atan2(dir.z, dir.x);
                 float theta = acos(clamp(dir.y,-1.0,1.0));
 
-                float u = phi/(2.0*PI)+0.5;
-                float v = theta/PI;
+                float u = phi / (2.0 * PI) + 0.5;
+                float v = theta / PI;
 
                 float lonLines = 24.0;
                 float latLines = 24.0;
 
-                float2 grid = float2(u*lonLines, v*latLines);
-                float2 cell = abs(frac(grid)-0.5);
+                float2 grid = float2(u * lonLines, v * latLines);
+                float2 cell = abs(frac(grid) - 0.5);
 
                 float thickness = 0.01;
+                float lon = smoothstep(thickness, 0.0, cell.x);
+                float lat = smoothstep(thickness, 0.0, cell.y);
+                float line1 = max(lon, lat);
 
-                float lon = smoothstep(thickness,0.0,cell.x);
-                float lat = smoothstep(thickness,0.0,cell.y);
-
-                float line1 = max(lon,lat);
-
-                float3 color = float3(u, v, 1.0-u);
-
+                float3 color = float3(u, v, 1.0 - u);
                 return color * line1;
             }
+
             float3 DebugRayBending(PixelMarcher before, PixelMarcher after, BlackHole blackHole)
             {
                 float3 dirBefore = before.ray.direction;
                 float3 dirAfter  = after.ray.direction;
 
-                // Angle between entry and exit direction in degrees
                 float cosAngle = clamp(dot(dirBefore, dirAfter), -1.0, 1.0);
                 float bendAngleDeg = acos(cosAngle) * (180.0 / UNITY_PI);
 
-                // Radial distance before and after
                 float rBefore = length(before.ray.position - blackHole.position);
                 float rAfter  = length(after.ray.position  - blackHole.position);
 
                 float rs = blackHole.SchwartzchildRadius;
                 float marchShell = max(rs * blackHole.blackHoleSOIMultiplier, 4.0 * rs);
 
-                // Visualize bend angle — map 0-180 degrees to a color
-                // Blue  = small bend (< 10 deg)
-                // Green = moderate bend (10-90 deg)
-                // Red   = large bend (> 90 deg) — likely orbiting
                 float t = saturate(bendAngleDeg / 180.0);
                 float3 color = lerp(float3(0,0,1), lerp(float3(0,1,0), float3(1,0,0), t*2), step(0.5, t));
 
                 return color;
             }
+
             #include "BlackHoleMarch2D.hlsl"
+
             float3 trace(float3 viewPoint, inout uint rngState)
             {
-                if (isNan(stepSize)) {
+                if (isNan(stepSize))
                     return float3(1,1,1);
-                }
+
                 PixelMarcher pixel_marcher;
                 Ray RayToStore;
                 RayToStore.position = viewPoint;
                 RayToStore.direction = normalize(RayToStore.position - CameraWorldPos);
                 RayToStore.energy = 1;
+
                 pixel_marcher.hitBlackHole = false;
                 pixel_marcher.rayColor = 1;
                 pixel_marcher.incomingLight = 0;
                 pixel_marcher.rayEarlyKill  = false;
                 pixel_marcher.numBounces = 0;
-                pixel_marcher.triTests = 0;
                 pixel_marcher.ray = RayToStore;
-                int maxIterations = 1000;
-                int iterations = 0;
-                //ray.debugSOISteps = 0;
-                //ray.maxNumTriangleTests = 0;
-                while (pixel_marcher.numBounces < maxBounces && iterations < maxIterations) {
 
-                    // First: compute weak-field bends and decide whether any BH requires marching.
-                    float nearestMarchT = 3.402823e+38;
-                    int nearestMarchBH = -1;
+                while (pixel_marcher.numBounces < maxBounces)
+                {
+                    if (pixel_marcher.rayEarlyKill)
+                        break;
 
-                    // Apply weak-field bends for BHs that do NOT require marching.
-                    // For BHs that DO require marching, keep track of the earliest handoff point.
                     #ifdef ENABLE_LENSING
-                    for (int bh = 0; bh < numBlackHoles; bh++)
+                    if (numBlackHoles > 0)
                     {
-                        BlackHoleDecision bhDecision = EvaluateBlackHoleForRay(pixel_marcher.ray, BlackHoles[bh]);
-                        
-                        if (!bhDecision.affectsRay)
-                            continue;
-                        if (bhDecision.shouldMarch)
-                        {
-                            if (bhDecision.marchEntryT < nearestMarchT)
-                            {
-                                nearestMarchT = bhDecision.marchEntryT;
-                                nearestMarchBH = bh;
-                            }
-                            //return float3(1,0,0);
-                        }
-                        else
-                        {
-                            pixel_marcher.ray.direction = bhDecision.weakBentDir;
-                        }
+                        pixel_marcher = marchAllBlackHoles(pixel_marcher, rngState);
 
-                        // DEBUG: visualize impact parameter
-                        // Return this from trace() instead of normal color to see b/rs map
-                        // Shadow boundary should appear at b/rs ≈ 2.598
-                        #ifdef IMPACT_PARAMETER_DEBUG
-                        float b_over_rs = bhDecision.impactParameter / BlackHoles[bh].SchwartzchildRadius;
-                        float3 debugColor = float3(
-                            saturate(b_over_rs / 6.0),           // red channel: 0 at center, 1 at b=6rs
-                            saturate((b_over_rs - 2.5980762114) / 0.05),   // green channel: lights up right at shadow boundary
-                            0
-                        );
-                        return debugColor;
-                        #endif
+                        if (pixel_marcher.hitBlackHole)
+                        {
+                            pixel_marcher.incomingLight = float3(0,0,0);
+                            break;
+                        }
                     }
                     #endif
-                    /*#ifndef APPLY_LENSING
-                    for (int i = 0; i < numBlackHoles; i++)
-                    {
-                        if (RaySphereEntryDistance(ray.position, ray.direction, BlackHoles[i].position, BlackHoles[i].SchwartzchildRadius) > 0)
-                        {
-                            return float3(0,0,0);
-                        }
-                    }
-                    #endif*/
 
-                    // Commit the weak-field bent direction before collision tests
-                    pixel_marcher.ray.direction = normalize(pixel_marcher.ray.direction);
-
-                    // Only look for object hits up to the nearest BH march handoff, if any.
-                    float sceneTMax = (nearestMarchBH != -1) ? nearestMarchT : 3.402823e+38;
-                    // Only check geometry before march if we're outside the SOI
-                    HitInfo objectHitInfo = (HitInfo)0;
-                    objectHitInfo.distance = 3.402823e+38;
-
-                    if (nearestMarchBH == -1 || nearestMarchT > 1e-4)
-                        objectHitInfo = queryCollisions(pixel_marcher.ray, sceneTMax, false);
-
-                    // Case 1: object hit before any BH handoff
+                    HitInfo objectHitInfo = queryCollisions(pixel_marcher.ray, 3.402823e+38, false);
                     if (objectHitInfo.didHit)
                     {
                         pixel_marcher = handleReflection(pixel_marcher, rngState, objectHitInfo);
+                        continue;
                     }
-                    // Case 2: no object hit, but a BH needs strong-field marching
-                    else if (nearestMarchBH != -1)
-                    {
-                        if (nearestMarchT > 1e-4)
-                            pixel_marcher.ray.position = pixel_marcher.ray.position + pixel_marcher.ray.direction * nearestMarchT;
 
-                        pixel_marcher = marchNearBlackHole(pixel_marcher, BlackHoles[nearestMarchBH], rngState);
+                    float3 rayDir = pixel_marcher.ray.direction;
+                    float atmExit = RaySphereExitDistance(
+                        pixel_marcher.ray.position, rayDir, PlanetCenter(), atmosphereRadius);
 
-                        if (pixel_marcher.hitBlackHole)
-                            return float3(0,0,0);
-                    }
-                    // Case 3: nothing hit at all, use background
-                   else // Case 3: miss
-                    {
-                        float3 rayDir = pixel_marcher.ray.direction;
-                        float atmExit = RaySphereExitDistance(
-                            pixel_marcher.ray.position, rayDir, PlanetCenter(), atmosphereRadius);
-
-                        if (atmExit > 0)
-                        {
-                            #ifdef APPLY_SCATTERING
-                            if ((numRenderedFrames % framesPerScatter == 0 || numRenderedFrames == 0))
-                            {
-                                pixel_marcher.incomingLight += calculateLight(
-                                    pixel_marcher.ray.position, rayDir, atmExit, rngState, inScatteringPoints);
-                            }
-                            #endif
-                        }
-                        break;
-                    }
-                    if (pixel_marcher.numBounces >= maxBounces || pixel_marcher.rayEarlyKill)
+                    if (atmExit > 0)
                     {
                         #ifdef APPLY_SCATTERING
-                        /*if (pixel_marcher.hasLastHit && (numRenderedFrames % framesPerScatter == 0 || numRenderedFrames == 0))
+                        if ((numRenderedFrames % framesPerScatter == 0 || numRenderedFrames == 0))
                         {
-                            float3 hitPos = pixel_marcher.ray.position;
-                            float NdotL = saturate(dot(pixel_marcher.lastHitNormal, sunDirection));
-                            if (NdotL > 0)
-                            {
-                                Ray finalSunRay;
-                                finalSunRay.position  = hitPos + pixel_marcher.lastHitNormal * 1e-4;
-                                finalSunRay.direction = sunDirection;
-                                finalSunRay.energy    = 1.0;
-                                float atmExit = RaySphereExitDistance(
-                                ray.position, ray.direction, float3(0,0,0), atmosphereRadius);
-                                if (atmExit > 0)
-                                {
-                                    pixel_marcher.incomingLight += calculateLight(
-                                        ray.position, ray.direction, atmExit, rngState, 8);
-                                }
-                            }
-                        }*/
+                            pixel_marcher.incomingLight += calculateLight(
+                                pixel_marcher.ray.position, rayDir, atmExit, rngState, inScatteringPoints);
+                        }
                         #endif
-                        break;  // unconditional, outside the ifdef
                     }
-                    iterations++;
+                    else
+                    {
+                        pixel_marcher.incomingLight += getAngularGrid(rayDir);
+                    }
 
-                    
-                }    
-                //return float3(BVHTests / 100, BVHTests / 100, BVHTests / 100);
-                //return float3(triTests / 1000, triTests / 1000, triTests / 1000);
-                if (bad3(pixel_marcher.incomingLight)) {
-                    return float4(10000000,0,10000000,1);
+                    break;
                 }
-                
+
+                if (bad3(pixel_marcher.incomingLight))
+                    return float3(10000000, 0, 10000000);
+
                 if (any(isNan(pixel_marcher.ray.energy)))
-                {
-                    return float4(10000000,0,10000000,1);
-                }
-                #ifdef DEBUG_ENABLE_ENERGY_VISUALIZATION
-                float g = 1.0 / max(pixel_marcher.ray.energy, 1e-6);
-                float d = log2(g);   // 0 = no shift, positive = blueshift, negative = redshift
+                    return float3(10000000, 0, 10000000);
 
+                #ifdef DEBUG_ENABLE_ENERGY_VISUALIZATION
+                float d = log2(1.0 / max(pixel_marcher.ray.energy, 1e-6));
                 if (d > 0.0)
-                {
-                    return float3(0.0, 0.0, saturate(d * 4.0)); // blue = blueshift
-                }
+                    return float3(0.0, 0.0, saturate(d * 4.0));
                 else
-                {
-                    return float3(saturate(-d * 4.0), 0.0, 0.0); // red = redshift
-                }
+                    return float3(saturate(-d * 4.0), 0.0, 0.0);
                 #endif
+
+                #if defined(DEBUG_DISPLAY_BVH_NODES_VISITED) || \
+                    defined(DEBUG_DISPLAY_TRIANGLE_TESTS) || \
+                    defined(DEBUG_DISPLAY_TLAS_NODE_VISITS) || \
+                    defined(DEBUG_DISPLAY_BLAS_NODE_VISITS) || \
+                    defined(DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS) || \
+                    defined(DEBUG_DISPLAY_TLAS_LEAF_REFS)
+                    pixel_marcher.incomingLight = float3(0,0,0);
+                #endif
+
+                float bounceDenom = max(1.0, (float)pixel_marcher.numBounces);
+
+                #ifdef DEBUG_DISPLAY_BVH_NODES_VISITED
+                    pixel_marcher.incomingLight.z = (float)BVHTests / max(1.0, (float)BVHTestsSaturation * bounceDenom);
+                #endif
+
+                #ifdef DEBUG_DISPLAY_TRIANGLE_TESTS
+                    pixel_marcher.incomingLight.r = (float)triTests / max(1.0, (float)triTestsSaturation * bounceDenom);
+                #endif
+
+                #ifdef DEBUG_DISPLAY_TLAS_NODE_VISITS
+                    pixel_marcher.incomingLight.g = (float)TLASNodeVisits / max(1.0, (float)TLASNodeVisitsSaturation * bounceDenom);
+                #endif
+
+                #ifdef DEBUG_DISPLAY_BLAS_NODE_VISITS
+                    pixel_marcher.incomingLight.b = (float)BLASNodeVisits / max(1.0, (float)BLASNodeVisitsSaturation * bounceDenom);
+                #endif
+
+                #ifdef DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS
+                    pixel_marcher.incomingLight.r = (float)InstanceBLASTraversals / max(1.0, (float)InstanceBLASTraversalsSaturation * bounceDenom);
+                #endif
+
+                #ifdef DEBUG_DISPLAY_TLAS_LEAF_REFS
+                    pixel_marcher.incomingLight.g = (float)TLASLeafRefsVisited / max(1.0, (float)TLASLeafRefsVisitedSaturation * bounceDenom);
+                #endif
+                
                 return pixel_marcher.incomingLight;
             }
             
             float4 frag (v2f i) : SV_Target
             {
-                
                 uint2 numPixels = _ScreenParams.xy;
                 uint2 pixelCoord = i.uv * numPixels;
                 uint pixelIndex = pixelCoord.y * numPixels.x + pixelCoord.x;
 
-
                 float3 totalIncomingLight = 0;
                 uint rngState = pixelIndex + (uint)numRenderedFrames * 829123;
-                //uint rngState = pixelIndex; //enable me for pix debugging
-                for (int x = 0; x < RaysPerPixel; x++) {
+
+                for (int x = 0; x < RaysPerPixel; x++)
+                {
                     uint sampleIndex = (uint)numRenderedFrames * (uint)RaysPerPixel + (uint)x + 1u;
                     float2 h = halton2(sampleIndex);
 
-                    // per-pixel Cranley–Patterson rotation
                     uint hash = pixelIndex * 1664525u + 1013904223u;
                     float2 rot = float2((hash & 0xFFFFu) / 65536.0, (hash >> 16) / 65536.0);
                     h = frac(h + rot);
 
-                    // subpixel jitter
                     float2 jitterUV = (h - 0.5) / (float2)_ScreenParams.xy;
                     float3 vpLocal = float3((i.uv + jitterUV) - 0.5, 1) * ViewParams;
                     float3 vp = mul(CameraLocalToWorldMatrix, float4(vpLocal, 1)).xyz;
@@ -1297,17 +1356,18 @@ Shader "Custom/RayTracer"
                     float maxLuma = 10.0;
 
                     if (luma > maxLuma)
-                    {
                         color *= maxLuma / luma;
-                    }
+
                     totalIncomingLight += color;
                 }
+
                 float3 pixelCol = totalIncomingLight / RaysPerPixel;
-                if (any(isinf(pixelCol))) {
+                if (any(isinf(pixelCol)))
                     return float4(10000000,0,10000000,1);
-                }
+
                 return float4(pixelCol, 1);
             }
+
             ENDHLSL
         }
     }
