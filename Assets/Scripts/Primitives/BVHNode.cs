@@ -1,5 +1,5 @@
 using UnityEngine;
-
+//Used for BVH construction, needs to be flattened for GPU
 public class BVHNode {
     public Vector3 boundsMin;
     public Vector3 boundsMax;

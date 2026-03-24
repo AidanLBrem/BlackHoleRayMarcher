@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Runtime.InteropServices;
 [StructLayout(LayoutKind.Sequential)]
+//TODO: Pack all AABBs into something more readable
 struct MeshStruct {
     public Matrix4x4 localToWorldMatrix;
     public Matrix4x4 worldToLocalMatrix;

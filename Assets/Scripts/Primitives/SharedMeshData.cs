@@ -2,7 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using System;
 using UnityEngine.Serialization;
-
+//Each instance creates a BLAS. All the GPU knows is the positions of each BLAS instance, it only contains one for each unqiue mesh
 [ExecuteAlways]
 public class SharedMeshData
 {
@@ -84,21 +84,10 @@ public class SharedMeshData
                 centroid = centroid,
                 triangleIndex = i,
             };
-
-            if (!float.IsFinite(g.x) || !float.IsFinite(g.y) || !float.IsFinite(g.z) || g.sqrMagnitude < 1e-12f)
-            {
-                Debug.LogWarning(
-                    $"Degenerate tri in {mesh.name}: triOffset={i}, indices=({v0Index},{v1Index},{v2Index})\n" +
-                    $"v0=({v0.x:R}, {v0.y:R}, {v0.z:R}) bits=({BitConverter.SingleToInt32Bits(v0.x)}, {BitConverter.SingleToInt32Bits(v0.y)}, {BitConverter.SingleToInt32Bits(v0.z)})\n" +
-                    $"v1=({v1.x:R}, {v1.y:R}, {v1.z:R}) bits=({BitConverter.SingleToInt32Bits(v1.x)}, {BitConverter.SingleToInt32Bits(v1.y)}, {BitConverter.SingleToInt32Bits(v1.z)})\n" +
-                    $"v2=({v2.x:R}, {v2.y:R}, {v2.z:R}) bits=({BitConverter.SingleToInt32Bits(v2.x)}, {BitConverter.SingleToInt32Bits(v2.y)}, {BitConverter.SingleToInt32Bits(v2.z)})\n" +
-                    $"area=({g.sqrMagnitude})\n" +
-                    $"cross=({g.x:R}, {g.y:R}, {g.z:R})"
-                );
-            }
+            
         }
     }
-
+    //Turn the recursive BLAS into something the GPU can read
     List<GPUBVHNode> FlattenBLASForGPU(BLASBuilder builder)
     {
         var result = new List<GPUBVHNode>();

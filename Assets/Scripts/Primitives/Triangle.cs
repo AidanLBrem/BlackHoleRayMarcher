@@ -1,6 +1,8 @@
 using UnityEngine;
 using System.Runtime.InteropServices;
 [StructLayout(LayoutKind.Sequential)]
+//Triangle struct fed into GPU
+//TODO: Octal encoding?
 public struct Triangle
 {
     /*public int vertexIndex1;

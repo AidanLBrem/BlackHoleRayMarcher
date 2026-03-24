@@ -1,5 +1,6 @@
 using UnityEngine;
 [System.Serializable]
+//used mainly for BVH construction, has data that's convenient 
 public struct buildTri {
     public Vector3 posA;
     public Vector3 posB;

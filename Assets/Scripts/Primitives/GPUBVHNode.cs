@@ -1,6 +1,8 @@
 using Unity.Mathematics;
 using System.Runtime.InteropServices;
 [StructLayout(LayoutKind.Sequential)]
+//BVH node that GPU can read
+//TODO: pack all the AABBs into something more readable
 public struct GPUBVHNode {
 
 

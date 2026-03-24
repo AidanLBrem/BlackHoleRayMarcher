@@ -2,7 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using System;
 using UnityEngine.Serialization;
-
+//Apply this to objects to make the raytracer see them
 [ExecuteAlways]
 public class RayTracedMesh : MonoBehaviour
 {

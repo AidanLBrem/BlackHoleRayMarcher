@@ -1,5 +1,5 @@
 using UnityEngine;
-
+//Structure that is fed into the GPU
 public struct BlackHole
 {
     public Vector3 position; //12

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using static UnityEngine.Mathf;
-
+//Gotta be honest here, this is almost 1:1 Sebastian Lague's code. I still need to learn how to do this myself well
 public static class ShaderHelper
 {
 	public enum DepthMode { None = 0, Depth16 = 16, Depth24 = 24 }

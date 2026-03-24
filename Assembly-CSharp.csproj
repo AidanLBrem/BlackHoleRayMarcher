@@ -51,7 +51,6 @@
     <Compile Include="Assets\Scripts\Primitives\BlackHole.cs" />
     <Compile Include="Assets\Scripts\CameraTestScript.cs" />
     <Compile Include="Assets\Scripts\RayTracingMaterial.cs" />
-    <Compile Include="Assets\Scripts\Primitives\RayTracedTriangle.cs" />
     <Compile Include="Assets\Scripts\BVH\BVHBuilder.cs" />
     <Compile Include="Assets\Scripts\BVH\MeshPreprocessor.cs" />
     <Compile Include="Assets\Scripts\Primitives\RayTracedSphere.cs" />
