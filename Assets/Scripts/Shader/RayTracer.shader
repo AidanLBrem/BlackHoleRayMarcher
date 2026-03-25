@@ -921,15 +921,18 @@ Shader "Custom/RayTracer"
            
             float3 ApplyFakeRelativisticToneShift(float3 color, float g, float strength)
             {
+                float3 outColor = color;
+                #ifdef USE_REDSHIFTING
                 float3 redTint  = float3(1.00, 0.38, 0.12);
                 float3 blueTint = float3(0.45, 0.68, 1.00);
 
                 float tRed  = saturate((1.0 - g) * 2.0) * strength;
                 float tBlue = saturate((g - 1.0) * 2.0) * strength;
 
-                float3 outColor = color;
+
                 outColor = lerp(outColor, outColor * redTint,  tRed);
                 outColor = lerp(outColor, outColor * blueTint, tBlue);
+                #endif
                 return outColor;
             }
             
@@ -1138,7 +1141,6 @@ Shader "Custom/RayTracer"
                 }
 
                 ray.rayColor /= p;
-
                 return ray;
             }
 
@@ -1243,6 +1245,10 @@ Shader "Custom/RayTracer"
                         if (pixel_marcher.hitBlackHole)
                         {
                             pixel_marcher.incomingLight = float3(0,0,0);
+                            break;
+                        }
+                        if (pixel_marcher.rayEarlyKill || pixel_marcher.numBounces >= maxBounces)
+                        {
                             break;
                         }
                     }

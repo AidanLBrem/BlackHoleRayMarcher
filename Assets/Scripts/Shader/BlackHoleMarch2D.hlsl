@@ -252,7 +252,7 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
             ray.ray.energy *= sqrt(gtt_old / gtt_new);
             #endif
             //if we are at max reflections or russian roulette killed, return. classifier will handle it from there
-            if (ray.rayEarlyKill)
+            if (ray.rayEarlyKill || ray.numBounces >= maxBounces)
                 return ray;
 
             pos = ray.ray.position;
