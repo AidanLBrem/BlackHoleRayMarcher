@@ -1,5 +1,5 @@
 
-This is a GPU accelerated Raymarcher that implements binned BVH (Bounded Volume Hierarchy) and stochastic path tracing to visualize black hole relativistic light bending in everyday scenes in the Unity editor with GGX material properties. When no black hole is present, the tracer defaults to a standard linear path tracer. Additionally, some support is given for atmosphereic scattering and some mild NEE, but since such occlusion computations are extremely expensive to perform when scattering, it IS NOT performant. Looking into ways to make curved space shadow maps, because currently all lighting is real time!
+This is a GPU accelerated Raymarcher that implements binned BVH (Bounded Volume Hierarchy) and stochastic path tracing to visualize black hole relativistic light bending in everyday scenes in the Unity editor with GGX material properties. When no black hole is present, the tracer defaults to a standard linear path tracer. Additionally, some support is given for atmosphereic scattering and some mild NEE, but since such occlusion computations are extremely expensive to perform, it IS NOT performant. Looking into ways to make curved space shadow maps, because currently all lighting is real time!
 
 A very special thanks to Sebastian Lague - the bones of the ray tracer come from his phenomenal raytracing series on YouTube! 
 
