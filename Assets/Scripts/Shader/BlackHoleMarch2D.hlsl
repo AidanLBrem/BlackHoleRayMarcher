@@ -50,7 +50,7 @@ float3 ComputeTotalAccel(float3 pos, float3 dir)
             (1.5 * rs - r) * invR2 * invSqrtF;
         float3 rel_perp  = rel - dot(rel, dir) * dir; //perpindicular component of vector
     
-        total += (-bendFactor / r) * rel_perp;
+        total += (-bendFactor * invR) * rel_perp;
     }
 
     return total;
@@ -140,7 +140,19 @@ bool SegmentHitsAnyHorizon(float3 p0, float3 p1)
 
     return false;
 }
-
+void IntegrateLeapfrog(float3 pos, float3 dir, float stepLen, out float3 newPos, out float3 newDir)
+{
+    // half step kick
+    float3 accel = ComputeTotalAccel(pos, dir);
+    float3 halfDir = (dir + 0.5 * stepLen * accel);
+    
+    // full step drift
+    newPos = pos + stepLen * halfDir;
+    
+    // half step kick at new position
+    float3 accel2 = ComputeTotalAccel(newPos, halfDir);
+    newDir = normalize(halfDir + 0.5 * stepLen * accel2);
+}
 // ----------------------------------------------------------------------------
 // RK4 integrator for:
 //   dpos/ds = dir
@@ -156,19 +168,19 @@ void IntegrateRK4(float3 pos, float3 dir, float stepLen, out float3 newPos, out 
 
     // k2
     float3 pos2 = pos + 0.5 * stepLen * k1_pos;
-    float3 dir2 = normalize(dir + 0.5 * stepLen * k1_dir);
+    float3 dir2 = (dir + 0.5 * stepLen * k1_dir);
     float3 k2_pos = dir2;
     float3 k2_dir = ComputeTotalAccel(pos2, dir2);
 
     // k3
     float3 pos3 = pos + 0.5 * stepLen * k2_pos;
-    float3 dir3 = normalize(dir + 0.5 * stepLen * k2_dir);
+    float3 dir3 = (dir + 0.5 * stepLen * k2_dir);
     float3 k3_pos = dir3;
     float3 k3_dir = ComputeTotalAccel(pos3, dir3);
 
     // k4
     float3 pos4 = pos + stepLen * k3_pos;
-    float3 dir4 = normalize(dir + stepLen * k3_dir);
+    float3 dir4 = (dir + stepLen * k3_dir);
     float3 k4_pos = dir4;
     float3 k4_dir = ComputeTotalAccel(pos4, dir4);
 
@@ -198,9 +210,15 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
     // Only enter the marcher if we are already in a shell or is about to enter one
     if (!IsInsideAnyMarchShell(pos) && !RayWillEnterAnyMarchShell(pos, dir))
         return ray;
-
+    #ifdef MARCH_CHORD_COLLISION_LIMIT
+    int stepsSinceCollisionTest = 0;
+    float3 chordStart = ray.ray.position;
+    #endif
     while (true)
     {
+        #ifdef MARCH_CHORD_COLLISION_LIMIT
+        stepsSinceCollisionTest++;
+        #endif
         //calculate adaptive step size - closer to the horizon = more bending = more steps needed
         float minDistFromHorizon = 3.402823e+38;
 
@@ -216,9 +234,9 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
         float stepLen = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
         
         //RK4
-        float3 newPos, newDir;
-        IntegrateRK4(pos, dir, stepLen, newPos, newDir);
-
+        float3 newPos;
+        IntegrateRK4(pos, dir, stepLen, newPos, dir);
+        //ntegrateLeapfrog(pos, dir, stepLen, newPos, newDir);
         //We need to check to see if we intersect the black hole at any point along the chord
         //TODO: Merge this with queryCollisions
         if (SegmentHitsAnyHorizon(pos, newPos))
@@ -229,27 +247,51 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
 
         //See if we collide with anything along this chord, we use testRay because we don't want to write to the actual ray until we confirm where we are going
         //TODO: It might be faster to use the ray itself. 
+        HitInfo h = (HitInfo)0;
+
+        #ifdef MARCH_CHORD_COLLISION_LIMIT
+        float t = saturate(minDistFromHorizon / (GetBlackHoleMarchShellRadius(0) - BlackHoles[0].SchwartzchildRadius));
+        int dynamicSteps = (int)lerp(1, u_StepsPerCollisionTest, t);
+        if (stepsSinceCollisionTest > dynamicSteps)
+        {
+            Ray testRay;
+            testRay.position = chordStart;
+            testRay.direction = normalize(newPos - chordStart);
+            h = queryCollisions(testRay, length(newPos - chordStart), false);
+            stepsSinceCollisionTest = 0;
+        }
+
+        #endif
+        #ifndef MARCH_CHORD_COLLISION_LIMIT
         Ray testRay;
         testRay.position  = pos;
-        testRay.direction = normalize(newPos - pos);
-        testRay.energy    = ray.ray.energy;
-
         float actualStepDist = length(newPos - pos);
+        testRay.direction = (newPos - pos)/actualStepDist;
 
-        float gtt_old = ComputeGttMulti(pos);
 
-        HitInfo h = queryCollisions(testRay, actualStepDist, false);
+        h = queryCollisions(testRay, actualStepDist, false);
+        #endif
+
         //We did collide with something. Move to the collision site and reflect
         if (h.didHit)
         {
+            #ifdef MARCH_CHORD_COLLISION_LIMIT
+            ray.ray.position  = chordStart;
+            ray.ray.direction = normalize(newPos - chordStart); //this is the ray we intersect along
+            #else
             ray.ray.position  = pos;
             ray.ray.direction = normalize(newPos - pos);
+            #endif
 
             ray = handleReflection(ray, rngState, h);
+            #ifdef MARCH_CHORD_COLLISION_LIMIT
+            chordStart = ray.ray.position; //go to new hit position
+            #endif
             //Make sure to redshift!
             #ifdef USE_REDSHIFTING
+            float gtt_old = ComputeGttMulti(pos);
             float gtt_new = ComputeGttMulti(newPos);
-            ray.ray.energy *= sqrt(gtt_old / gtt_new);
+            ray.energy *= sqrt(gtt_old / gtt_new);
             #endif
             //if we are at max reflections or russian roulette killed, return. classifier will handle it from there
             if (ray.rayEarlyKill || ray.numBounces >= maxBounces)
@@ -267,16 +309,20 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
 
             continue;
         }
+        #ifdef MARCH_CHORD_COLLISION_LIMIT
+        if (stepsSinceCollisionTest == 0)
+            chordStart = newPos;
+        #endif
         //no hit, we march instead
         #ifdef ENABLE_LENSING
         #ifdef USE_REDSHIFTING
         float gtt_new = ComputeGttMulti(newPos);
-        ray.ray.energy *= sqrt(gtt_old / gtt_new);
+        float gtt_old = ComputeGttMulti(pos);
+        ray.energy *= sqrt(gtt_old / gtt_new);
         #endif
         #endif
 
         pos = newPos;
-        dir = newDir;
 
         ray.ray.position  = pos;
         ray.ray.direction = dir;

@@ -132,6 +132,9 @@ public class RayTracingManager : MonoBehaviour
 
     public bool displayTLASLeafRefs = false;
     public int TLASLeafRefsSaturationValue = 1000;
+
+    public bool useStepsPerCollision = true;
+    public int StepsPerCollisionTest = 3;
     // --- Accumulation tracking ---
     Vector3 lastCameraPosition;
     Quaternion lastCameraRotation;
@@ -561,6 +564,7 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("BLASNodeVisitsSaturation", BLASNodeVisitsSaturationValue);
         rayTracingMaterial.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
         rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation", TLASLeafRefsSaturationValue);
+        rayTracingMaterial.SetInt("u_StepsPerCollisionTest", StepsPerCollisionTest);
     }
 
     static GPUBVHNode[] PackNodes(BvhNode[] nodes)
@@ -780,6 +784,9 @@ public class RayTracingManager : MonoBehaviour
 
         if (displayTLASLeafRefs) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_TLAS_LEAF_REFS");
         else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_TLAS_LEAF_REFS");
+        
+        if (useStepsPerCollision && StepsPerCollisionTest > 1) rayTracingMaterial.EnableKeyword("MARCH_CHORD_COLLISION_LIMIT");
+        else rayTracingMaterial.DisableKeyword("MARCH_CHORD_COLLISION_LIMIT");
     }
 
     void UpdateShaderValues()

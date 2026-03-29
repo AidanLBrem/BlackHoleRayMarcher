@@ -214,7 +214,6 @@ float3 calculateLight(
         Ray shadowRay;
         shadowRay.position  = samplePoint;
         shadowRay.direction = dirToSun;
-        shadowRay.energy    = 1.0;
         //TODO: probably want to replace this with a cheaper, return if we hit ANYTHING check
         HitInfo h = queryCollisions(shadowRay, sunSegment, true);
         if (i == 0)
@@ -321,7 +320,6 @@ float3 evaluateDirectSunAtHit(
     Ray shadowRay;
     shadowRay.position  = shadowOrigin;
     shadowRay.direction = L;
-    shadowRay.energy    = 1.0;
 
     HitInfo shadowHit = queryCollisions(shadowRay, sunSegment, true);
     if (shadowHit.didHit)

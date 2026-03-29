@@ -14,6 +14,7 @@ public struct BvhSplitResult
     public bool valid;
     public int axis;
     public float splitPos;
+    public float cost;
     public Bounds leftBounds;
     public Bounds rightBounds;
 }
@@ -82,9 +83,10 @@ public class BvhBuilder<TRef>
             return nodeIndex;
 
         BvhSplitResult split = FindBestSplitBinnedSAH_NoMutate(start, end);
-        if (!split.valid)
+        float leafCost = count * SurfaceArea(bounds);
+        if (!split.valid || split.cost >= leafCost)
             return nodeIndex;
-
+        
         int mid = PartitionArray(
             primitiveRefs,
             start,
@@ -309,6 +311,7 @@ public class BvhBuilder<TRef>
                     best.valid = true;
                     best.axis = axis;
                     best.splitPos = splitPos;
+                    best.cost = cost;
                     best.leftBounds = leftB[k - 1];
                     best.rightBounds = rightB[k];
                 }

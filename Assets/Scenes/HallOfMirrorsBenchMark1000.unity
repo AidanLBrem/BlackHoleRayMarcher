@@ -212,7 +212,7 @@ GameObject:
   - component: {fileID: 240701371}
   - component: {fileID: 240701370}
   m_Layer: 0
-  m_Name: GameObject (2)
+  m_Name: Knight
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -263,9 +263,42 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: -8319465574948283117, guid: c90e7c58149c9a94caa8bc7ae758c7cf, type: 3}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
-    color: {r: 0, g: 1, b: 0.011921406, a: 1}
+    color: {r: 0, g: 0, b: 0, a: 1}
     emissiveColor: {r: 1, g: 1, b: 1, a: 0}
     specularColor: {r: 1, g: 1, b: 1, a: 0}
     emissiveStrength: 0
@@ -273,17 +306,10 @@ MonoBehaviour:
     metallicity: 0
   update: 0
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: -0.044100493, z: 1.6834215}
-    m_Extent: {x: 0.79608184, y: 0.87364995, z: 1.686191}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 857
   numNormals: 857
   numTriangles: 1368
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!33 &240701372
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -339,6 +365,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!4 &240701374
 Transform:
@@ -350,6 +377,190 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0.6532815, y: 0.27059805, z: 0.27059805, w: 0.6532815}
   m_LocalPosition: {x: -0.030629901, y: -4.51, z: -2.45}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 45}
+--- !u!1 &296161806
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 296161811}
+  - component: {fileID: 296161810}
+  - component: {fileID: 296161809}
+  - component: {fileID: 296161808}
+  - component: {fileID: 296161807}
+  m_Layer: 0
+  m_Name: GameObject (6)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &296161807
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 296161806}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ba1d2e5d40acbcd4f8ba48e095a2b08c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BVHCreator
+  numBins: 16
+  meshObj: {fileID: 296161808}
+  drawCentroids: 0
+  drawBVH: 0
+  drawTriangleHeatMap: 0
+  drawNodeDepthHeatMap: 0
+  totalNodes: 215
+  leafNodes: 108
+  trianglesPerLeaf: 0
+  maxDepth: 32
+  visualizorMaxDepth: 14
+  maxTrianglesInNode: 4
+  minTrianglesInNode: 2
+  recordDepth: 9
+  highestLeafNode: 6
+  triIndexArray: 67000000660000006f0000006e0000004c0000004d0000004b0000004a0000006900000068000000550000005400000050000000510000005b000000610000005a0000006a0000005f0000005e0000006b00000052000000530000006c000000570000006d000000560000004e0000005d0000004f0000005c000000630000006500000062000000f6000000f7000000ff000000fe000000dd000000dc000000f9000000f8000000db000000da000000e0000000e1000000e4000000e5000000f0000000ea000000eb000000fa000000fb000000ee000000ef000000e2000000e3000000fc000000e7000000e6000000fd000000f4000000f2000000f3000000de000000df000000ed000000ec000000230000002200000016000000170000000a0000000b0000000e0000000f0000002500000024000000150000001400000007000000060000001a0000001b0000001c0000001e0000001f0000002600000027000000040000000500000021000000200000000300000002000000120000001300000018000000080000000d000000090000000c000000a6000000a7000000b3000000b20000009b0000009a000000b4000000b50000009e0000009f000000ad000000ab000000aa000000a40000009700000096000000a5000000af000000ae000000b6000000b7000000940000009500000093000000b1000000b000000092000000a9000000a3000000a20000009d0000009c0000009900000098000000580000005900000060000000440000006400000045000000650100001d00000064010000100000001100000019000000e9000000e8000000f1000000f5000000d4000000d50000008c0000008d000000ac000000a8000000a1000000a00000007400000075000000700000007100000029000000280000002c0000002d00000001010000050100000401000000010000bc000000bd000000b9000000b80000007600000077000000780000007900000031000000300000002e0000002f00000006010000070100000801000009010000c0000000c1000000be000000bf0000004800000049000000720000007300000082000000830000007e0000007f00000086000000870000007a0000007b0000007d0000007c00000080000000810000000201000003010000d9000000d80000000e0100000f010000130100001201000016010000170100000c0100000d0100000a0100000b01000010010000110100002b0000002a00000001000000000000003500000034000000320000003300000038000000390000003b0000003a00000036000000370000003f0000003e000000bb000000ba0000009000000091000000c5000000c4000000c3000000c2000000c8000000c9000000c7000000c6000000cb000000ca000000ce000000cf0000002d01000031010000300100002c0100008500000084000000360100002b0100002a010000370100008b0000008a0000003e0100003f01000023010000220100001b0100001a0100001501000014010000250100002401000039010000380100004b0100004a01000059010000580100005a0100004d0100004c0100005b010000510100004301000042010000500100004501000053010000520100004401000088000000890000008e0000001f010000180100008f0000005e0100001e010000600100005f01000019010000200100001c0100001d010000210100003c0000003d00000042000000430000002f01000032010000330100002e010000d3000000d20000003b010000260100003a01000027010000cc000000cd000000280100002901000035010000340100003c0100003d01000041010000400100004f0100005c0100004e0100005d0100004901000048010000570100005601000055010000460100005401000047010000470000004000000041000000d6000000d1000000630100006101000062010000d000000046000000d7000000
+  averageTrianglesPerNode: 3.3148148
+  numNodes: 215
+  totalTrianglesCoveredByBVH: 358
+  trianglesInNodesCutoff: 1
+  depthCutOff: 1
+--- !u!114 &296161808
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 296161806}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  material:
+    color: {r: 0, g: 0, b: 0, a: 1}
+    emissiveColor: {r: 1, g: 1, b: 1, a: 0}
+    specularColor: {r: 1, g: 1, b: 1, a: 0}
+    emissiveStrength: 0
+    roughness: 1
+    metallicity: 0
+  update: 0
+  rebuildBVH: 0
+  drawBVH: 0
+  numVertices: 857
+  numNormals: 857
+  numTriangles: 1368
+--- !u!33 &296161809
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 296161806}
+  m_Mesh: {fileID: 1705324974331375986, guid: cf4d3acd65c6b4940b7b2a4cb9811c8f, type: 3}
+--- !u!23 &296161810
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 296161806}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: -3033667219593020291, guid: aee1e8f3cc8281140aa63d27ae800dd7, type: 3}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!4 &296161811
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 296161806}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0.6532815, y: 0.27059805, z: 0.27059805, w: 0.6532815}
+  m_LocalPosition: {x: 2.12, y: -4.4993, z: 2.06}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -508,6 +719,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracingManager
   useShaderInSceneView: 0
+  useTlas: 1
+  useRedshifting: 1
   rayTracingShader: {fileID: 4800000, guid: d779f3a711c21624381f1f9699fdec69, type: 3}
   accumulatorShader: {fileID: 4800000, guid: 32812c464f9bb7944bccf2042f6e3436, type: 3}
   tlasMaxLeafSize: 2
@@ -520,18 +733,49 @@ MonoBehaviour:
   accumlateInSceneView: 0
   accumulateInGameView: 1
   blackHoleSOIStepSize: 1
+  applyScattering: 1
+  applyRayleigh: 1
+  applyMie: 1
+  applySundisk: 1
+  applySunLighting: 1
+  planetRadius: 6378137
+  atmosphereRadius: 6538137
+  framesPerScatter: 10
+  numOpticalDepthPoints: 8
+  inScatteringPoints: 8
+  densityFalloffRayleigh: 4
+  rayleighScatteringCoefficients: {x: 0.0058, y: 0.0135, z: 0.0331}
+  densityFalloffMie: 4
+  mieForwardScatter: 0.76
+  mieBackwardScatter: -0.5
+  mieScatteringCoefficients: {x: 0.000021, y: 0.000021, z: 0.000021}
+  sunLightColor: {r: 1, g: 1, b: 1, a: 1}
+  sunLightIntensity: 1
+  sun: {fileID: 0}
   emergencyBreakMaxSteps: 500
   numFrames: 10000
   accumWeight: 0
   renderSphere: 1
   renderTriangles: 1
-  blackHoleBendLUT: {fileID: 2800000, guid: a7fde00753a64674599b589eaf7b5e7a, type: 3}
-  rMinOverRs: 1.02
-  rMaxOverRs: 100
-  logEpsilonOverRs: 0.001
-  use_lut: 1
+  strongFieldRadPerMeterCuttoff: 0.01
   enable_lensing: 1
   bendStrength: 1
+  impactParameterDebug: 0
+  useOrbitalPlaneCullingIfAble: 0
+  displayTriTests: 0
+  triTestFullSaturationValue: 1000
+  displayBVHNodeTests: 0
+  BVHNodeTestSaturationValue: 10
+  displayTLASNodeVisits: 0
+  TLASNodeVisitsSaturationValue: 1000
+  displayBLASNodeVisits: 0
+  BLASNodeVisitsSaturationValue: 1000
+  displayInstanceBLASTraversals: 0
+  InstanceBLASTraversalsSaturationValue: 1000
+  displayTLASLeafRefs: 0
+  TLASLeafRefsSaturationValue: 1000
+  useStepsPerCollision: 1
+  StepsPerCollisionTest: 3
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -549,6 +793,190 @@ MonoBehaviour:
   lookSensitivity: 1
   dampingCoefficient: 5
   focusOnEnable: 1
+--- !u!1 &352980207
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 352980212}
+  - component: {fileID: 352980211}
+  - component: {fileID: 352980210}
+  - component: {fileID: 352980209}
+  - component: {fileID: 352980208}
+  m_Layer: 0
+  m_Name: GameObject (5)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &352980208
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 352980207}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ba1d2e5d40acbcd4f8ba48e095a2b08c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BVHCreator
+  numBins: 16
+  meshObj: {fileID: 352980209}
+  drawCentroids: 0
+  drawBVH: 0
+  drawTriangleHeatMap: 0
+  drawNodeDepthHeatMap: 0
+  totalNodes: 215
+  leafNodes: 108
+  trianglesPerLeaf: 0
+  maxDepth: 32
+  visualizorMaxDepth: 14
+  maxTrianglesInNode: 4
+  minTrianglesInNode: 2
+  recordDepth: 9
+  highestLeafNode: 6
+  triIndexArray: 67000000660000006f0000006e0000004c0000004d0000004b0000004a0000006900000068000000550000005400000050000000510000005b000000610000005a0000006a0000005f0000005e0000006b00000052000000530000006c000000570000006d000000560000004e0000005d0000004f0000005c000000630000006500000062000000f6000000f7000000ff000000fe000000dd000000dc000000f9000000f8000000db000000da000000e0000000e1000000e4000000e5000000f0000000ea000000eb000000fa000000fb000000ee000000ef000000e2000000e3000000fc000000e7000000e6000000fd000000f4000000f2000000f3000000de000000df000000ed000000ec000000230000002200000016000000170000000a0000000b0000000e0000000f0000002500000024000000150000001400000007000000060000001a0000001b0000001c0000001e0000001f0000002600000027000000040000000500000021000000200000000300000002000000120000001300000018000000080000000d000000090000000c000000a6000000a7000000b3000000b20000009b0000009a000000b4000000b50000009e0000009f000000ad000000ab000000aa000000a40000009700000096000000a5000000af000000ae000000b6000000b7000000940000009500000093000000b1000000b000000092000000a9000000a3000000a20000009d0000009c0000009900000098000000580000005900000060000000440000006400000045000000650100001d00000064010000100000001100000019000000e9000000e8000000f1000000f5000000d4000000d50000008c0000008d000000ac000000a8000000a1000000a00000007400000075000000700000007100000029000000280000002c0000002d00000001010000050100000401000000010000bc000000bd000000b9000000b80000007600000077000000780000007900000031000000300000002e0000002f00000006010000070100000801000009010000c0000000c1000000be000000bf0000004800000049000000720000007300000082000000830000007e0000007f00000086000000870000007a0000007b0000007d0000007c00000080000000810000000201000003010000d9000000d80000000e0100000f010000130100001201000016010000170100000c0100000d0100000a0100000b01000010010000110100002b0000002a00000001000000000000003500000034000000320000003300000038000000390000003b0000003a00000036000000370000003f0000003e000000bb000000ba0000009000000091000000c5000000c4000000c3000000c2000000c8000000c9000000c7000000c6000000cb000000ca000000ce000000cf0000002d01000031010000300100002c0100008500000084000000360100002b0100002a010000370100008b0000008a0000003e0100003f01000023010000220100001b0100001a0100001501000014010000250100002401000039010000380100004b0100004a01000059010000580100005a0100004d0100004c0100005b010000510100004301000042010000500100004501000053010000520100004401000088000000890000008e0000001f010000180100008f0000005e0100001e010000600100005f01000019010000200100001c0100001d010000210100003c0000003d00000042000000430000002f01000032010000330100002e010000d3000000d20000003b010000260100003a01000027010000cc000000cd000000280100002901000035010000340100003c0100003d01000041010000400100004f0100005c0100004e0100005d0100004901000048010000570100005601000055010000460100005401000047010000470000004000000041000000d6000000d1000000630100006101000062010000d000000046000000d7000000
+  averageTrianglesPerNode: 3.3148148
+  numNodes: 215
+  totalTrianglesCoveredByBVH: 358
+  trianglesInNodesCutoff: 1
+  depthCutOff: 1
+--- !u!114 &352980209
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 352980207}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  material:
+    color: {r: 0, g: 0, b: 0, a: 1}
+    emissiveColor: {r: 1, g: 1, b: 1, a: 0}
+    specularColor: {r: 1, g: 1, b: 1, a: 0}
+    emissiveStrength: 0
+    roughness: 1
+    metallicity: 0
+  update: 0
+  rebuildBVH: 0
+  drawBVH: 0
+  numVertices: 857
+  numNormals: 857
+  numTriangles: 1368
+--- !u!33 &352980210
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 352980207}
+  m_Mesh: {fileID: 1705324974331375986, guid: cf4d3acd65c6b4940b7b2a4cb9811c8f, type: 3}
+--- !u!23 &352980211
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 352980207}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: -3033667219593020291, guid: aee1e8f3cc8281140aa63d27ae800dd7, type: 3}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!4 &352980212
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 352980207}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0.6532815, y: 0.27059805, z: 0.27059805, w: 0.6532815}
+  m_LocalPosition: {x: 2.12, y: -4.4993, z: -2.52}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 45}
 --- !u!1 &401877715
 GameObject:
   m_ObjectHideFlags: 0
@@ -582,7 +1010,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 1, g: 1, b: 1, a: 0}
@@ -592,17 +1053,10 @@ MonoBehaviour:
     metallicity: 0
   update: 0
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 24
   numNormals: 24
   numTriangles: 36
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!65 &401877717
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -671,6 +1125,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &401877719
 MeshFilter:
@@ -754,14 +1209,14 @@ Light:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 410087039}
   m_Enabled: 1
-  serializedVersion: 11
+  serializedVersion: 12
   m_Type: 1
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_Intensity: 2
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
-  m_CookieSize: 10
+  m_CookieSize2D: {x: 10, y: 10}
   m_Shadows:
     m_Type: 2
     m_Resolution: -1
@@ -920,7 +1375,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: -2432090755550338912, guid: 31dd48687efa15a488bd29a077a2134e, type: 3}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 0, g: 0, b: 0, a: 0}
@@ -930,17 +1418,10 @@ MonoBehaviour:
     metallicity: 0
   update: 1
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 2.4940624, y: 1.2516861, z: 4.1038923}
-    m_Extent: {x: 1.3671875, y: 0.98437506, z: 0.8515624}
-  largestAxis: 0
   drawBVH: 1
   numVertices: 507
   numNormals: 507
   numTriangles: 2904
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!23 &564083191
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -988,6 +1469,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &564083192
 MeshFilter:
@@ -1012,6 +1494,190 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 63.55, z: 0}
+--- !u!1 &623919788
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 623919793}
+  - component: {fileID: 623919792}
+  - component: {fileID: 623919791}
+  - component: {fileID: 623919790}
+  - component: {fileID: 623919789}
+  m_Layer: 0
+  m_Name: GameObject (7)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &623919789
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 623919788}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ba1d2e5d40acbcd4f8ba48e095a2b08c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BVHCreator
+  numBins: 16
+  meshObj: {fileID: 623919790}
+  drawCentroids: 0
+  drawBVH: 0
+  drawTriangleHeatMap: 0
+  drawNodeDepthHeatMap: 0
+  totalNodes: 215
+  leafNodes: 108
+  trianglesPerLeaf: 0
+  maxDepth: 32
+  visualizorMaxDepth: 14
+  maxTrianglesInNode: 4
+  minTrianglesInNode: 2
+  recordDepth: 9
+  highestLeafNode: 6
+  triIndexArray: 67000000660000006f0000006e0000004c0000004d0000004b0000004a0000006900000068000000550000005400000050000000510000005b000000610000005a0000006a0000005f0000005e0000006b00000052000000530000006c000000570000006d000000560000004e0000005d0000004f0000005c000000630000006500000062000000f6000000f7000000ff000000fe000000dd000000dc000000f9000000f8000000db000000da000000e0000000e1000000e4000000e5000000f0000000ea000000eb000000fa000000fb000000ee000000ef000000e2000000e3000000fc000000e7000000e6000000fd000000f4000000f2000000f3000000de000000df000000ed000000ec000000230000002200000016000000170000000a0000000b0000000e0000000f0000002500000024000000150000001400000007000000060000001a0000001b0000001c0000001e0000001f0000002600000027000000040000000500000021000000200000000300000002000000120000001300000018000000080000000d000000090000000c000000a6000000a7000000b3000000b20000009b0000009a000000b4000000b50000009e0000009f000000ad000000ab000000aa000000a40000009700000096000000a5000000af000000ae000000b6000000b7000000940000009500000093000000b1000000b000000092000000a9000000a3000000a20000009d0000009c0000009900000098000000580000005900000060000000440000006400000045000000650100001d00000064010000100000001100000019000000e9000000e8000000f1000000f5000000d4000000d50000008c0000008d000000ac000000a8000000a1000000a00000007400000075000000700000007100000029000000280000002c0000002d00000001010000050100000401000000010000bc000000bd000000b9000000b80000007600000077000000780000007900000031000000300000002e0000002f00000006010000070100000801000009010000c0000000c1000000be000000bf0000004800000049000000720000007300000082000000830000007e0000007f00000086000000870000007a0000007b0000007d0000007c00000080000000810000000201000003010000d9000000d80000000e0100000f010000130100001201000016010000170100000c0100000d0100000a0100000b01000010010000110100002b0000002a00000001000000000000003500000034000000320000003300000038000000390000003b0000003a00000036000000370000003f0000003e000000bb000000ba0000009000000091000000c5000000c4000000c3000000c2000000c8000000c9000000c7000000c6000000cb000000ca000000ce000000cf0000002d01000031010000300100002c0100008500000084000000360100002b0100002a010000370100008b0000008a0000003e0100003f01000023010000220100001b0100001a0100001501000014010000250100002401000039010000380100004b0100004a01000059010000580100005a0100004d0100004c0100005b010000510100004301000042010000500100004501000053010000520100004401000088000000890000008e0000001f010000180100008f0000005e0100001e010000600100005f01000019010000200100001c0100001d010000210100003c0000003d00000042000000430000002f01000032010000330100002e010000d3000000d20000003b010000260100003a01000027010000cc000000cd000000280100002901000035010000340100003c0100003d01000041010000400100004f0100005c0100004e0100005d0100004901000048010000570100005601000055010000460100005401000047010000470000004000000041000000d6000000d1000000630100006101000062010000d000000046000000d7000000
+  averageTrianglesPerNode: 3.3148148
+  numNodes: 215
+  totalTrianglesCoveredByBVH: 358
+  trianglesInNodesCutoff: 1
+  depthCutOff: 1
+--- !u!114 &623919790
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 623919788}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  material:
+    color: {r: 0, g: 0, b: 0, a: 1}
+    emissiveColor: {r: 1, g: 1, b: 1, a: 0}
+    specularColor: {r: 1, g: 1, b: 1, a: 0}
+    emissiveStrength: 0
+    roughness: 1
+    metallicity: 0
+  update: 0
+  rebuildBVH: 0
+  drawBVH: 0
+  numVertices: 857
+  numNormals: 857
+  numTriangles: 1368
+--- !u!33 &623919791
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 623919788}
+  m_Mesh: {fileID: 4385538395738152230, guid: ea49ebe95bcc41547bf175983e67b1fa, type: 3}
+--- !u!23 &623919792
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 623919788}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: -3033667219593020291, guid: aee1e8f3cc8281140aa63d27ae800dd7, type: 3}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!4 &623919793
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 623919788}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0.6532815, y: 0.27059805, z: 0.27059805, w: 0.6532815}
+  m_LocalPosition: {x: 0, y: -4.4993, z: 2.06}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 45}
 --- !u!1 &676307914
 GameObject:
   m_ObjectHideFlags: 0
@@ -1101,6 +1767,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &676307918
 MeshFilter:
@@ -1137,7 +1804,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 0, g: 0, b: 0, a: 0}
@@ -1147,17 +1847,10 @@ MonoBehaviour:
     metallicity: 1
   update: 0
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 24
   numNormals: 24
   numTriangles: 36
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!114 &676307921
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1240,6 +1933,190 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: -3.631, y: -0.115, z: 3.638}
+--- !u!1 &1036112902
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1036112907}
+  - component: {fileID: 1036112906}
+  - component: {fileID: 1036112905}
+  - component: {fileID: 1036112904}
+  - component: {fileID: 1036112903}
+  m_Layer: 0
+  m_Name: GameObject (4)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1036112903
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1036112902}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ba1d2e5d40acbcd4f8ba48e095a2b08c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BVHCreator
+  numBins: 16
+  meshObj: {fileID: 1036112904}
+  drawCentroids: 0
+  drawBVH: 0
+  drawTriangleHeatMap: 0
+  drawNodeDepthHeatMap: 0
+  totalNodes: 285
+  leafNodes: 143
+  trianglesPerLeaf: 0
+  maxDepth: 32
+  visualizorMaxDepth: 14
+  maxTrianglesInNode: 4
+  minTrianglesInNode: 1
+  recordDepth: 11
+  highestLeafNode: 6
+  triIndexArray: 6f0000006e00000067000000660000004c0000004d00000069000000680000004a0000004b000000500000005100000055000000540000006b0000006a0000005f0000005e00000053000000520000006c0000006d00000057000000560000005c0000005d0000004f0000004e000000f6000000f7000000ff000000fe000000dc000000dd000000db000000da000000f9000000f8000000e5000000e4000000e1000000e0000000fa000000fb000000ee000000ef000000e2000000e3000000e6000000e7000000fd000000fc000000ed000000ec000000df000000de000000170000001600000022000000230000000b0000000a00000024000000250000000e0000000f000000150000001400000007000000060000001f0000001e000000270000002600000005000000040000000300000002000000210000002000000008000000090000000c0000000d000000b2000000b3000000a6000000a70000009b0000009a000000b4000000b50000009f0000009e000000a5000000a40000009600000097000000b6000000b7000000ae000000af00000094000000950000009200000093000000b1000000b00000009c0000009d00000099000000980000005a0000005b000000610000006000000064000000650000006300000062000000ea000000eb000000f0000000f1000000f3000000f2000000f4000000f50000005800000059000000740000007500000071000000700000004400000045000000e9000000e80000000401000005010000d4000000d500000001010000000100001d0000001c0000001a0000001b00000019000000180000001200000013000000ad000000ac000000ab000000aa000000a9000000a8000000a2000000a3000000d1010000d001000028000000290000002d0000002c00000011000000100000008d0000008c000000b9000000b8000000bd000000bc000000a1000000a0000000790000007800000077000000760000002e0000002f000000300000003100000006010000070100000801000009010000c1000000c0000000be000000bf000000490000004800000073000000720000002b0000002a0000000100000000000000d8000000d900000003010000020100009000000091000000bb000000ba000000860000008700000082000000830000007e0000007f0000007c0000007d00000080000000810000007a0000007b000000130100001201000017010000160100000f0100000e0100000a0100000b0100000c0100000d010000110100001001000036010000370100008a0000008b0000002a0100002b0100004b0100004a01000068010000690100008e0100008f010000310100003001000084000000850000002d0100002c0100004c0100004d010000910100009001000062010000630100001b0100001a0100003e0100003f010000220100002301000043010000420100008601000087010000710100007001000015010000140100003801000039010000250100002401000045010000440100006a0100006b010000880100008901000035000000340000003900000038000000320000003300000037000000360000003f0000003e0000003b0000003a000000c3000000c2000000c9000000c8000000c5000000c4000000c7000000c6000000cb000000ca000000ce000000cf00000021010000200100003d0000003c0000001d0100001c0100003c0100003d01000080010000810100005101000050010000430000004200000032010000330100002f0100002e0100004e0100004f01000092010000930100006501000064010000cc000000cd00000034010000350100002801000029010000480100004901000067010000660100008c0100008d010000d2000000d30000003a0100003b010000270100002601000046010000470100008b0100008a0100006c0100006d0100005a0100005b0100005c0100005d01000089000000880000008e0000008f00000041010000400100005f0100005e010000460000004700000041000000400000005301000052010000550100005401000019010000180100001e0100001f01000056010000570100005901000058010000d1000000d0000000d6000000d70000007e0100007f010000720100008501000084010000790100007801000073010000740100006e0100006f010000b4010000b50100007a0100007b010000750100007c0100007d010000760100008301000082010000770100006101000060010000a5010000a4010000a3010000a2010000b2010000b30100009501000094010000b9010000b8010000a7010000a60100009601000097010000b6010000b7010000cd010000cc010000c9010000c80100009a010000ad010000ae01000099010000cb010000ca010000a80100009b01000098010000ab010000ce010000cf0100009d010000a9010000aa0100009e010000c7010000c6010000be010000bf010000bb010000ba0100009f0100009c010000af010000ac010000bd010000bc010000b0010000b1010000c3010000c2010000c0010000c1010000a1010000a0010000c4010000c5010000
+  averageTrianglesPerNode: 3.2587411
+  numNodes: 285
+  totalTrianglesCoveredByBVH: 466
+  trianglesInNodesCutoff: 1
+  depthCutOff: 1
+--- !u!114 &1036112904
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1036112902}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  material:
+    color: {r: 0, g: 0, b: 0, a: 1}
+    emissiveColor: {r: 1, g: 1, b: 1, a: 0}
+    specularColor: {r: 1, g: 1, b: 1, a: 0}
+    emissiveStrength: 0
+    roughness: 1
+    metallicity: 0
+  update: 0
+  rebuildBVH: 0
+  drawBVH: 0
+  numVertices: 857
+  numNormals: 857
+  numTriangles: 1368
+--- !u!33 &1036112905
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1036112902}
+  m_Mesh: {fileID: 1705324974331375986, guid: cf4d3acd65c6b4940b7b2a4cb9811c8f, type: 3}
+--- !u!23 &1036112906
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1036112902}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: -3033667219593020291, guid: aee1e8f3cc8281140aa63d27ae800dd7, type: 3}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!4 &1036112907
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1036112902}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0.6532815, y: 0.27059805, z: 0.27059805, w: 0.6532815}
+  m_LocalPosition: {x: 2.12, y: -4.4993, z: -0.24}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 45}
 --- !u!1 &1092420451
 GameObject:
   m_ObjectHideFlags: 0
@@ -1329,6 +2206,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &1092420454
 MeshFilter:
@@ -1384,171 +2262,17 @@ MonoBehaviour:
   rMinOverRs: 1.02
   rMaxOverRs: 100
   logEpsilonOverRs: 0.001
+  lightLutRadiusResolution: 64
+  lightLutSunAngleResolution: 64
   generateOnStart: 0
-  textureAssetName: BlackHoleBendLUT
   saveAsPNG: 0
   saveAsEXR: 1
   printSampleValues: 0
   previewInScene: 0
   filterMode: 1
+  generatedTexture: {fileID: 0}
+  LightLUT: {fileID: 0}
   regenerate: 0
---- !u!1 &1342701285
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1342701290}
-  - component: {fileID: 1342701289}
-  - component: {fileID: 1342701288}
-  - component: {fileID: 1342701287}
-  - component: {fileID: 1342701286}
-  m_Layer: 0
-  m_Name: GameObject (1)
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1342701286
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1342701285}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ba1d2e5d40acbcd4f8ba48e095a2b08c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::BVHCreator
-  numBins: 16
-  meshObj: {fileID: 1342701287}
-  drawCentroids: 0
-  drawBVH: 1
-  drawTriangleHeatMap: 0
-  drawNodeDepthHeatMap: 0
-  totalNodes: 265
-  leafNodes: 133
-  trianglesPerLeaf: 0
-  maxDepth: 32
-  visualizorMaxDepth: 14
-  maxTrianglesInNode: 4
-  minTrianglesInNode: 2
-  recordDepth: 10
-  highestLeafNode: 5
-  triIndexArray: b2000000b1000000dd000000de0000001400000015000000cc000000cb00000013000000120000001e0000001f0000002800000029000000df000000e0000000ae000000ad0000001c0000001d0000002500000024000000d1000000d2000000ab000000ac000000d8000000d70000001b0000001a000000d0000000cf000000230000002200000009000000080000002a0000002b00000007000000060000002d0000002c000000db000000dc000000a9000000aa0000001700000016000000ce000000cd000000100000001100000031000000300000002600000027000000b0000000af000000da000000d90000001800000019000000d4000000d30000000e0000000f0000002e0000002f00000020000000210000008901000088010000b1010000b001000000010000ff0000000701000008010000a8010000a90100008b0100008a010000b9010000b801000001010000020100000a01000009010000ab010000aa010000ef000000f00000001201000011010000100100000f010000f2000000f1000000b6010000b70100008e0100008f010000fa000000f9000000f8000000f7000000a5010000a401000003010000040100000e0100000d0100008d0100008c010000b3010000b2010000fe000000fd000000f4000000f3000000ad010000ac01000005010000060100001301000014010000b5010000b40100008601000087010000fc000000fb000000f5000000f6000000a6010000a70100000c0100000b01000015010000160100008600000085000000a00000009f0000005f00000060000000c2000000c10000009b0000009c0000008b0000008c000000a5000000a600000089000000a4000000a30000008a0000005a000000c5000000c6000000590000009400000093000000c8000000c70000005c0000005b000000950000009600000069010000680100008201000083010000670100006601000081010000800100003c0100003d010000a0010000a101000072010000730100009e0100003b0100009f0100003a010000700100007101000063010000620100007d0100007c010000400100009a010000410100009b0100007901000078010000ed000000ee000000900000008f000000b9000000ba000000e70000009a00000099000000e8000000e6000000e5000000e2000000e1000000be000000e3000000e4000000bd000000ba010000bb010000be010000bf010000c0010000c10100007701000076010000bf000000bd010000bc010000c00000006d0100006c010000c6010000c70100009601000097010000a8000000a70000008e0000008d000000ca000000c900000058000000570000009e0000009d0000009200000091000000ec000000eb000000bc000000bb000000a1000000a20000008700000088000000c4000000c30000005e0000005d000000b3000000b400000098000000970000003600000037000000e9000000ea000000650100007f0100007e010000640100003f0100009d0100003e0100009c01000091010000750100009001000074010000c2010000c30100001c0100001b01000085010000840100006b0100006a010000a201000039010000a3010000380100007a0100007b0100006f0100006e010000c5010000c40100009801000099010000b8000000b70000000a0000000b0000000c0000000d00000094010000950100004a0100004b010000690000006a000000380000003900000002000000b6000000b50000000500000092010000930100001e0100001d010000500000004f0000004e0000004d0000005301000052010000760000007500000028010000420000002701000043000000340000003500000068000000670000001a010000190100004801000049010000200100001f0100003a0000003b000000330000003200000018010000170100007f0000008000000082000000810000005f0100005d0100005c0100005e010000550000004700000046000000560000004b00000054000000530000002c0100002b010000370100003601000031010000340100003501000083000000840000007d0000007e000000000000007c0000007b00000061010000600100005b0100005a01000059010000580100000300000077000000780000004c0000005501000030010000540100004a0000004900000048000000520000004400000045000000510000002a0100002901000033010000320100002d0100002f0100002e010000630000003f000000640000003e0000006100000062000000400000006600000065000000470100004601000024010000440100004501000023010000430100004201000026010000560100007a00000079000000570100003c0000003d0000004100000025010000210100002201000071000000720000006f000000d600000070000000d50000006c0000006b000000010000006e0000006d00000073000000740000005001000051010000ae010000af0100004f0100004e0100004d010000040000004c010000
-  averageTrianglesPerNode: 3.4285715
-  numNodes: 265
-  totalTrianglesCoveredByBVH: 0
-  trianglesInNodesCutoff: 1
-  depthCutOff: 1
---- !u!114 &1342701287
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1342701285}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: -8319465574948283117, guid: c90e7c58149c9a94caa8bc7ae758c7cf, type: 3}
-  material:
-    color: {r: 0, g: 1, b: 0.011921406, a: 1}
-    emissiveColor: {r: 1, g: 1, b: 1, a: 0}
-    specularColor: {r: 1, g: 1, b: 1, a: 0}
-    emissiveStrength: 0
-    roughness: 1
-    metallicity: 1
-  update: 0
-  rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: -0.044100493, z: 1.6834215}
-    m_Extent: {x: 0.79608184, y: 0.87364995, z: 1.686191}
-  largestAxis: 0
-  drawBVH: 0
-  numVertices: 857
-  numNormals: 857
-  numTriangles: 1368
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
---- !u!33 &1342701288
-MeshFilter:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1342701285}
-  m_Mesh: {fileID: -8319465574948283117, guid: c90e7c58149c9a94caa8bc7ae758c7cf, type: 3}
---- !u!23 &1342701289
-MeshRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1342701285}
-  m_Enabled: 1
-  m_CastShadows: 1
-  m_ReceiveShadows: 1
-  m_DynamicOccludee: 1
-  m_StaticShadowCaster: 0
-  m_MotionVectors: 1
-  m_LightProbeUsage: 1
-  m_ReflectionProbeUsage: 1
-  m_RayTracingMode: 2
-  m_RayTraceProcedural: 0
-  m_RayTracingAccelStructBuildFlagsOverride: 0
-  m_RayTracingAccelStructBuildFlags: 1
-  m_SmallMeshCulling: 1
-  m_ForceMeshLod: -1
-  m_MeshLodSelectionBias: 0
-  m_RenderingLayerMask: 1
-  m_RendererPriority: 0
-  m_Materials:
-  - {fileID: -3033667219593020291, guid: aee1e8f3cc8281140aa63d27ae800dd7, type: 3}
-  m_StaticBatchInfo:
-    firstSubMesh: 0
-    subMeshCount: 0
-  m_StaticBatchRoot: {fileID: 0}
-  m_ProbeAnchor: {fileID: 0}
-  m_LightProbeVolumeOverride: {fileID: 0}
-  m_ScaleInLightmap: 1
-  m_ReceiveGI: 1
-  m_PreserveUVs: 0
-  m_IgnoreNormalsForChartDetection: 0
-  m_ImportantGI: 0
-  m_StitchLightmapSeams: 1
-  m_SelectedEditorRenderState: 3
-  m_MinimumChartSize: 4
-  m_AutoUVMaxDistance: 0.5
-  m_AutoUVMaxAngle: 89
-  m_LightmapParameters: {fileID: 0}
-  m_GlobalIlluminationMeshLod: 0
-  m_SortingLayerID: 0
-  m_SortingLayer: 0
-  m_SortingOrder: 0
-  m_AdditionalVertexStreams: {fileID: 0}
---- !u!4 &1342701290
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1342701285}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0.27059805, y: 0.6532815, z: 0.6532815, w: 0.27059805}
-  m_LocalPosition: {x: 0, y: -4.51, z: 2.5}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 135}
 --- !u!1 &1408453339
 GameObject:
   m_ObjectHideFlags: 0
@@ -1719,8 +2443,7 @@ MonoBehaviour:
   tracerProperties: {fileID: 330585546}
   path:
     hitInfos:
-    - hitDistance: 10.248998
-      localHitDistance: 10.248999
+    - hitDistance: 10.248999
       hitPoint: {x: 0.7065107, y: -1.9107676, z: 1.9374046}
       shadingNormal: {x: 0.4174261, y: 0.837375, z: -0.3529287}
       geometricNormal: {x: 0.44155762, y: 0.8436218, z: -0.3054984}
@@ -1802,7 +2525,11 @@ MonoBehaviour:
           m_Extent: {x: 0, y: 0, z: 0}
         centroid: {x: 0.5833198, y: -1.8263202, z: 1.9925478}
         triangleIndex: 0
-      BVHNodesSearched: 9
+      BVHNodesSearched: 17
+      BLASLeafNodesSearched: 2
+      TLASLeafNodesSearched: 2
+      BLASNodesSearched: 9
+      TLASNodesSearched: 8
       time: 0
       hitNodeIndex: 209
       material:
@@ -1814,7 +2541,7 @@ MonoBehaviour:
         metallicity: 1
       debugInvalidBelowSurface: 0
       debugInvalidBRDF: 0
-    time: 0.008771002
+    time: 0.008041382
     debugInvalidBelowSurfaceCount: 0
     debugInvalidBRDFCount: 0
 --- !u!4 &1436880562
@@ -1865,7 +2592,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 0, g: 0, b: 0, a: 0}
@@ -1875,17 +2635,10 @@ MonoBehaviour:
     metallicity: 1
   update: 0
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 24
   numNormals: 24
   numTriangles: 36
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!65 &1483012328
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -1954,6 +2707,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &1483012330
 MeshFilter:
@@ -2086,6 +2840,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!4 &1578048713
 Transform:
@@ -2147,7 +2902,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: 4385538395738152230, guid: ea49ebe95bcc41547bf175983e67b1fa, type: 3}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 0, b: 0, a: 1}
     emissiveColor: {r: 1, g: 1, b: 1, a: 0}
@@ -2157,17 +2945,10 @@ MonoBehaviour:
     metallicity: 0
   update: 1
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: 0, z: 1.985379}
-    m_Extent: {x: 0.8868088, y: 0.86395276, z: 1.9883964}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 1160
   numNormals: 1160
   numTriangles: 1746
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!1 &1584024460
 GameObject:
   m_ObjectHideFlags: 0
@@ -2235,6 +3016,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &1584024463
 MeshFilter:
@@ -2271,7 +3053,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: -8319465574948283117, guid: c90e7c58149c9a94caa8bc7ae758c7cf, type: 3}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 0, g: 0, b: 0, a: 0}
@@ -2281,17 +3096,10 @@ MonoBehaviour:
     metallicity: 0
   update: 1
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: -0.044100493, z: 1.6834215}
-    m_Extent: {x: 0.79608184, y: 0.87364995, z: 1.686191}
-  largestAxis: 2
   drawBVH: 0
   numVertices: 857
   numNormals: 857
   numTriangles: 1368
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!114 &1584024466
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2358,7 +3166,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 0, g: 0, b: 0, a: 0}
@@ -2368,17 +3209,10 @@ MonoBehaviour:
     metallicity: 1
   update: 0
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 24
   numNormals: 24
   numTriangles: 36
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!65 &1708738822
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -2447,6 +3281,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &1708738824
 MeshFilter:
@@ -2537,7 +3372,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 1, g: 1, b: 1, a: 0}
@@ -2547,17 +3415,10 @@ MonoBehaviour:
     metallicity: 1
   update: 0
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 24
   numNormals: 24
   numTriangles: 36
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!65 &1777804310
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -2626,6 +3487,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &1777804312
 MeshFilter:
@@ -2683,6 +3545,190 @@ MonoBehaviour:
   totalTrianglesCoveredByBVH: 12
   trianglesInNodesCutoff: 1
   depthCutOff: 1
+--- !u!1 &1780274775
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1780274780}
+  - component: {fileID: 1780274779}
+  - component: {fileID: 1780274778}
+  - component: {fileID: 1780274777}
+  - component: {fileID: 1780274776}
+  m_Layer: 0
+  m_Name: King
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1780274776
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1780274775}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ba1d2e5d40acbcd4f8ba48e095a2b08c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BVHCreator
+  numBins: 16
+  meshObj: {fileID: 1780274777}
+  drawCentroids: 0
+  drawBVH: 0
+  drawTriangleHeatMap: 0
+  drawNodeDepthHeatMap: 0
+  totalNodes: 285
+  leafNodes: 143
+  trianglesPerLeaf: 0
+  maxDepth: 32
+  visualizorMaxDepth: 14
+  maxTrianglesInNode: 4
+  minTrianglesInNode: 1
+  recordDepth: 11
+  highestLeafNode: 6
+  triIndexArray: 6f0000006e00000067000000660000004c0000004d00000069000000680000004a0000004b000000500000005100000055000000540000006b0000006a0000005f0000005e00000053000000520000006c0000006d00000057000000560000005c0000005d0000004f0000004e000000f6000000f7000000ff000000fe000000dc000000dd000000db000000da000000f9000000f8000000e5000000e4000000e1000000e0000000fa000000fb000000ee000000ef000000e2000000e3000000e6000000e7000000fd000000fc000000ed000000ec000000df000000de000000170000001600000022000000230000000b0000000a00000024000000250000000e0000000f000000150000001400000007000000060000001f0000001e000000270000002600000005000000040000000300000002000000210000002000000008000000090000000c0000000d000000b2000000b3000000a6000000a70000009b0000009a000000b4000000b50000009f0000009e000000a5000000a40000009600000097000000b6000000b7000000ae000000af00000094000000950000009200000093000000b1000000b00000009c0000009d00000099000000980000005a0000005b000000610000006000000064000000650000006300000062000000ea000000eb000000f0000000f1000000f3000000f2000000f4000000f50000005800000059000000740000007500000071000000700000004400000045000000e9000000e80000000401000005010000d4000000d500000001010000000100001d0000001c0000001a0000001b00000019000000180000001200000013000000ad000000ac000000ab000000aa000000a9000000a8000000a2000000a3000000d1010000d001000028000000290000002d0000002c00000011000000100000008d0000008c000000b9000000b8000000bd000000bc000000a1000000a0000000790000007800000077000000760000002e0000002f000000300000003100000006010000070100000801000009010000c1000000c0000000be000000bf000000490000004800000073000000720000002b0000002a0000000100000000000000d8000000d900000003010000020100009000000091000000bb000000ba000000860000008700000082000000830000007e0000007f0000007c0000007d00000080000000810000007a0000007b000000130100001201000017010000160100000f0100000e0100000a0100000b0100000c0100000d010000110100001001000036010000370100008a0000008b0000002a0100002b0100004b0100004a01000068010000690100008e0100008f010000310100003001000084000000850000002d0100002c0100004c0100004d010000910100009001000062010000630100001b0100001a0100003e0100003f010000220100002301000043010000420100008601000087010000710100007001000015010000140100003801000039010000250100002401000045010000440100006a0100006b010000880100008901000035000000340000003900000038000000320000003300000037000000360000003f0000003e0000003b0000003a000000c3000000c2000000c9000000c8000000c5000000c4000000c7000000c6000000cb000000ca000000ce000000cf00000021010000200100003d0000003c0000001d0100001c0100003c0100003d01000080010000810100005101000050010000430000004200000032010000330100002f0100002e0100004e0100004f01000092010000930100006501000064010000cc000000cd00000034010000350100002801000029010000480100004901000067010000660100008c0100008d010000d2000000d30000003a0100003b010000270100002601000046010000470100008b0100008a0100006c0100006d0100005a0100005b0100005c0100005d01000089000000880000008e0000008f00000041010000400100005f0100005e010000460000004700000041000000400000005301000052010000550100005401000019010000180100001e0100001f01000056010000570100005901000058010000d1000000d0000000d6000000d70000007e0100007f010000720100008501000084010000790100007801000073010000740100006e0100006f010000b4010000b50100007a0100007b010000750100007c0100007d010000760100008301000082010000770100006101000060010000a5010000a4010000a3010000a2010000b2010000b30100009501000094010000b9010000b8010000a7010000a60100009601000097010000b6010000b7010000cd010000cc010000c9010000c80100009a010000ad010000ae01000099010000cb010000ca010000a80100009b01000098010000ab010000ce010000cf0100009d010000a9010000aa0100009e010000c7010000c6010000be010000bf010000bb010000ba0100009f0100009c010000af010000ac010000bd010000bc010000b0010000b1010000c3010000c2010000c0010000c1010000a1010000a0010000c4010000c5010000
+  averageTrianglesPerNode: 3.2587411
+  numNodes: 285
+  totalTrianglesCoveredByBVH: 466
+  trianglesInNodesCutoff: 1
+  depthCutOff: 1
+--- !u!114 &1780274777
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1780274775}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  material:
+    color: {r: 0, g: 0, b: 0, a: 1}
+    emissiveColor: {r: 1, g: 1, b: 1, a: 0}
+    specularColor: {r: 1, g: 1, b: 1, a: 0}
+    emissiveStrength: 0
+    roughness: 1
+    metallicity: 0
+  update: 0
+  rebuildBVH: 0
+  drawBVH: 0
+  numVertices: 857
+  numNormals: 857
+  numTriangles: 1368
+--- !u!33 &1780274778
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1780274775}
+  m_Mesh: {fileID: -4175726406976504967, guid: 05768a7c4a0e4cb488ffa6d1e8a585bf, type: 3}
+--- !u!23 &1780274779
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1780274775}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: -3033667219593020291, guid: aee1e8f3cc8281140aa63d27ae800dd7, type: 3}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!4 &1780274780
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1780274775}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0.6532815, y: 0.27059805, z: 0.27059805, w: 0.6532815}
+  m_LocalPosition: {x: -0.030629901, y: -4.4993, z: -0.15}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 45}
 --- !u!1 &1875486901
 GameObject:
   m_ObjectHideFlags: 0
@@ -2798,6 +3844,7 @@ MonoBehaviour:
   m_VerticalAlignment: 256
   m_textAlignment: 65535
   m_characterSpacing: 0
+  m_characterHorizontalScale: 1
   m_wordSpacing: 0
   m_lineSpacing: 0
   m_lineSpacingMax: 0
@@ -2879,7 +3926,7 @@ MonoBehaviour:
       m_Calls: []
   m_text: 'Triangle Test: 7
 
-    Node Tests: 9
+    Node Tests: 17
 
     Time taken: 0'
   m_isRightToLeft: 0
@@ -2919,6 +3966,7 @@ MonoBehaviour:
   m_VerticalAlignment: 256
   m_textAlignment: 65535
   m_characterSpacing: 0
+  m_characterHorizontalScale: 1
   m_wordSpacing: 0
   m_lineSpacing: 0
   m_lineSpacingMax: 0
@@ -3012,7 +4060,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 1, g: 1, b: 1, a: 0}
@@ -3022,17 +4103,10 @@ MonoBehaviour:
     metallicity: 1
   update: 0
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 24
   numNormals: 24
   numTriangles: 36
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!65 &2013927943
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -3101,6 +4175,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &2013927945
 MeshFilter:
@@ -3190,7 +4265,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: -8319465574948283117, guid: c90e7c58149c9a94caa8bc7ae758c7cf, type: 3}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 0, b: 0, a: 0}
     emissiveColor: {r: 0, g: 0, b: 0, a: 0}
@@ -3200,17 +4308,10 @@ MonoBehaviour:
     metallicity: 0
   update: 1
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: -0.044100493, z: 1.6834215}
-    m_Extent: {x: 0.79608184, y: 0.87364995, z: 1.686191}
-  largestAxis: 2
   drawBVH: 1
   numVertices: 857
   numNormals: 857
   numTriangles: 1368
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!23 &2032233368
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -3258,6 +4359,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &2032233369
 MeshFilter:
@@ -3348,7 +4450,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d1d1ca87cc5d9b341a0953db9300f608, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracedMesh
-  mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  localToWorld:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  worldToLocal:
+    e00: 0
+    e01: 0
+    e02: 0
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
   material:
     color: {r: 1, g: 1, b: 1, a: 0}
     emissiveColor: {r: 0, g: 0, b: 0, a: 0}
@@ -3358,17 +4493,10 @@ MonoBehaviour:
     metallicity: 1
   update: 0
   rebuildBVH: 0
-  ModelBounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 0.5, y: 0.5, z: 0.5}
-  largestAxis: 0
   drawBVH: 0
   numVertices: 24
   numNormals: 24
   numTriangles: 36
-  maxLeafSize: 4
-  bvhMaxDepth: 64
-  numBins: 16
 --- !u!65 &2100865773
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -3437,6 +4565,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &2100865775
 MeshFilter:
@@ -3515,5 +4644,9 @@ SceneRoots:
   - {fileID: 1408453343}
   - {fileID: 132247717}
   - {fileID: 1578048713}
-  - {fileID: 1342701290}
   - {fileID: 240701374}
+  - {fileID: 1780274780}
+  - {fileID: 1036112907}
+  - {fileID: 352980212}
+  - {fileID: 296161811}
+  - {fileID: 623919793}

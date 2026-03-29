@@ -42,7 +42,7 @@ Shader "Custom/RayTracer"
             #pragma shader_feature_local DEBUG_DISPLAY_BLAS_NODE_VISITS
             #pragma shader_feature_local DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS
             #pragma shader_feature_local DEBUG_DISPLAY_TLAS_LEAF_REFS
-
+            #pragma shader_feature_local MARCH_CHORD_COLLISION_LIMIT
 			struct appdata
 			{
 				float4 vertex : POSITION;
@@ -80,21 +80,17 @@ Shader "Custom/RayTracer"
             {
                 float3 position;
                 float3 direction; 
-                float energy;
             };
 
             struct PixelMarcher
             {
                 Ray ray;
+                float energy;
                 bool hitBlackHole;
                 bool rayEarlyKill;
                 float3 incomingLight;
                 float3 rayColor;
                 uint numBounces;
-
-                float3 lastHitNormal;
-                float3 lastHitAlbedo;
-                bool hasLastHit;
             };
 
             struct Sphere
@@ -217,6 +213,8 @@ Shader "Custom/RayTracer"
 
             float strongFieldCurvatureRadPetMeterCutoff;
             float inScatteringPoints;
+            
+            int u_StepsPerCollisionTest;
 
             struct OrbitalPlaneParameters
             {
@@ -980,7 +978,7 @@ Shader "Custom/RayTracer"
                 RayTracingMaterial material = Instances[hitInfo.objectIndex].material;
                 if (material.emissionStrength > 0.0)
                 {
-                    float g = 1 / ray.ray.energy;
+                    float g = 1 / ray.energy;
                     #ifndef USE_REDSHIFTING
                     g = 1;
                     #endif
@@ -1007,14 +1005,11 @@ Shader "Custom/RayTracer"
                     n2 * hitInfo.u +
                     n3 * hitInfo.v
                 );
-
-                ray.lastHitAlbedo = material.color;
-                ray.hasLastHit = true;
+                
 
                 Mesh mesh = Instances[hitInfo.objectIndex];
                 float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
                 N = safeNormalize(mul(nMat, N));
-                ray.lastHitNormal = N;
 
                 //float3 geomNormalLocal = normalize(Triangles[hitInfo.triIndex].geometricNormal);
                 float3 geomNormalLocal = normalize(cross(Triangles[hitInfo.triIndex].edgeAB, Triangles[hitInfo.triIndex].edgeAC));
@@ -1223,7 +1218,7 @@ Shader "Custom/RayTracer"
                 Ray RayToStore;
                 RayToStore.position = viewPoint;
                 RayToStore.direction = normalize(RayToStore.position - CameraWorldPos);
-                RayToStore.energy = 1;
+                pixel_marcher.energy = 1;
 
                 pixel_marcher.hitBlackHole = false;
                 pixel_marcher.rayColor = 1;
@@ -1277,7 +1272,7 @@ Shader "Custom/RayTracer"
                     }
                     else
                     {
-                        pixel_marcher.incomingLight += getAngularGrid(rayDir);
+                        pixel_marcher.incomingLight += getStarField(rayDir);
                     }
 
                     break;
@@ -1286,11 +1281,11 @@ Shader "Custom/RayTracer"
                 if (bad3(pixel_marcher.incomingLight))
                     return float3(10000000, 0, 10000000);
 
-                if (any(isNan(pixel_marcher.ray.energy)))
+                if (any(isNan(pixel_marcher.energy)))
                     return float3(10000000, 0, 10000000);
 
                 #ifdef DEBUG_ENABLE_ENERGY_VISUALIZATION
-                float d = log2(1.0 / max(pixel_marcher.ray.energy, 1e-6));
+                float d = log2(1.0 / max(pixel_marcher.energy, 1e-6));
                 if (d > 0.0)
                     return float3(0.0, 0.0, saturate(d * 4.0));
                 else
