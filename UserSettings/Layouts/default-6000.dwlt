@@ -1159,9 +1159,9 @@ MonoBehaviour:
   m_AudioPlay: 0
   m_DebugDrawModesUseInteractiveLightBakingData: 0
   m_Position:
-    m_Target: {x: 0, y: 0.4399414, z: 0}
+    m_Target: {x: 2112.8542, y: 534.15173, z: 7515.327}
     speed: 2
-    m_Value: {x: 0, y: 0.4399414, z: 0}
+    m_Value: {x: 2112.8542, y: 534.15173, z: 7515.327}
   m_RenderMode: 0
   m_CameraMode:
     drawMode: 0
@@ -1207,13 +1207,13 @@ MonoBehaviour:
     m_GridAxis: 1
     m_gridOpacity: 0.5
   m_Rotation:
-    m_Target: {x: -0.20267296, y: 0.43580824, z: -0.102180004, w: -0.8712924}
+    m_Target: {x: -0.023744015, y: 0.96742374, z: -0.10150173, w: -0.23199427}
     speed: 2
-    m_Value: {x: -0.20267296, y: 0.43580824, z: -0.10218001, w: -0.8712925}
+    m_Value: {x: -0.02373694, y: 0.96713537, z: -0.10147148, w: -0.23192513}
   m_Size:
-    m_Target: 1534.0216
+    m_Target: 2890.563
     speed: 2
-    m_Value: 1766.9069
+    m_Value: 2890.563
   m_Ortho:
     m_Target: 1
     speed: 2
@@ -1401,49 +1401,49 @@ MonoBehaviour:
       m_Data: 0
     m_ExpandedIDs:
     - m_Data: 0
-    - m_Data: 46276
-    - m_Data: 46278
-    - m_Data: 46280
-    - m_Data: 46282
-    - m_Data: 46284
-    - m_Data: 46286
-    - m_Data: 46288
-    - m_Data: 46290
-    - m_Data: 46292
-    - m_Data: 46294
-    - m_Data: 46296
-    - m_Data: 46298
-    - m_Data: 46300
-    - m_Data: 46302
-    - m_Data: 46304
-    - m_Data: 46306
-    - m_Data: 46308
-    - m_Data: 46310
-    - m_Data: 46312
-    - m_Data: 46314
-    - m_Data: 46316
-    - m_Data: 46318
-    - m_Data: 46320
-    - m_Data: 46322
-    - m_Data: 46324
-    - m_Data: 46326
-    - m_Data: 46328
-    - m_Data: 46330
-    - m_Data: 46332
-    - m_Data: 46334
-    - m_Data: 46336
-    - m_Data: 46338
-    - m_Data: 46340
-    - m_Data: 46342
-    - m_Data: 46344
-    - m_Data: 46346
-    - m_Data: 46348
-    - m_Data: 46350
-    - m_Data: 46352
-    - m_Data: 46354
-    - m_Data: 46356
-    - m_Data: 46358
-    - m_Data: 46360
+    - m_Data: 46954
+    - m_Data: 46956
+    - m_Data: 46958
+    - m_Data: 46960
+    - m_Data: 46962
+    - m_Data: 46964
+    - m_Data: 46966
+    - m_Data: 46968
+    - m_Data: 46970
+    - m_Data: 46972
+    - m_Data: 46974
+    - m_Data: 46976
+    - m_Data: 46978
+    - m_Data: 46980
+    - m_Data: 46982
+    - m_Data: 46984
+    - m_Data: 46986
+    - m_Data: 46988
+    - m_Data: 46990
+    - m_Data: 46992
+    - m_Data: 46994
+    - m_Data: 46996
+    - m_Data: 46998
+    - m_Data: 47000
+    - m_Data: 47002
+    - m_Data: 47004
+    - m_Data: 47006
+    - m_Data: 47008
+    - m_Data: 47010
+    - m_Data: 47012
+    - m_Data: 47014
+    - m_Data: 47016
+    - m_Data: 47018
+    - m_Data: 47020
+    - m_Data: 47022
+    - m_Data: 47024
+    - m_Data: 47026
+    - m_Data: 47028
+    - m_Data: 47030
+    - m_Data: 47032
+    - m_Data: 47034
+    - m_Data: 47036
+    - m_Data: 47038
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -1477,49 +1477,49 @@ MonoBehaviour:
       m_Data: 0
     m_ExpandedIDs:
     - m_Data: 0
-    - m_Data: 46276
-    - m_Data: 46278
-    - m_Data: 46280
-    - m_Data: 46282
-    - m_Data: 46284
-    - m_Data: 46286
-    - m_Data: 46288
-    - m_Data: 46290
-    - m_Data: 46292
-    - m_Data: 46294
-    - m_Data: 46296
-    - m_Data: 46298
-    - m_Data: 46300
-    - m_Data: 46302
-    - m_Data: 46304
-    - m_Data: 46306
-    - m_Data: 46308
-    - m_Data: 46310
-    - m_Data: 46312
-    - m_Data: 46314
-    - m_Data: 46316
-    - m_Data: 46318
-    - m_Data: 46320
-    - m_Data: 46322
-    - m_Data: 46324
-    - m_Data: 46326
-    - m_Data: 46328
-    - m_Data: 46330
-    - m_Data: 46332
-    - m_Data: 46334
-    - m_Data: 46336
-    - m_Data: 46338
-    - m_Data: 46340
-    - m_Data: 46342
-    - m_Data: 46344
-    - m_Data: 46346
-    - m_Data: 46348
-    - m_Data: 46350
-    - m_Data: 46352
-    - m_Data: 46354
-    - m_Data: 46356
-    - m_Data: 46358
-    - m_Data: 46360
+    - m_Data: 46954
+    - m_Data: 46956
+    - m_Data: 46958
+    - m_Data: 46960
+    - m_Data: 46962
+    - m_Data: 46964
+    - m_Data: 46966
+    - m_Data: 46968
+    - m_Data: 46970
+    - m_Data: 46972
+    - m_Data: 46974
+    - m_Data: 46976
+    - m_Data: 46978
+    - m_Data: 46980
+    - m_Data: 46982
+    - m_Data: 46984
+    - m_Data: 46986
+    - m_Data: 46988
+    - m_Data: 46990
+    - m_Data: 46992
+    - m_Data: 46994
+    - m_Data: 46996
+    - m_Data: 46998
+    - m_Data: 47000
+    - m_Data: 47002
+    - m_Data: 47004
+    - m_Data: 47006
+    - m_Data: 47008
+    - m_Data: 47010
+    - m_Data: 47012
+    - m_Data: 47014
+    - m_Data: 47016
+    - m_Data: 47018
+    - m_Data: 47020
+    - m_Data: 47022
+    - m_Data: 47024
+    - m_Data: 47026
+    - m_Data: 47028
+    - m_Data: 47030
+    - m_Data: 47032
+    - m_Data: 47034
+    - m_Data: 47036
+    - m_Data: 47038
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 

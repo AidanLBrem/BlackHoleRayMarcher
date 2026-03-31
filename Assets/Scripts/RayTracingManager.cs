@@ -135,6 +135,8 @@ public class RayTracingManager : MonoBehaviour
 
     public bool useStepsPerCollision = true;
     public int StepsPerCollisionTest = 3;
+
+    public bool useRayMagnification = false;
     // --- Accumulation tracking ---
     Vector3 lastCameraPosition;
     Quaternion lastCameraRotation;
@@ -787,6 +789,9 @@ public class RayTracingManager : MonoBehaviour
         
         if (useStepsPerCollision && StepsPerCollisionTest > 1) rayTracingMaterial.EnableKeyword("MARCH_CHORD_COLLISION_LIMIT");
         else rayTracingMaterial.DisableKeyword("MARCH_CHORD_COLLISION_LIMIT");
+        
+        if (useRayMagnification) rayTracingMaterial.EnableKeyword("USE_RAY_MAGNIFICATION");
+        else rayTracingMaterial.DisableKeyword("USE_RAY_MAGNIFICATION");
     }
 
     void UpdateShaderValues()

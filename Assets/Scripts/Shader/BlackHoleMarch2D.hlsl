@@ -200,28 +200,34 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
     float3 pos = ray.ray.position;
     float3 dir = normalize(ray.ray.direction);
 
-    //Immediate capture if somehow already inside a horizon.
+    #ifdef USE_RAY_MAGNIFICATION
+    float3 posDX = ray.rayDX.position;
+    float3 dirDX = normalize(ray.rayDX.direction);
+    float3 posDY = ray.rayDY.position;
+    float3 dirDY = normalize(ray.rayDY.direction);
+    #endif
+
     if (IsInsideAnyHorizon(pos))
     {
         ray.hitBlackHole = true;
         return ray;
     }
 
-    // Only enter the marcher if we are already in a shell or is about to enter one
     if (!IsInsideAnyMarchShell(pos) && !RayWillEnterAnyMarchShell(pos, dir))
         return ray;
+
     #ifdef MARCH_CHORD_COLLISION_LIMIT
     int stepsSinceCollisionTest = 0;
     float3 chordStart = ray.ray.position;
     #endif
+
     while (true)
     {
         #ifdef MARCH_CHORD_COLLISION_LIMIT
         stepsSinceCollisionTest++;
         #endif
-        //calculate adaptive step size - closer to the horizon = more bending = more steps needed
-        float minDistFromHorizon = 3.402823e+38;
 
+        float minDistFromHorizon = 3.402823e+38;
         for (int i = 0; i < numBlackHoles; i++)
         {
             float rs = BlackHoles[i].SchwartzchildRadius;
@@ -230,23 +236,25 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
         }
 
         float adaptiveStep = minDistFromHorizon * stepSize;
-        float minStep = stepSize / 100.0;
-        float stepLen = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
-        
-        //RK4
-        float3 newPos;
-        IntegrateRK4(pos, dir, stepLen, newPos, dir);
-        //ntegrateLeapfrog(pos, dir, stepLen, newPos, newDir);
-        //We need to check to see if we intersect the black hole at any point along the chord
-        //TODO: Merge this with queryCollisions
+        float minStep      = stepSize / 100.0;
+        float stepLen      = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
+
+        float3 newPos, newDir;
+        IntegrateRK4(pos, dir, stepLen, newPos, newDir);
+
+        #ifdef USE_RAY_MAGNIFICATION
+        float3 newPosDX, newDirDX;
+        float3 newPosDY, newDirDY;
+        IntegrateRK4(posDX, dirDX, stepLen, newPosDX, newDirDX);
+        IntegrateRK4(posDY, dirDY, stepLen, newPosDY, newDirDY);
+        #endif
+
         if (SegmentHitsAnyHorizon(pos, newPos))
         {
             ray.hitBlackHole = true;
             return ray;
         }
 
-        //See if we collide with anything along this chord, we use testRay because we don't want to write to the actual ray until we confirm where we are going
-        //TODO: It might be faster to use the ray itself. 
         HitInfo h = (HitInfo)0;
 
         #ifdef MARCH_CHORD_COLLISION_LIMIT
@@ -255,65 +263,63 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
         if (stepsSinceCollisionTest > dynamicSteps)
         {
             Ray testRay;
-            testRay.position = chordStart;
+            testRay.position  = chordStart;
             testRay.direction = normalize(newPos - chordStart);
             h = queryCollisions(testRay, length(newPos - chordStart), false);
             stepsSinceCollisionTest = 0;
         }
-
         #endif
+
         #ifndef MARCH_CHORD_COLLISION_LIMIT
         Ray testRay;
-        testRay.position  = pos;
-        float actualStepDist = length(newPos - pos);
-        testRay.direction = (newPos - pos)/actualStepDist;
-
-
+        testRay.position      = pos;
+        float actualStepDist  = length(newPos - pos);
+        testRay.direction     = (newPos - pos) / actualStepDist;
         h = queryCollisions(testRay, actualStepDist, false);
         #endif
 
-        //We did collide with something. Move to the collision site and reflect
         if (h.didHit)
         {
             #ifdef MARCH_CHORD_COLLISION_LIMIT
             ray.ray.position  = chordStart;
-            ray.ray.direction = normalize(newPos - chordStart); //this is the ray we intersect along
+            ray.ray.direction = normalize(newPos - chordStart);
             #else
             ray.ray.position  = pos;
             ray.ray.direction = normalize(newPos - pos);
             #endif
 
             ray = handleReflection(ray, rngState, h);
+
             #ifdef MARCH_CHORD_COLLISION_LIMIT
-            chordStart = ray.ray.position; //go to new hit position
+            chordStart = ray.ray.position;
             #endif
-            //Make sure to redshift!
+
             #ifdef USE_REDSHIFTING
             float gtt_old = ComputeGttMulti(pos);
             float gtt_new = ComputeGttMulti(newPos);
             ray.energy *= sqrt(gtt_old / gtt_new);
             #endif
-            //if we are at max reflections or russian roulette killed, return. classifier will handle it from there
+
             if (ray.rayEarlyKill || ray.numBounces >= maxBounces)
                 return ray;
 
             pos = ray.ray.position;
             dir = normalize(ray.ray.direction);
-            //should never happen, but eh
+
             if (IsInsideAnyHorizon(pos))
             {
                 ray.hitBlackHole = true;
                 return ray;
             }
 
-
             continue;
         }
+
         #ifdef MARCH_CHORD_COLLISION_LIMIT
         if (stepsSinceCollisionTest == 0)
             chordStart = newPos;
         #endif
-        //no hit, we march instead
+
         #ifdef ENABLE_LENSING
         #ifdef USE_REDSHIFTING
         float gtt_new = ComputeGttMulti(newPos);
@@ -323,15 +329,28 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
         #endif
 
         pos = newPos;
+        dir = newDir;
+
+        #ifdef USE_RAY_MAGNIFICATION
+        posDX = newPosDX;
+        dirDX = newDirDX;
+        posDY = newPosDY;
+        dirDY = newDirDY;
+        #endif
 
         ray.ray.position  = pos;
         ray.ray.direction = dir;
 
-        //check to see if we have exited SOI
+        #ifdef USE_RAY_MAGNIFICATION
+        ray.rayDX.position  = posDX;
+        ray.rayDX.direction = dirDX;
+        ray.rayDY.position  = posDY;
+        ray.rayDY.direction = dirDY;
+        #endif
+
         if (IsSafeToExitMarch(pos, dir))
             return ray;
-        
-        //emergency break to stop weird photon sphere crashes
+
         emergencyBreak++;
         if (emergencyBreak > emergencyBreakMaxSteps)
         {

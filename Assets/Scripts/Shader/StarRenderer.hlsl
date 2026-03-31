@@ -29,7 +29,7 @@ float3 getStarField(float3 rayDirection)
         // --- layer parameters (easy to tweak) ---
         float3 scales      = float3(100.0, 200.0, 500.0);
         float3 thresholds  = float3(0.999, 0.997, 0.995);
-        float3 brightness  = float3(1.0, 0.8, 0.6);
+        float3 brightness  = float3(10.0, 4.0, 2.0);
 
         // --- star density layers ---
         float stars = 0.0;

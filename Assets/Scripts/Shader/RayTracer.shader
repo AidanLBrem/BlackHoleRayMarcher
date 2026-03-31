@@ -43,6 +43,7 @@ Shader "Custom/RayTracer"
             #pragma shader_feature_local DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS
             #pragma shader_feature_local DEBUG_DISPLAY_TLAS_LEAF_REFS
             #pragma shader_feature_local MARCH_CHORD_COLLISION_LIMIT
+            #pragma shader_feature_local USE_RAY_MAGNIFICATION
 			struct appdata
 			{
 				float4 vertex : POSITION;
@@ -91,6 +92,11 @@ Shader "Custom/RayTracer"
                 float3 incomingLight;
                 float3 rayColor;
                 uint numBounces;
+                #ifdef USE_RAY_MAGNIFICATION
+                Ray rayDX;
+                Ray rayDY;
+                float baseDifferentialArea;
+                #endif
             };
 
             struct Sphere
@@ -1127,7 +1133,6 @@ Shader "Custom/RayTracer"
                 }
                 
                 ray.ray.position = hitInfo.hitPoint + (Ng * 1e-4);
-
                 float p = max(saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722))), 1e-4);
                 if (randomValue(rngState) > p)
                 {
@@ -1226,7 +1231,26 @@ Shader "Custom/RayTracer"
                 pixel_marcher.rayEarlyKill  = false;
                 pixel_marcher.numBounces = 0;
                 pixel_marcher.ray = RayToStore;
+                #ifdef USE_RAY_MAGNIFICATION
+                {
+                    float2 pixelSize = float2(ViewParams.x / _ScreenParams.x,
+                                              ViewParams.y / _ScreenParams.y);
+                    float3 right = mul((float3x3)CameraLocalToWorldMatrix, float3(pixelSize.x, 0, 0));
+                    float3 up    = mul((float3x3)CameraLocalToWorldMatrix, float3(0, pixelSize.y, 0));
 
+                    float3 vpDX = viewPoint + right;
+                    float3 vpDY = viewPoint + up;
+
+                    pixel_marcher.rayDX.position  = vpDX;
+                    pixel_marcher.rayDX.direction = normalize(vpDX - CameraWorldPos);
+                    pixel_marcher.rayDY.position  = vpDY;
+                    pixel_marcher.rayDY.direction = normalize(vpDY - CameraWorldPos);
+
+                    float3 dDdX = pixel_marcher.rayDX.direction - pixel_marcher.ray.direction;
+                    float3 dDdY = pixel_marcher.rayDY.direction - pixel_marcher.ray.direction;
+                    pixel_marcher.baseDifferentialArea = length(cross(dDdX, dDdY));
+                }
+                #endif
                 while (pixel_marcher.numBounces < maxBounces)
                 {
                     if (pixel_marcher.rayEarlyKill)
@@ -1272,7 +1296,16 @@ Shader "Custom/RayTracer"
                     }
                     else
                     {
+                        #ifdef USE_RAY_MAGNIFICATION
+                        float3 dDdX = pixel_marcher.rayDX.direction - pixel_marcher.ray.direction;
+                        float3 dDdY = pixel_marcher.rayDY.direction - pixel_marcher.ray.direction;
+                        float exitArea = length(cross(dDdX, dDdY));
+                        float mu = exitArea / max(pixel_marcher.baseDifferentialArea, 1e-12);
+                        //return float3(mu/100,mu/100,mu/100);
+                        pixel_marcher.incomingLight += getStarField(rayDir) + float3(0.00001,0.00001,0.00001) * mu;
+                        #else
                         pixel_marcher.incomingLight += getStarField(rayDir);
+                        #endif
                     }
 
                     break;
