@@ -240,15 +240,8 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
         float stepLen      = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
 
         float3 newPos, newDir;
-        IntegrateRK4(pos, dir, stepLen, newPos, newDir);
-
-        #ifdef USE_RAY_MAGNIFICATION
-        float3 newPosDX, newDirDX;
-        float3 newPosDY, newDirDY;
-        IntegrateRK4(posDX, dirDX, stepLen, newPosDX, newDirDX);
-        IntegrateRK4(posDY, dirDY, stepLen, newPosDY, newDirDY);
-        #endif
-
+        IntegrateLeapfrog(pos, dir, stepLen, newPos, newDir);
+        
         if (SegmentHitsAnyHorizon(pos, newPos))
         {
             ray.hitBlackHole = true;
@@ -330,23 +323,24 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
 
         pos = newPos;
         dir = newDir;
-
         #ifdef USE_RAY_MAGNIFICATION
+        float3 newPosDX, newDirDX;
+        float3 newPosDY, newDirDY;
+        IntegrateLeapfrog(posDX, dirDX, stepLen, newPosDX, newDirDX);
+        IntegrateLeapfrog(posDY, dirDY, stepLen, newPosDY, newDirDY);
         posDX = newPosDX;
         dirDX = newDirDX;
         posDY = newPosDY;
         dirDY = newDirDY;
-        #endif
-
-        ray.ray.position  = pos;
-        ray.ray.direction = dir;
-
-        #ifdef USE_RAY_MAGNIFICATION
         ray.rayDX.position  = posDX;
         ray.rayDX.direction = dirDX;
         ray.rayDY.position  = posDY;
         ray.rayDY.direction = dirDY;
         #endif
+
+        ray.ray.position  = pos;
+        ray.ray.direction = dir;
+        
 
         if (IsSafeToExitMarch(pos, dir))
             return ray;

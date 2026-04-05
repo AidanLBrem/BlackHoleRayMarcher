@@ -1297,12 +1297,9 @@ Shader "Custom/RayTracer"
                     else
                     {
                         #ifdef USE_RAY_MAGNIFICATION
-                        float3 dDdX = pixel_marcher.rayDX.direction - pixel_marcher.ray.direction;
-                        float3 dDdY = pixel_marcher.rayDY.direction - pixel_marcher.ray.direction;
-                        float exitArea = length(cross(dDdX, dDdY));
-                        float mu = exitArea / max(pixel_marcher.baseDifferentialArea, 1e-12);
                         //return float3(mu/100,mu/100,mu/100);
-                        pixel_marcher.incomingLight += getStarField(rayDir) + float3(0.00001,0.00001,0.00001) * mu;
+                        float3 starColor = getStarField(rayDir);
+                        pixel_marcher.incomingLight += starColor;
                         #else
                         pixel_marcher.incomingLight += getStarField(rayDir);
                         #endif
@@ -1310,7 +1307,13 @@ Shader "Custom/RayTracer"
 
                     break;
                 }
-
+                #ifdef USE_RAY_MAGNIFICATION
+                float3 dDdX = pixel_marcher.rayDX.direction - pixel_marcher.ray.direction;
+                float3 dDdY = pixel_marcher.rayDY.direction - pixel_marcher.ray.direction;
+                float exitArea = length(cross(dDdX, dDdY));
+                float mu = exitArea / max(pixel_marcher.baseDifferentialArea, 1e-12);
+                pixel_marcher.incomingLight = pixel_marcher.incomingLight + float3(0.01,0.01,0.01) * mu * pixel_marcher.incomingLight;
+                #endif
                 if (bad3(pixel_marcher.incomingLight))
                     return float3(10000000, 0, 10000000);
 
