@@ -1389,19 +1389,15 @@ Shader "Custom/RayTracer"
                     float3 vp = mul(CameraLocalToWorldMatrix, float4(vpLocal, 1)).xyz;
                     
                     float3 color = trace(vp, rngState);
-                    float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
-                    float maxLuma = 10.0;
-
-                    if (luma > maxLuma)
-                        color *= maxLuma / luma;
 
                     totalIncomingLight += color;
+                   
                 }
 
                 float3 pixelCol = totalIncomingLight / RaysPerPixel;
                 if (any(isinf(pixelCol)))
                     return float4(10000000,0,10000000,1);
-
+    
                 return float4(pixelCol, 1);
             }
 

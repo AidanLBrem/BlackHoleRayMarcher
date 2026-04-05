@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using Unity.Mathematics;
+using Unity.VisualScripting;
 using Debug = UnityEngine.Debug;
 using UnityEngine.Profiling;
 using static RaytracerCPURay;
@@ -35,8 +36,7 @@ public class RayTracingManager : MonoBehaviour
     [SerializeField] bool useShaderInSceneView = true;
     [SerializeField] public bool useTlas = true;
     public bool useRedshifting = true;
-    [SerializeField] Shader rayTracingShader;
-    [SerializeField] Shader accumulatorShader;
+
 
     [Header("TLAS Settings")]
     public int tlasMaxLeafSize = 2;
@@ -45,7 +45,8 @@ public class RayTracingManager : MonoBehaviour
 
     Material rayTracingMaterial;
     Material accumulatorMaterial;
-
+    Material ditherMaterial;
+    private Material colorQuantizationMaterial;
     public int marchStepsCount;
     public int renderDistance;
     public int raysPerPixel;
@@ -94,6 +95,15 @@ public class RayTracingManager : MonoBehaviour
     public Transform sun;
 
     RenderTexture resultTexture;
+    [Header("Post Processing")] 
+    public Shader rayTracingShader;
+    public Shader accumulatorShader;
+    public Shader ditherShader;
+    public bool ditherPostProcess = false;
+    public Shader ColorQuantizationShader;
+    public bool colorQuantization = false;
+    public int numColors = 256;
+    public int ditherMatrixSize = 4;
     int numRenderedFrames = 0;
 
     public int emergencyBreakMaxSteps = 1000;
@@ -144,6 +154,7 @@ public class RayTracingManager : MonoBehaviour
     int lastScreenWidth;
     int lastScreenHeight;
     bool historyInitialized = false;
+    void Swap(ref RenderTexture a, ref RenderTexture b) => (a, b) = (b, a);
     struct MeshOffsets
     {
         public int vertexOffset;
@@ -212,6 +223,7 @@ public class RayTracingManager : MonoBehaviour
         {
             rayTracingMaterial.SetInt("framesPerScatter", 1);
         }
+        
 
         DirectionalGeodesic2DLutSolver.StepSize = blackHoleSOIStepSize;
     }
@@ -608,6 +620,10 @@ public class RayTracingManager : MonoBehaviour
 
         if (accumulatorShader != null)
             ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
+        if (ditherShader != null) 
+            ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
+        if (ColorQuantizationShader != null) 
+            ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
 
         numRenderedFrames = 0;
     }
@@ -645,19 +661,36 @@ public class RayTracingManager : MonoBehaviour
 
             RenderTexture currentFrame =
                 RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
+            RenderTexture tempBuffer =
+                RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
 
             Graphics.Blit(null, currentFrame, rayTracingMaterial);
 
             accumulatorMaterial.SetInt("numRenderedFrames", numRenderedFrames);
             accumulatorMaterial.SetTexture("_MainTexOld", prevFrame);
-            Graphics.Blit(currentFrame, resultTexture, accumulatorMaterial);
+            Graphics.Blit(currentFrame, tempBuffer, accumulatorMaterial);
+            Swap(ref currentFrame, ref tempBuffer);
+
+            if (ditherPostProcess)
+            {
+                ditherMaterial.SetInt("matrixSize", ditherMatrixSize);
+                Graphics.Blit(currentFrame, tempBuffer, ditherMaterial);
+                Swap(ref currentFrame, ref tempBuffer);
+            }
+
+            if (colorQuantization)
+            {
+                colorQuantizationMaterial.SetInt("numColors", numColors);
+                Graphics.Blit(currentFrame, tempBuffer, colorQuantizationMaterial);
+                Swap(ref currentFrame, ref tempBuffer);
+            }
+
+            Graphics.Blit(currentFrame, resultTexture);
+
+            RenderTexture.ReleaseTemporary(currentFrame);
+            RenderTexture.ReleaseTemporary(tempBuffer);
+            Graphics.Blit(currentFrame, resultTexture);
             Graphics.Blit(resultTexture, target);
-
-            if (Camera.current.name == "SceneCamera" && !accumlateInSceneView)
-                Graphics.Blit(currentFrame, target);
-
-            if (Camera.current.name != "SceneCamera" && !accumulateInGameView)
-                Graphics.Blit(currentFrame, target);
 
             if (Camera.current.name != "SceneCamera")
             {
@@ -686,7 +719,8 @@ public class RayTracingManager : MonoBehaviour
 
         ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
         ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
-
+        ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
+        ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
         ShaderHelper.CreateRenderTexture(
             ref resultTexture,
             Screen.width,

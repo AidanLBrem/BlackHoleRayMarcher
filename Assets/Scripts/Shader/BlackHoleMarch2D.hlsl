@@ -202,9 +202,9 @@ PixelMarcher marchAllBlackHoles(PixelMarcher ray, inout uint rngState)
 
     #ifdef USE_RAY_MAGNIFICATION
     float3 posDX = ray.rayDX.position;
-    float3 dirDX = normalize(ray.rayDX.direction);
+    float3 dirDX = (ray.rayDX.direction);
     float3 posDY = ray.rayDY.position;
-    float3 dirDY = normalize(ray.rayDY.direction);
+    float3 dirDY = (ray.rayDY.direction);
     #endif
 
     if (IsInsideAnyHorizon(pos))

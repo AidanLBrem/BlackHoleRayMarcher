@@ -912,11 +912,11 @@
     <Reference Include="Unity.RenderPipelines.Universal.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.RenderPipelines.Universal.Editor.dll</HintPath>
     </Reference>
-    <Reference Include="Unity.AI.Navigation.Updater">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.AI.Navigation.Updater.dll</HintPath>
-    </Reference>
     <Reference Include="Unity.Timeline">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.Timeline.dll</HintPath>
+    </Reference>
+    <Reference Include="Unity.AI.Navigation.Updater">
+      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.AI.Navigation.Updater.dll</HintPath>
     </Reference>
     <Reference Include="Unity.AI.Navigation.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.AI.Navigation.Editor.dll</HintPath>
@@ -984,8 +984,8 @@
     <Reference Include="Unity.InputSystem.ForUI">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.InputSystem.ForUI.dll</HintPath>
     </Reference>
-    <Reference Include="Unity.RenderPipelines.GPUDriven.Runtime">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.RenderPipelines.GPUDriven.Runtime.dll</HintPath>
+    <Reference Include="Unity.ProBuilder.AddOns.Editor">
+      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.AddOns.Editor.dll</HintPath>
     </Reference>
     <Reference Include="Unity.Timeline.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.Timeline.Editor.dll</HintPath>
@@ -993,8 +993,8 @@
     <Reference Include="Unity.VisualScripting.State.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.VisualScripting.State.Editor.dll</HintPath>
     </Reference>
-    <Reference Include="Unity.ProBuilder.AddOns.Editor">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.AddOns.Editor.dll</HintPath>
+    <Reference Include="Unity.RenderPipelines.GPUDriven.Runtime">
+      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.RenderPipelines.GPUDriven.Runtime.dll</HintPath>
     </Reference>
     <Reference Include="Unity.Mathematics">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.Mathematics.dll</HintPath>
