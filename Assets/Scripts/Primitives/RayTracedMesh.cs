@@ -36,6 +36,10 @@ public class RayTracedMesh : MonoBehaviour
 
         RebuildStaticData();
         rebuildBVH = false;
+        if (material.emissiveStrength > 0)
+        {
+            transform.tag = "Light Source";
+        }
     }
 
     void Update()

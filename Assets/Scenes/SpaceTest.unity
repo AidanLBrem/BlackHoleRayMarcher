@@ -385,9 +385,9 @@ MonoBehaviour:
   rayTracingShader: {fileID: 4800000, guid: d779f3a711c21624381f1f9699fdec69, type: 3}
   accumulatorShader: {fileID: 4800000, guid: 32812c464f9bb7944bccf2042f6e3436, type: 3}
   ditherShader: {fileID: 4800000, guid: 4d884bf0e9124245b4cc402bcbadeeda, type: 3}
-  ditherPostProcess: 0
+  ditherPostProcess: 1
   ColorQuantizationShader: {fileID: 4800000, guid: bf1d279c767087b4cacb9b41d4104202, type: 3}
-  colorQuantization: 0
+  colorQuantization: 1
   numColors: 64
   ditherMatrixSize: 4
   emergencyBreakMaxSteps: 500
@@ -7267,7 +7267,7 @@ MonoBehaviour:
   tracerProperties: {fileID: 330585546}
   path:
     hitInfos: []
-    time: 0.00010550022
+    time: 0.003836751
     debugInvalidBelowSurfaceCount: 0
     debugInvalidBRDFCount: 0
 --- !u!4 &1436880562

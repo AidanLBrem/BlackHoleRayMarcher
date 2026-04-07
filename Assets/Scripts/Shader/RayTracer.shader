@@ -14,15 +14,12 @@ Shader "Custom/RayTracer"
             Name "RayTracer"
 
             HLSLPROGRAM
-            #include "UnityCG.cginc"
-            #include "Math.hlsl"
-            #include "StarRenderer.hlsl"
-            #include "GGX.hlsl"
- 
+
+
             #pragma vertex vert
             #pragma fragment frag
             #pragma target 5.0
-            #pragma enable_d3d11_debug_symbols
+
             #pragma shader_feature_local TEST_SPHERE
             #pragma shader_feature_local TEST_TRIANGLE
             #pragma shader_feature_local USE_LUT
@@ -44,6 +41,7 @@ Shader "Custom/RayTracer"
             #pragma shader_feature_local DEBUG_DISPLAY_TLAS_LEAF_REFS
             #pragma shader_feature_local MARCH_CHORD_COLLISION_LIMIT
             #pragma shader_feature_local USE_RAY_MAGNIFICATION
+            #pragma shader_feature_local APPLY_NEE
 			struct appdata
 			{
 				float4 vertex : POSITION;
@@ -221,7 +219,11 @@ Shader "Custom/RayTracer"
             float inScatteringPoints;
             
             int u_StepsPerCollisionTest;
+            #include "Math.hlsl"
 
+            #include "UnityCG.cginc"
+            #include "StarRenderer.hlsl"
+            #include "GGX.hlsl"
             struct OrbitalPlaneParameters
             {
                 float3 localOrbitalPlaneNormal;
@@ -255,107 +257,88 @@ Shader "Custom/RayTracer"
                 float3 weakBentDir;
             };
             
-            OrbitalPlaneParameters GetLocalOrbitalPlaneParameters(float3 rayPosition, float3 bhPosition, float3 rayDirection, float4x4 worldToLocalMatrix)
+            HitInfo raySphere(Ray ray, float3 sphereCenter, float sphereRadius)
             {
-                float3 orbitalPlaneNormal = normalize(cross(rayTo(rayPosition, bhPosition), rayDirection));
-                float3 orbitalPlaneNormalLocal = normalize(mul((float3x3)worldToLocalMatrix, orbitalPlaneNormal));
-                    
-                float3 localOrigin = mul(worldToLocalMatrix, float4(rayPosition, 1.0)).xyz;
-                float planeD = dot(orbitalPlaneNormalLocal, localOrigin);
+                HitInfo hitInfo = (HitInfo)0;
+                float3 offsetRayOrigin = ray.position - sphereCenter;
 
-                OrbitalPlaneParameters result;
-                result.localOrbitalPlaneNormal = orbitalPlaneNormalLocal;
-                result.localPlaneD = planeD;
-                return result;
-            }
-            
-            OrbitalPlaneParameters GetWorldOrbitalPlaneParameters(float3 rayPosition, float3 bhPosition, float3 rayDirection)
-            {
-                float3 orbitalPlaneNormal = normalize(cross(rayTo(rayPosition, bhPosition), rayDirection));
-                float planeD = dot(orbitalPlaneNormal, rayPosition);
+                float a = dot(ray.direction, ray.direction);
+                float b = 2 * dot(offsetRayOrigin, ray.direction);
+                float c = dot(offsetRayOrigin, offsetRayOrigin) - sphereRadius * sphereRadius;
+                float discriminant = b * b - 4 * a * c;
 
-                OrbitalPlaneParameters result;
-                result.localOrbitalPlaneNormal = orbitalPlaneNormal;
-                result.localPlaneD = planeD;
-                return result;
-            }
-
-            BlackHoleDecision EvaluateBlackHoleForRay(Ray ray, BlackHole blackHole)
-            {
-                BlackHoleDecision result = (BlackHoleDecision)0;
-                result.marchEntryT = 3.402823e+38;
-                result.weakBentDir = ray.direction;
-
-                float3 d = ray.direction;
-                float3 rel = ray.position - blackHole.position;
-                float rs = blackHole.SchwartzchildRadius;
-
-                float marchImpactThreshold = max(rs * blackHole.blackHoleSOIMultiplier, 4.0 * rs);
-
-                float r0 = length(rel);
-                bool startInsideMarchRegion = (r0 < marchImpactThreshold);
-
-                if (startInsideMarchRegion)
+                if (discriminant >=  0)
                 {
-                    result.affectsRay = true;
-                    result.shouldMarch = true;
-                    result.marchEntryT = 0.0;
-                    float tClosestInside = -dot(rel, d);
-                    float3 closestVecInside = rel + d * tClosestInside;
-                    result.impactParameter = length(closestVecInside);
-                    result.deflectionAngle = 0.0;
-                    result.weakBentDir = d;
-                    return result;
-                }
+                    float dst = (-b - sqrt(discriminant)) / (2 * a);
 
-                float tClosest = -dot(rel, d);
-                if (tClosest <= 0.0)
-                    return result;
-
-                float3 closestVec = rel + d * tClosest;
-                float b = length(closestVec);
-                float safeB = max(b, 1e-6);
-
-                result.affectsRay = true;
-                result.impactParameter = b;
-
-                float alpha = 2.0 * rs / safeB;
-                result.deflectionAngle = alpha;
-
-                float3 bendDir = float3(0,0,0);
-                if (b > 1e-6)
-                    bendDir = -closestVec / b;
-
-                result.weakBentDir = normalize(d * cos(alpha) + bendDir * sin(alpha));
-
-                if (b < marchImpactThreshold)
-                {
-                    result.shouldMarch = true;
-                    result.weakBentDir = d;
-                    float tEntry = RaySphereEntryDistance(ray.position, d, blackHole.position, marchImpactThreshold);
-                    result.marchEntryT = (tEntry >= 0.0) ? tEntry : 0.0;
-                }
-
-                return result;
-            }
-            
-            MultiBlackHoleDecision FindAllStrongFieldMarchers(Ray ray, MultiBlackHoleDecision result, int indexStart)
-            {
-                for (int i = indexStart + 1; i < numBlackHoles; i++)
-                {
-                    BlackHoleDecision d = EvaluateBlackHoleForRay(ray, BlackHoles[i]);
-                    if (!d.affectsRay)
-                        continue;
-
-                    if (d.marchEntryT == 0 && d.shouldMarch)
+                    if (dst >= 0)
                     {
-                        result.activeStrongFieldMarchers[result.activeStrongFieldMarchCount++] = i;   
+                        hitInfo.didHit = true;
+                        hitInfo.distance = dst;
+                        hitInfo.hitPoint = ray.position + ray.direction * dst;
                     }
                 }
-                
-                return result;
+
+                return hitInfo;
             }
+            HitInfo checkSphereCollisions(Ray ray)
+            {
+                HitInfo closest = (HitInfo)0;
+                closest.distance = 3.402823e+38;
+
+                for (int i = 0; i < numSpheres; i++)
+                {
+                    Sphere sphere = Spheres[i];
+                    HitInfo hit = raySphere(ray, sphere.position, sphere.radius);
+                    if (hit.didHit && hit.distance < closest.distance)
+                    {
+                        closest = hit;
+                        closest.objectType = 0;
+                        closest.objectIndex = -1;
+                    }
+                }
+
+                return closest;
+            }
+
             
+            HitInfo rayTriangle(Ray ray, Triangle tri)
+			{
+                float3 edgeAB = tri.edgeAB;
+                float3 edgeAC = tri.edgeAC;
+				float3 geometricNormal = cross(tri.edgeAB, tri.edgeAC);
+
+				float determinant = -dot(ray.direction, geometricNormal);
+                if (determinant <=  0)
+                    return (HitInfo)0;
+
+				float invDet = 1 / determinant;
+                uint vertex1 = TriangleIndices[tri.baseIndex];
+				float3 ao = ray.position - Vertices[vertex1];
+				float dst = dot(ao, geometricNormal) * invDet;
+                if (dst <  0)
+                    return (HitInfo)0;
+
+                float3 dao = cross(ao, ray.direction);
+				float u = dot(edgeAC, dao) * invDet;
+                if (u <  0)
+                    return (HitInfo)0;
+
+				float v = -dot(edgeAB, dao) * invDet;
+                if (v < 0)
+                    return (HitInfo)0;
+
+                if (u + v > 1.0)
+                    return (HitInfo)0;
+
+				HitInfo hitInfo = (HitInfo)0;
+				hitInfo.didHit = true;
+				hitInfo.hitPoint = ray.position + ray.direction * dst;
+				hitInfo.distance = dst;
+                hitInfo.u = u;
+                hitInfo.v = v;
+				return hitInfo;
+			}
             AABBHitInfo RayAABB(float3 rayOrigin, float3 rayDirection, float3 inverseDirection, float3 boxMin, float3 boxMax, float distanceToBeat)
             {
                 float3 invDir = inverseDirection;
@@ -380,6 +363,8 @@ Shader "Custom/RayTracer"
                 float r = dot(abs(orbitalPlaneParameters.localOrbitalPlaneNormal), boxHalfExtents);
                 return abs(d) <= r;
             }
+
+            
 
             AABBHitInfo RayHitsBox(
                 OrbitalPlaneParameters orbitalPlaneParameters,
@@ -419,90 +404,6 @@ Shader "Custom/RayTracer"
                 float3 boxMax = float3(AABBRightX, AABBRightY, AABBRightZ);
                 return RayAABB(rayOrigin, rayDirection, inverseDirection, boxMin, boxMax, distanceToBeat);
             }
-
-            HitInfo raySphere(Ray ray, float3 sphereCenter, float sphereRadius)
-            {
-				HitInfo hitInfo = (HitInfo)0;
-				float3 offsetRayOrigin = ray.position - sphereCenter;
-
-				float a = dot(ray.direction, ray.direction);
-				float b = 2 * dot(offsetRayOrigin, ray.direction);
-				float c = dot(offsetRayOrigin, offsetRayOrigin) - sphereRadius * sphereRadius;
-				float discriminant = b * b - 4 * a * c;
-
-				if (discriminant >=  0)
-                {
-					float dst = (-b - sqrt(discriminant)) / (2 * a);
-
-					if (dst >= 0)
-                    {
-						hitInfo.didHit = true;
-						hitInfo.distance = dst;
-						hitInfo.hitPoint = ray.position + ray.direction * dst;
-					}
-				}
-
-				return hitInfo;
-            }
-
-			HitInfo rayTriangle(Ray ray, Triangle tri)
-			{
-                float3 edgeAB = tri.edgeAB;
-                float3 edgeAC = tri.edgeAC;
-				float3 geometricNormal = cross(tri.edgeAB, tri.edgeAC);
-
-				float determinant = -dot(ray.direction, geometricNormal);
-                if (determinant <=  0)
-                    return (HitInfo)0;
-
-				float invDet = 1 / determinant;
-                uint vertex1 = TriangleIndices[tri.baseIndex];
-				float3 ao = ray.position - Vertices[vertex1];
-				float dst = dot(ao, geometricNormal) * invDet;
-                if (dst <  0)
-                    return (HitInfo)0;
-
-                float3 dao = cross(ao, ray.direction);
-				float u = dot(edgeAC, dao) * invDet;
-                if (u <  0)
-                    return (HitInfo)0;
-
-				float v = -dot(edgeAB, dao) * invDet;
-                if (v < 0)
-                    return (HitInfo)0;
-
-                if (u + v > 1.0)
-                    return (HitInfo)0;
-
-				HitInfo hitInfo = (HitInfo)0;
-				hitInfo.didHit = true;
-				hitInfo.hitPoint = ray.position + ray.direction * dst;
-				hitInfo.distance = dst;
-                hitInfo.u = u;
-                hitInfo.v = v;
-				return hitInfo;
-			}
-            
-            HitInfo checkSphereCollisions(Ray ray)
-            {
-                HitInfo closest = (HitInfo)0;
-                closest.distance = 3.402823e+38;
-
-                for (int i = 0; i < numSpheres; i++)
-                {
-                    Sphere sphere = Spheres[i];
-                    HitInfo hit = raySphere(ray, sphere.position, sphere.radius);
-                    if (hit.didHit && hit.distance < closest.distance)
-                    {
-                        closest = hit;
-                        closest.objectType = 0;
-                        closest.objectIndex = -1;
-                    }
-                }
-
-                return closest;
-            }
-
             HitInfo TraverseInstanceBLAS(Ray ray, uint instanceIndex, float worldTMax, bool findClosestCollisionOnly)
             {
                 InstanceBLASTraversals++;
@@ -922,6 +823,129 @@ Shader "Custom/RayTracer"
                 return closest;
                 #endif
             }
+            HitInfo queryCollisions(Ray ray, float tMax, bool findFirstCollisionOnly)
+            {
+                HitInfo closest = (HitInfo)0;
+                closest.distance = 3.402823e+38;
+
+                #ifdef TEST_SPHERE
+                HitInfo s = checkSphereCollisions(ray);
+                if (s.didHit && s.distance <= tMax && s.distance < closest.distance)
+                {
+                    closest = s;
+                    if (findFirstCollisionOnly)
+                        return s;
+                }
+                #endif
+
+                #ifdef TEST_TRIANGLE
+                HitInfo m = checkMeshCollisions(ray, tMax, findFirstCollisionOnly);
+                if (m.didHit && m.distance <= tMax && m.distance < closest.distance)
+                    closest = m;
+                #endif
+
+                return closest;
+            }
+            OrbitalPlaneParameters GetLocalOrbitalPlaneParameters(float3 rayPosition, float3 bhPosition, float3 rayDirection, float4x4 worldToLocalMatrix)
+            {
+                float3 orbitalPlaneNormal = normalize(cross(rayTo(rayPosition, bhPosition), rayDirection));
+                float3 orbitalPlaneNormalLocal = normalize(mul((float3x3)worldToLocalMatrix, orbitalPlaneNormal));
+                    
+                float3 localOrigin = mul(worldToLocalMatrix, float4(rayPosition, 1.0)).xyz;
+                float planeD = dot(orbitalPlaneNormalLocal, localOrigin);
+
+                OrbitalPlaneParameters result;
+                result.localOrbitalPlaneNormal = orbitalPlaneNormalLocal;
+                result.localPlaneD = planeD;
+                return result;
+            }
+            
+            OrbitalPlaneParameters GetWorldOrbitalPlaneParameters(float3 rayPosition, float3 bhPosition, float3 rayDirection)
+            {
+                float3 orbitalPlaneNormal = normalize(cross(rayTo(rayPosition, bhPosition), rayDirection));
+                float planeD = dot(orbitalPlaneNormal, rayPosition);
+
+                OrbitalPlaneParameters result;
+                result.localOrbitalPlaneNormal = orbitalPlaneNormal;
+                result.localPlaneD = planeD;
+                return result;
+            }
+
+            BlackHoleDecision EvaluateBlackHoleForRay(Ray ray, BlackHole blackHole)
+            {
+                BlackHoleDecision result = (BlackHoleDecision)0;
+                result.marchEntryT = 3.402823e+38;
+                result.weakBentDir = ray.direction;
+
+                float3 d = ray.direction;
+                float3 rel = ray.position - blackHole.position;
+                float rs = blackHole.SchwartzchildRadius;
+
+                float marchImpactThreshold = max(rs * blackHole.blackHoleSOIMultiplier, 4.0 * rs);
+
+                float r0 = length(rel);
+                bool startInsideMarchRegion = (r0 < marchImpactThreshold);
+
+                if (startInsideMarchRegion)
+                {
+                    result.affectsRay = true;
+                    result.shouldMarch = true;
+                    result.marchEntryT = 0.0;
+                    float tClosestInside = -dot(rel, d);
+                    float3 closestVecInside = rel + d * tClosestInside;
+                    result.impactParameter = length(closestVecInside);
+                    result.deflectionAngle = 0.0;
+                    result.weakBentDir = d;
+                    return result;
+                }
+
+                float tClosest = -dot(rel, d);
+                if (tClosest <= 0.0)
+                    return result;
+
+                float3 closestVec = rel + d * tClosest;
+                float b = length(closestVec);
+                float safeB = max(b, 1e-6);
+
+                result.affectsRay = true;
+                result.impactParameter = b;
+
+                float alpha = 2.0 * rs / safeB;
+                result.deflectionAngle = alpha;
+
+                float3 bendDir = float3(0,0,0);
+                if (b > 1e-6)
+                    bendDir = -closestVec / b;
+
+                result.weakBentDir = normalize(d * cos(alpha) + bendDir * sin(alpha));
+
+                if (b < marchImpactThreshold)
+                {
+                    result.shouldMarch = true;
+                    result.weakBentDir = d;
+                    float tEntry = RaySphereEntryDistance(ray.position, d, blackHole.position, marchImpactThreshold);
+                    result.marchEntryT = (tEntry >= 0.0) ? tEntry : 0.0;
+                }
+
+                return result;
+            }
+            #include "NEE.hlsl"
+            MultiBlackHoleDecision FindAllStrongFieldMarchers(Ray ray, MultiBlackHoleDecision result, int indexStart)
+            {
+                for (int i = indexStart + 1; i < numBlackHoles; i++)
+                {
+                    BlackHoleDecision d = EvaluateBlackHoleForRay(ray, BlackHoles[i]);
+                    if (!d.affectsRay)
+                        continue;
+
+                    if (d.marchEntryT == 0 && d.shouldMarch)
+                    {
+                        result.activeStrongFieldMarchers[result.activeStrongFieldMarchCount++] = i;   
+                    }
+                }
+                
+                return result;
+            }
            
             float3 ApplyFakeRelativisticToneShift(float3 color, float g, float strength)
             {
@@ -951,29 +975,7 @@ Shader "Custom/RayTracer"
                 return (Sphere)0;
             }
             
-            HitInfo queryCollisions(Ray ray, float tMax, bool findFirstCollisionOnly)
-            {
-                HitInfo closest = (HitInfo)0;
-                closest.distance = 3.402823e+38;
 
-                #ifdef TEST_SPHERE
-                HitInfo s = checkSphereCollisions(ray);
-                if (s.didHit && s.distance <= tMax && s.distance < closest.distance)
-                {
-                    closest = s;
-                    if (findFirstCollisionOnly)
-                        return s;
-                }
-                #endif
-
-                #ifdef TEST_TRIANGLE
-                HitInfo m = checkMeshCollisions(ray, tMax, findFirstCollisionOnly);
-                if (m.didHit && m.distance <= tMax && m.distance < closest.distance)
-                    closest = m;
-                #endif
-
-                return closest;
-            }
 
             #include "AtmosphereicScattering.hlsl"
 
@@ -1133,6 +1135,9 @@ Shader "Custom/RayTracer"
                 }
                 
                 ray.ray.position = hitInfo.hitPoint + (Ng * 1e-4);
+                #ifdef APPLY_NEE
+                ray.incomingLight += NEE(ray.ray.position, rngState) * ray.rayColor;
+                #endif
                 float p = max(saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722))), 1e-4);
                 if (randomValue(rngState) > p)
                 {
@@ -1294,15 +1299,15 @@ Shader "Custom/RayTracer"
                         }
                         #endif
                     }
-                    else
                     {
-                        #ifdef USE_RAY_MAGNIFICATION
+                        float luma = dot(pixel_marcher.incomingLight, float3(0.2126, 0.7152, 0.0722));
+                        if (luma > 0.05)
+                        {
+                            break;
+                        }
                         //return float3(mu/100,mu/100,mu/100);
                         float3 starColor = getStarField(rayDir);
                         pixel_marcher.incomingLight += starColor;
-                        #else
-                        pixel_marcher.incomingLight += getStarField(rayDir);
-                        #endif
                     }
 
                     break;

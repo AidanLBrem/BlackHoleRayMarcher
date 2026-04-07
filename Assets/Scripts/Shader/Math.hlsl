@@ -1,5 +1,5 @@
 #define PI 3.1415926
-#include <UnityShaderVariables.cginc>
+#include "UnityShaderVariables.cginc"
 const float2x2 bayerMatrix2x2 = float2x2(
     0.0, 2.0,
     3.0, 1.0
@@ -18,6 +18,17 @@ float randomValue(inout uint state) {
     result = (result >> 22) ^ result;
     return result / 4294967295.0;
 }
+uint randomUint(inout uint state) {
+    state = state * 747796405 + 2891336453;
+    uint result = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
+    result = (result >> 22) ^ result;
+    return result;
+}
+int randomRange(inout uint state, int minVal, int maxVal) {
+    uint range = (uint)(maxVal - minVal);
+    return minVal + (int)(randomValue(state) % range);
+}
+
 bool isNan(float value)
 {
     uint bits = asuint(value);
