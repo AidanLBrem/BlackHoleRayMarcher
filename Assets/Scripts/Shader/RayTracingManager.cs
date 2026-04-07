@@ -32,6 +32,14 @@ public static class SharedMeshRegistry
     }
 }
 
+// Matches the HLSL struct in NEE.hlsl
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct GPULightSource
+{
+    public int instanceIndex;
+    public float totalArea;
+}
+
 [ExecuteAlways, ImageEffectAllowedInSceneView]
 public class RayTracingManager : MonoBehaviour
 {
@@ -305,7 +313,7 @@ public class RayTracingManager : MonoBehaviour
         ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, new Vector3[1]);
         ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer, new Vector3[1]);
         ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer, new uint[1]);
-        ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, new uint[1]);
+        ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, new GPULightSource[1]);
 
         rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
         rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
@@ -507,14 +515,12 @@ public class RayTracingManager : MonoBehaviour
     {
         BvhInstance[] instances = new BvhInstance[meshObjects.Count];
         MeshStruct[] gpuInstances = new MeshStruct[meshObjects.Count];
-        int[] lightSources = new int[meshObjects.Count];
+        GPULightSource[] lightSources = new GPULightSource[meshObjects.Count];
         int numLightSources = 0;
 
         for (int i = 0; i < meshObjects.Count; i++)
         {
             RayTracedMesh meshObj = meshObjects[i];
-            if (meshObj.material.emissiveStrength > 0)
-                lightSources[numLightSources++] = i;
 
             MeshOffsets off = offsets[meshObj.sharedMesh];
 
@@ -549,6 +555,28 @@ public class RayTracingManager : MonoBehaviour
                 AABBRightY = worldBounds.max.y,
                 AABBRightZ = worldBounds.max.z,
             };
+            
+            // Compute world-space area for emissive meshes
+            if (meshObj.material.emissiveStrength > 0)
+            {
+                Matrix4x4 l2w = meshObj.transform.localToWorldMatrix;
+                SharedMeshData sm = meshObj.sharedMesh;
+                float totalArea = 0f;
+
+                foreach (int triId in sm.blas.PrimitiveRefs)
+                {
+                    ref buildTri bt = ref sm.buildTriangles[triId];
+                    Vector3 worldAB = l2w.MultiplyVector(bt.posB - bt.posA);
+                    Vector3 worldAC = l2w.MultiplyVector(bt.posC - bt.posA);
+                    totalArea += Vector3.Cross(worldAB, worldAC).magnitude * 0.5f;
+                }
+
+                lightSources[numLightSources++] = new GPULightSource
+                {
+                    instanceIndex = i,
+                    totalArea = totalArea
+                };
+            }
         }
 
         TLASBuilder tlasBuilder = new TLASBuilder();
@@ -566,10 +594,14 @@ public class RayTracingManager : MonoBehaviour
         for (int i = 0; i < tlasRefs.Length; i++)
             tlasRefs[i] = (uint)tlasBuilder.PrimitiveRefs[i];
 
+        // Trim lightSources array to actual count
+        GPULightSource[] trimmedLightSources = new GPULightSource[Mathf.Max(1, numLightSources)];
+        Array.Copy(lightSources, trimmedLightSources, numLightSources);
+
         ShaderHelper.CreateStructuredBuffer(ref TLASBuffer, tlasNodes);
         ShaderHelper.CreateStructuredBuffer(ref TLASRefBuffer, tlasRefs);
         ShaderHelper.CreateStructuredBuffer(ref InstanceBuffer, gpuInstances);
-        ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, lightSources);
+        ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, trimmedLightSources);
 
         rayTracingMaterial.SetBuffer("TLASNodes", TLASBuffer);
         rayTracingMaterial.SetBuffer("TLASRefs", TLASRefBuffer);
@@ -677,7 +709,11 @@ public class RayTracingManager : MonoBehaviour
             accumulatorMaterial.SetTexture("_MainTexOld", cleanAccumBuffer);
             Graphics.Blit(currentFrame, tempBuffer, accumulatorMaterial);
             Swap(ref currentFrame, ref tempBuffer);
-            // 4. A-Trous spatial filter (before stylistic post-processing)
+
+            // 3. Save clean accumulated result for next frame (before any post-processing)
+            Graphics.Blit(currentFrame, cleanAccumBuffer);
+
+            // 4. A-Trous spatial filter (display only, not fed back into accumulation)
             if (atrousFilter && atrousMaterial != null)
             {
                 int[] stepSizes = { 1, 2, 4, 8, 16 };
@@ -689,8 +725,6 @@ public class RayTracingManager : MonoBehaviour
                     Swap(ref currentFrame, ref tempBuffer);
                 }
             }
-            // 3. Save clean accumulated result for next frame (no post-processing)
-            Graphics.Blit(currentFrame, cleanAccumBuffer);
 
             // 5. Apply stylistic post-processes for display only
             if (ditherPostProcess)
@@ -794,7 +828,6 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
         rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation", TLASLeafRefsSaturationValue);
 
-        // Shader keywords
         SetKeyword(rayTracingMaterial, "TEST_SPHERE", renderSphere);
         SetKeyword(rayTracingMaterial, "TEST_TRIANGLE", renderTriangles);
         SetKeyword(rayTracingMaterial, "ENABLE_LENSING", enable_lensing);

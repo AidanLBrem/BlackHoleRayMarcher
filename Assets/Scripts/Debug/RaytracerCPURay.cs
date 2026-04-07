@@ -655,7 +655,7 @@ public class RaytracerCPURay : MonoBehaviour
 
         best.BVHNodesSearched++;
         best.BLASNodesSearched++;
-        bool isLeaf = node.IsLeaf;
+        bool isLeaf = node.rightChild == node.leftChild;
 
         best.boundsHitData.Add(new BoundsHitData
         {

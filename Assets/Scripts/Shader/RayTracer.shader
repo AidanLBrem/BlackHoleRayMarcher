@@ -984,22 +984,34 @@ Shader "Custom/RayTracer"
                 ray.numBounces++;
                 float3 preBounceColor = ray.rayColor;
                 RayTracingMaterial material = Instances[hitInfo.objectIndex].material;
+
+                // =======================
+                // EMISSION
+                // =======================
                 if (material.emissionStrength > 0.0)
                 {
+                    #ifdef APPLY_NEE
+                    ray.rayEarlyKill = true;
+                    return ray;
+                    #else
                     float g = 1 / ray.energy;
                     #ifndef USE_REDSHIFTING
                     g = 1;
                     #endif
-
                     float3 c = ApplyFakeRelativisticToneShift(material.emissiveColor.rgb, g, 1.0);
                     float3 emittedLight = c * material.emissionStrength * (g * g * g);
                     ray.incomingLight += emittedLight * ray.rayColor;
                     ray.rayEarlyKill = true;
                     return ray;
+                    #endif
                 }
 
+                // =======================
+                // NORMAL SETUP
+                // =======================
                 uint triIndex = hitInfo.triIndex;
                 Triangle tri = Triangles[triIndex];
+
                 uint index1 = TriangleIndices[tri.baseIndex];
                 uint index2 = TriangleIndices[tri.baseIndex + 1];
                 uint index3 = TriangleIndices[tri.baseIndex + 2];
@@ -1013,29 +1025,27 @@ Shader "Custom/RayTracer"
                     n2 * hitInfo.u +
                     n3 * hitInfo.v
                 );
-                
 
                 Mesh mesh = Instances[hitInfo.objectIndex];
                 float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
                 N = safeNormalize(mul(nMat, N));
 
-                //float3 geomNormalLocal = normalize(Triangles[hitInfo.triIndex].geometricNormal);
-                float3 geomNormalLocal = normalize(cross(Triangles[hitInfo.triIndex].edgeAB, Triangles[hitInfo.triIndex].edgeAC));
+                float3 geomNormalLocal = normalize(cross(tri.edgeAB, tri.edgeAC));
                 float3 Ng = safeNormalize(mul(nMat, geomNormalLocal));
 
-                if (dot(Ng, ray.ray.direction) > 0)
-                    Ng = -Ng;
-
-                if (dot(N, Ng) < 0)
-                    N = -N;
+                if (dot(Ng, ray.ray.direction) > 0) Ng = -Ng;
+                if (dot(N, Ng) < 0) N = -N;
 
                 if (bad3(ray.ray.direction) || bad3(ray.rayColor) || bad3(N) || bad3(Ng))
                 {
-                    ray.incomingLight = float3(1, 0, 1);
+                    ray.incomingLight = float3(1000, 0, 1000);
                     ray.rayEarlyKill = true;
                     return ray;
                 }
 
+                // =======================
+                // MATERIAL
+                // =======================
                 float3 baseColor = material.color;
                 float metallic = saturate(material.metallicity);
                 float roughness = saturate(material.roughness);
@@ -1044,102 +1054,158 @@ Shader "Custom/RayTracer"
                 float3 F0 = lerp(dielectricF0, baseColor, metallic);
 
                 float3 V = -ray.ray.direction;
-                float NdotV = saturate(dot(N, V));
+                float NdotV = max(dot(N, V), 1e-4);
 
-                float3 F_pick = FresnelSchlick(NdotV, F0);
-                float3 kd = (1.0 - F_pick) * (1.0 - metallic);
+                // Diffuse (energy-conserving, metallic-aware)
+                float3 kd = (1.0 - metallic);
                 float3 diffuseBRDF = kd * baseColor / PI;
 
-                float specularWeight = saturate(luminance(F_pick));
-                float diffuseWeight = max(luminance(diffuseBRDF), 1e-4);
-
-                float totalWeight = specularWeight + diffuseWeight;
-                if (totalWeight <= 1e-8)
-                {
-                    ray.rayEarlyKill = true;
-                    return ray;
-                }
-                
+                // =======================
+                // DIRECT LIGHTING
+                // =======================
                 #ifdef APPLY_SUN_LIGHTING
-                ray.incomingLight += evaluateDirectSunAtHit(hitInfo.hitPoint, N, Ng, V, material.color, material.metallicity, material.roughness, F0);
+                ray.incomingLight += evaluateDirectSunAtHit(
+                    hitInfo.hitPoint, N, Ng, V,
+                    material.color, material.metallicity, material.roughness, F0
+                );
                 #endif
 
                 #ifdef APPLY_SCATTERING
                 if (ray.numBounces == 1)
                 {
-                    ray.incomingLight += calculateLight(ray.ray.position, ray.ray.direction, hitInfo.distance, rngState, 1);
+                    ray.incomingLight += calculateLight(
+                        ray.ray.position,
+                        ray.ray.direction,
+                        hitInfo.distance,
+                        rngState,
+                        1
+                    );
                 }
                 #endif
 
-                float specularChance = clamp(specularWeight / totalWeight, 0.001, 0.999);
+                // =======================
+                // MIS SAMPLING
+                // =======================
+                float specWeight = luminance(F0);
+                float diffWeight = luminance(baseColor) * (1.0 - metallic);
+
+                float sum = specWeight + diffWeight;
+                float specProb = (sum > 0.0) ? specWeight / sum : 0.5;
+
+                // clamp to avoid degeneracy
+                specProb = clamp(specProb, 0.01, 0.99);
                 float choose = randomValue(rngState);
+                bool sampleSpecular = (choose < specProb);
 
-                if (choose < specularChance)
+                float3 L;
+                float pdf_spec = 0.0;
+                float pdf_diff = 0.0;
+                float3 specBRDF = float3(0,0,0);
+
+                float NdotL = 0.0;
+                if (sampleSpecular)
                 {
-                    float2 xi = float2(randomValue(rngState), randomValue(rngState));
-                    float3 H = sampleGGX_H(xi, roughness, N);
-                    float3 L = reflect(-V, H);
-
-                    float NdotL = saturate(dot(N, L));
-                    float NdotH = saturate(dot(N, H));
-                    float VdotH = saturate(dot(V, H));
-
-                    if (NdotL <= 0 || NdotV <= 0 || VdotH <= 0)
+                    float2 xi = float2(0,0);
+                    float3 H = float3(0,0,0);
+                    float NdotH;
+                    float VdotH;
+                    int attempts = 0;
+                    const int maxAttempts = 10;
+                    do
                     {
-                        ray.rayEarlyKill = true;
-                        return ray;
-                    }
-
-                    if (dot(L, Ng) <= 0)
-                    {
-                        ray.rayEarlyKill = true;
-                        return ray;
-                    }
-
-                    float3 F_spec = FresnelSchlick(VdotH, F0);
-                    float D = D_GGX(NdotH, roughness);
-                    float G = G_SmithGGX(NdotV, NdotL, roughness);
-
-                    float3 specBRDF = (F_spec * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
-
-                    float pdf_H = D * NdotH;
-                    float pdf_L = pdf_H / max(4.0 * VdotH, 1e-8);
-                    float branchPdf = specularChance * max(pdf_L, 1e-8);
-
-                    ray.ray.direction = L;
-                    ray.rayColor *= specBRDF * NdotL / branchPdf;
-                }
-                else
-                {
-                    float2 xi = float2(randomValue(rngState), randomValue(rngState));
-                    float3 L = toWorld(sampleCosineHemisphere(xi), N);
-
-                    float NdotL = saturate(dot(N, L));
+                        xi = float2(randomValue(rngState), randomValue(rngState));
+                        H = sampleGGX_VNDF(xi, roughness, N, V);
+                        L = reflect(-V, H);
+                        NdotL = dot(N,L);
+                        attempts++;
+                    } while (NdotL <= 0 && attempts < maxAttempts);
                     if (NdotL <= 0)
                     {
                         ray.rayEarlyKill = true;
+                        ray.incomingLight = float3(1000,0,0);
                         return ray;
                     }
+                    NdotH = saturate(dot(N, H));
+                    VdotH = max(dot(V, H), 1e-4);
+                    float3 F = FresnelSchlick(VdotH, F0);
+                    float D = D_GGX(NdotH, roughness);
+                    float G = G_SmithGGX(NdotV, NdotL, roughness);
 
-                    if (dot(L, Ng) <= 0)
+                    specBRDF = (F * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
+
+                    float G1V = G1_SmithGGX(NdotV, roughness);
+                    float pdf_H = D * G1V * VdotH / max(NdotV, 1e-8);
+                    pdf_spec = pdf_H / max(4.0 * VdotH, 1e-8);
+
+                    pdf_diff = NdotL / PI;
+                }
+                else
+                {
+                    float2 xi = float2(0,0);
+                    int attempts = 0;
+                    int maxAttempts = 10;
+                    do
+                    {
+                        xi = float2(randomValue(rngState), randomValue((rngState)));
+                        L = toWorld(sampleCosineHemisphere(xi), N);
+                        attempts++;
+                        NdotL = dot(N,L);
+                    } while (NdotL <= 0 && attempts < maxAttempts);
+                    if (NdotL <= 0)
                     {
                         ray.rayEarlyKill = true;
+                        ray.incomingLight = float3(1000,0,0);
                         return ray;
                     }
 
-                    float pdf_L = NdotL / PI;
-                    float branchPdf = (1.0 - specularChance) * max(pdf_L, 1e-8);
+                    pdf_diff = NdotL / PI;
 
-                    ray.ray.direction = L;
-                    ray.rayColor *= diffuseBRDF * NdotL / branchPdf;
+                    float3 H = normalize(V + L);
+                    float NdotH = saturate(dot(N, H));
+                    float VdotH = max(dot(V, H), 1e-4);
+
+                    float D = D_GGX(NdotH, roughness);
+                    float G1V = G1_SmithGGX(NdotV, roughness);
+
+                    float pdf_H = D * G1V * VdotH / max(NdotV, 1e-8);
+                    pdf_spec = pdf_H / max(4.0 * VdotH, 1e-8);
                 }
-                
+
+                // =======================
+                // MIS WEIGHTS
+                // =======================
+                float pdf_spec_w = pdf_spec * specProb;
+                float pdf_diff_w = pdf_diff * (1 - specProb);
+
+                float w_spec = (pdf_spec_w * pdf_spec_w) /
+                    max(pdf_spec_w * pdf_spec_w + pdf_diff_w * pdf_diff_w, 1e-8);
+
+                float w_diff = (pdf_diff_w * pdf_diff_w) /
+                    max(pdf_spec_w * pdf_spec_w + pdf_diff_w * pdf_diff_w, 1e-8);
+
+                float3 f = diffuseBRDF + specBRDF;
+
+                float pdf = sampleSpecular ? pdf_spec_w : pdf_diff_w;
+                float weight = sampleSpecular ? w_spec : w_diff;
+
+                ray.ray.direction = L;
+                ray.rayColor *= f * NdotL * weight / max(pdf, 1e-8);
+
                 ray.ray.position = hitInfo.hitPoint + (Ng * 1e-4);
+
+                // =======================
+                // NEE
+                // =======================
                 #ifdef APPLY_NEE
-                if (ray.numBounces == 1) 
-                    ray.incomingLight += NEE(hitInfo.hitPoint + Ng * 1e-4, N, rngState) * diffuseBRDF * preBounceColor;
+                ray.incomingLight = NEE(ray.ray.position, N, rngState)/* * diffuseBRDF * preBounceColor*/;
+                ray.rayEarlyKill = true;
+                return ray;
                 #endif
-                float p = max(saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722))), 1e-4);
+                
+                // =======================
+                // RUSSIAN ROULETTE
+                // =======================
+                float p = max(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722)), 1e-4);
                 if (randomValue(rngState) > p)
                 {
                     ray.rayEarlyKill = true;
@@ -1149,7 +1215,6 @@ Shader "Custom/RayTracer"
                 ray.rayColor /= p;
                 return ray;
             }
-
             float estimateNearestCollidableObjectDistance(Ray ray)
             {
                 float closestDistance = 3.402823e+38;

@@ -108,8 +108,8 @@ public class BvhBuilder<TRef>
             bounds = bounds,
             leftChild = leftChild,
             rightChild = rightChild,
-            start = 0,
-            count = 0
+            start = start,
+            count = count
         };
 
         return nodeIndex;
