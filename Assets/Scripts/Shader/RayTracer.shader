@@ -982,7 +982,7 @@ Shader "Custom/RayTracer"
             PixelMarcher handleReflection(PixelMarcher ray, inout uint rngState, HitInfo hitInfo)
             {
                 ray.numBounces++;
-
+                float3 preBounceColor = ray.rayColor;
                 RayTracingMaterial material = Instances[hitInfo.objectIndex].material;
                 if (material.emissionStrength > 0.0)
                 {
@@ -1136,7 +1136,8 @@ Shader "Custom/RayTracer"
                 
                 ray.ray.position = hitInfo.hitPoint + (Ng * 1e-4);
                 #ifdef APPLY_NEE
-                ray.incomingLight += NEE(ray.ray.position, rngState) * ray.rayColor;
+                if (ray.numBounces == 1) 
+                    ray.incomingLight += NEE(hitInfo.hitPoint + Ng * 1e-4, N, rngState) * diffuseBRDF * preBounceColor;
                 #endif
                 float p = max(saturate(dot(ray.rayColor, float3(0.2126, 0.7152, 0.0722))), 1e-4);
                 if (randomValue(rngState) > p)

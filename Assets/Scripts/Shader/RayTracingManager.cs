@@ -9,7 +9,7 @@ using UnityEngine.Profiling;
 using static RaytracerCPURay;
 using Random = System.Random;
 
-//TODO: Look into wavefromt pipelining? This file is a mess
+//TODO: Look into wavefront pipelining? This file is a mess
 public static class SharedMeshRegistry
 {
     private static Dictionary<Mesh, SharedMeshData> cache = new();
@@ -39,7 +39,6 @@ public class RayTracingManager : MonoBehaviour
     [SerializeField] public bool useTlas = true;
     [SerializeField] public bool useNEE = true;
     public bool useRedshifting = true;
-
 
     [Header("TLAS Settings")]
     public int tlasMaxLeafSize = 2;
@@ -100,7 +99,8 @@ public class RayTracingManager : MonoBehaviour
 
     RenderTexture resultTexture;
     private RenderTexture cleanAccumBuffer;
-    [Header("Post Processing")] 
+
+    [Header("Post Processing")]
     public Shader rayTracingShader;
     public Shader accumulatorShader;
     public Shader ditherShader;
@@ -109,6 +109,13 @@ public class RayTracingManager : MonoBehaviour
     public bool colorQuantization = false;
     public int numColors = 256;
     public int ditherMatrixSize = 4;
+
+    [Header("A-Trous Filter")]
+    public bool atrousFilter = false;
+    public Shader atrousShader;
+    public float atrousColorSigma = 0.6f;
+    Material atrousMaterial;
+
     int numRenderedFrames = 0;
     private int baseSeed = 0;
     public int emergencyBreakMaxSteps = 1000;
@@ -152,6 +159,7 @@ public class RayTracingManager : MonoBehaviour
     public int StepsPerCollisionTest = 3;
 
     public bool useRayMagnification = false;
+
     // --- Accumulation tracking ---
     Vector3 lastCameraPosition;
     Quaternion lastCameraRotation;
@@ -159,7 +167,9 @@ public class RayTracingManager : MonoBehaviour
     int lastScreenWidth;
     int lastScreenHeight;
     bool historyInitialized = false;
+
     void Swap(ref RenderTexture a, ref RenderTexture b) => (a, b) = (b, a);
+
     struct MeshOffsets
     {
         public int vertexOffset;
@@ -167,6 +177,7 @@ public class RayTracingManager : MonoBehaviour
         public int blasNodeOffset;
         public int rootNodeIndex;
     }
+
     bool ShouldResetAccumulation(Camera cam)
     {
         if (!historyInitialized)
@@ -202,6 +213,7 @@ public class RayTracingManager : MonoBehaviour
 
         return changed;
     }
+
     void UpdateAtmosphereParams()
     {
         rayTracingMaterial.SetFloat("atmosphereRadius", atmosphereRadius);
@@ -225,10 +237,7 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("framesPerScatter", framesPerScatter);
 
         if (!accumulateInGameView)
-        {
             rayTracingMaterial.SetInt("framesPerScatter", 1);
-        }
-        
 
         DirectionalGeodesic2DLutSolver.StepSize = blackHoleSOIStepSize;
     }
@@ -241,26 +250,18 @@ public class RayTracingManager : MonoBehaviour
         for (int i = 0; i < allMeshes.Length; i++)
         {
             RayTracedMesh m = allMeshes[i];
-            if (m == null)
-                continue;
+            if (m == null) continue;
 
             if (m.sharedMesh == null)
                 m.RebuildStaticData();
 
-            if (m.sharedMesh == null)
-                continue;
-            if (m.sharedMesh.mesh == null)
-                continue;
-            if (m.sharedMesh.buildTriangles == null || m.sharedMesh.buildTriangles.Length == 0)
-                continue;
-            if (m.sharedMesh.blas == null)
-                continue;
-            if (m.sharedMesh.blas.Nodes == null || m.sharedMesh.blas.Nodes.Length == 0)
-                continue;
-            if (m.sharedMesh.blas.PrimitiveRefs == null || m.sharedMesh.blas.PrimitiveRefs.Length == 0)
-                continue;
-            if (m.sharedMesh.GPUBVH == null || m.sharedMesh.GPUBVH.Count == 0)
-                continue;
+            if (m.sharedMesh == null) continue;
+            if (m.sharedMesh.mesh == null) continue;
+            if (m.sharedMesh.buildTriangles == null || m.sharedMesh.buildTriangles.Length == 0) continue;
+            if (m.sharedMesh.blas == null) continue;
+            if (m.sharedMesh.blas.Nodes == null || m.sharedMesh.blas.Nodes.Length == 0) continue;
+            if (m.sharedMesh.blas.PrimitiveRefs == null || m.sharedMesh.blas.PrimitiveRefs.Length == 0) continue;
+            if (m.sharedMesh.GPUBVH == null || m.sharedMesh.GPUBVH.Count == 0) continue;
 
             validMeshes.Add(m);
         }
@@ -276,9 +277,7 @@ public class RayTracingManager : MonoBehaviour
         for (int i = 0; i < validInstances.Count; i++)
         {
             SharedMeshData sm = validInstances[i].sharedMesh;
-            if (sm == null)
-                continue;
-
+            if (sm == null) continue;
             if (seen.Add(sm))
                 unique.Add(sm);
         }
@@ -322,7 +321,7 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("numTLASNodes", 0);
         rayTracingMaterial.SetInt("numInstances", 0);
         rayTracingMaterial.SetInt("TLASRootIndex", 0);
-        rayTracingMaterial.SetInt("NumLightSources", 0);
+        rayTracingMaterial.SetInt("numLightSources", 0);
     }
 
     void AllocateAccelerationBuffers()
@@ -458,10 +457,6 @@ public class RayTracingManager : MonoBehaviour
 
                 Vector3 edgeAB = bt.posB - bt.posA;
                 Vector3 edgeAC = bt.posC - bt.posA;
-                //Vector3 geometricNormal = Vector3.Cross(edgeAB, edgeAC);
-
-                /*if (geometricNormal.sqrMagnitude <= 1e-16f)
-                    degenerateTriangles++;*/
 
                 int globalTriIndex = off.triangleOffset + t;
                 int triIndexBase = globalTriIndex * 3;
@@ -471,7 +466,6 @@ public class RayTracingManager : MonoBehaviour
                     baseIndex = (uint)triIndexBase,
                     edgeAB = edgeAB,
                     edgeAC = edgeAC,
-                    //normal = geometricNormal
                 };
 
                 triangleIndices[triIndexBase + 0] = (uint)(off.vertexOffset + v1);
@@ -515,13 +509,13 @@ public class RayTracingManager : MonoBehaviour
         MeshStruct[] gpuInstances = new MeshStruct[meshObjects.Count];
         int[] lightSources = new int[meshObjects.Count];
         int numLightSources = 0;
+
         for (int i = 0; i < meshObjects.Count; i++)
         {
             RayTracedMesh meshObj = meshObjects[i];
             if (meshObj.material.emissiveStrength > 0)
-            {
                 lightSources[numLightSources++] = i;
-            }
+
             MeshOffsets off = offsets[meshObj.sharedMesh];
 
             int localRootIndex = meshObj.sharedMesh.blas.RootIndex;
@@ -576,18 +570,18 @@ public class RayTracingManager : MonoBehaviour
         ShaderHelper.CreateStructuredBuffer(ref TLASRefBuffer, tlasRefs);
         ShaderHelper.CreateStructuredBuffer(ref InstanceBuffer, gpuInstances);
         ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, lightSources);
-        
+
         rayTracingMaterial.SetBuffer("TLASNodes", TLASBuffer);
         rayTracingMaterial.SetBuffer("TLASRefs", TLASRefBuffer);
         rayTracingMaterial.SetBuffer("Instances", InstanceBuffer);
         rayTracingMaterial.SetBuffer("LightSources", LightSourceBuffer);
-        
+
         rayTracingMaterial.SetInt("numMeshes", gpuInstances.Length);
         rayTracingMaterial.SetInt("numTLASNodes", tlasNodes.Length);
         rayTracingMaterial.SetInt("numInstances", gpuInstances.Length);
         rayTracingMaterial.SetInt("TLASRootIndex", tlasBuilder.RootIndex);
         rayTracingMaterial.SetInt("numLightSources", numLightSources);
-        
+
         rayTracingMaterial.SetInt("BVHTestsSaturation", BVHNodeTestSaturationValue);
         rayTracingMaterial.SetInt("triTestsSaturation", triTestFullSaturationValue);
         rayTracingMaterial.SetInt("TLASNodeVisitsSaturation", TLASNodeVisitsSaturationValue);
@@ -636,14 +630,19 @@ public class RayTracingManager : MonoBehaviour
 
         if (accumulatorShader != null)
             ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
-        if (ditherShader != null) 
+
+        if (ditherShader != null)
             ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
-        if (ColorQuantizationShader != null) 
+
+        if (ColorQuantizationShader != null)
             ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
+
+        if (atrousShader != null)
+            ShaderHelper.InitMaterial(atrousShader, ref atrousMaterial);
 
         numRenderedFrames = 0;
     }
-    
+
     void OnRenderImage(RenderTexture source, RenderTexture target)
     {
         if (Camera.current.name != "SceneCamera" || useShaderInSceneView)
@@ -655,12 +654,11 @@ public class RayTracingManager : MonoBehaviour
             {
                 Debug.Log("Moving!");
                 numRenderedFrames = 0;
-                baseSeed = UnityEngine.Random.Range(0, int.MaxValue); // new seed on each movement
+                baseSeed = UnityEngine.Random.Range(0, int.MaxValue);
                 Debug.Log("Base seed is now " + baseSeed);
                 stopRendering = false;
             }
-            
-    
+
             if (!accumulateInGameView)
                 numRenderedFrames = 0;
 
@@ -668,8 +666,10 @@ public class RayTracingManager : MonoBehaviour
                 RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
             RenderTexture tempBuffer =
                 RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
+
             // 1. Render raw frame
             rayTracingMaterial.SetInt("numRenderedFrames", numRenderedFrames);
+            rayTracingMaterial.SetInt("baseSeed", baseSeed);
             Graphics.Blit(null, currentFrame, rayTracingMaterial);
 
             // 2. Accumulate against the clean buffer
@@ -677,11 +677,22 @@ public class RayTracingManager : MonoBehaviour
             accumulatorMaterial.SetTexture("_MainTexOld", cleanAccumBuffer);
             Graphics.Blit(currentFrame, tempBuffer, accumulatorMaterial);
             Swap(ref currentFrame, ref tempBuffer);
-
+            // 4. A-Trous spatial filter (before stylistic post-processing)
+            if (atrousFilter && atrousMaterial != null)
+            {
+                int[] stepSizes = { 1, 2, 4, 8, 16 };
+                foreach (int step in stepSizes)
+                {
+                    atrousMaterial.SetInt("stepSize", step);
+                    atrousMaterial.SetFloat("colorSigma", atrousColorSigma);
+                    Graphics.Blit(currentFrame, tempBuffer, atrousMaterial);
+                    Swap(ref currentFrame, ref tempBuffer);
+                }
+            }
             // 3. Save clean accumulated result for next frame (no post-processing)
             Graphics.Blit(currentFrame, cleanAccumBuffer);
 
-            // 4. Apply stylistic post-processes for display only
+            // 5. Apply stylistic post-processes for display only
             if (ditherPostProcess)
             {
                 ditherMaterial.SetInt("matrixSize", ditherMatrixSize);
@@ -696,13 +707,12 @@ public class RayTracingManager : MonoBehaviour
                 Swap(ref currentFrame, ref tempBuffer);
             }
 
-            // 5. Output to screen
+            // 6. Output to screen
             Graphics.Blit(currentFrame, target);
 
             RenderTexture.ReleaseTemporary(currentFrame);
             RenderTexture.ReleaseTemporary(tempBuffer);
-            //Graphics.Blit(currentFrame, target);
-            //return; // early out to isolate
+
             if (Camera.current.name != "SceneCamera")
             {
                 numRenderedFrames++;
@@ -729,6 +739,8 @@ public class RayTracingManager : MonoBehaviour
         ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
         ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
         ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
+        ShaderHelper.InitMaterial(atrousShader, ref atrousMaterial);
+
         ShaderHelper.CreateRenderTexture(
             ref resultTexture,
             Screen.width,
@@ -737,15 +749,15 @@ public class RayTracingManager : MonoBehaviour
             ShaderHelper.RGBA_SFloat,
             "Result"
         );
-        
+
         ShaderHelper.CreateRenderTexture(
-                    ref cleanAccumBuffer,
-                    Screen.width,
-                    Screen.height,
-                    FilterMode.Bilinear,
-                    ShaderHelper.RGBA_SFloat,
-                    "cleanAccumBuffer"
-                );
+            ref cleanAccumBuffer,
+            Screen.width,
+            Screen.height,
+            FilterMode.Bilinear,
+            ShaderHelper.RGBA_SFloat,
+            "cleanAccumBuffer"
+        );
 
         UpdateShaderValues();
         AllocateAccelerationBuffers();
@@ -782,70 +794,34 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
         rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation", TLASLeafRefsSaturationValue);
 
-        if (renderSphere) rayTracingMaterial.EnableKeyword("TEST_SPHERE");
-        else rayTracingMaterial.DisableKeyword("TEST_SPHERE");
+        // Shader keywords
+        SetKeyword(rayTracingMaterial, "TEST_SPHERE", renderSphere);
+        SetKeyword(rayTracingMaterial, "TEST_TRIANGLE", renderTriangles);
+        SetKeyword(rayTracingMaterial, "ENABLE_LENSING", enable_lensing);
+        SetKeyword(rayTracingMaterial, "USE_TLAS", useTlas);
+        SetKeyword(rayTracingMaterial, "USE_REDSHIFTING", useRedshifting);
+        SetKeyword(rayTracingMaterial, "APPLY_SCATTERING", applyScattering);
+        SetKeyword(rayTracingMaterial, "APPLY_RAYLEIGH", applyRayleigh);
+        SetKeyword(rayTracingMaterial, "APPLY_MIE", applyMie);
+        SetKeyword(rayTracingMaterial, "APPLY_SUNDISK", applySundisk);
+        SetKeyword(rayTracingMaterial, "APPLY_SUN_LIGHTING", applySunLighting);
+        SetKeyword(rayTracingMaterial, "IMPACT_PARAMETER_DEBUG", impactParameterDebug);
+        SetKeyword(rayTracingMaterial, "ORBITAL_PLANE_TEST_POSSIBLE", useOrbitalPlaneCullingIfAble && blackHoleBuffer.count == 1);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TRIANGLE_TESTS", displayTriTests);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_BVH_NODES_VISITED", displayBVHNodeTests);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TLAS_NODE_VISITS", displayTLASNodeVisits);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_BLAS_NODE_VISITS", displayBLASNodeVisits);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS", displayInstanceBLASTraversals);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TLAS_LEAF_REFS", displayTLASLeafRefs);
+        SetKeyword(rayTracingMaterial, "MARCH_CHORD_COLLISION_LIMIT", useStepsPerCollision && StepsPerCollisionTest > 1);
+        SetKeyword(rayTracingMaterial, "USE_RAY_MAGNIFICATION", useRayMagnification);
+        SetKeyword(rayTracingMaterial, "APPLY_NEE", useNEE);
+    }
 
-        if (renderTriangles) rayTracingMaterial.EnableKeyword("TEST_TRIANGLE");
-        else rayTracingMaterial.DisableKeyword("TEST_TRIANGLE");
-
-        if (enable_lensing) rayTracingMaterial.EnableKeyword("ENABLE_LENSING");
-        else rayTracingMaterial.DisableKeyword("ENABLE_LENSING");
-
-        if (useTlas) rayTracingMaterial.EnableKeyword("USE_TLAS");
-        else rayTracingMaterial.DisableKeyword("USE_TLAS");
-
-        if (useRedshifting) rayTracingMaterial.EnableKeyword("USE_REDSHIFTING");
-        else rayTracingMaterial.DisableKeyword("USE_REDSHIFTING");
-
-        if (applyScattering) rayTracingMaterial.EnableKeyword("APPLY_SCATTERING");
-        else rayTracingMaterial.DisableKeyword("APPLY_SCATTERING");
-
-        if (applyRayleigh) rayTracingMaterial.EnableKeyword("APPLY_RAYLEIGH");
-        else rayTracingMaterial.DisableKeyword("APPLY_RAYLEIGH");
-
-        if (applyMie) rayTracingMaterial.EnableKeyword("APPLY_MIE");
-        else rayTracingMaterial.DisableKeyword("APPLY_MIE");
-
-        if (applySundisk) rayTracingMaterial.EnableKeyword("APPLY_SUNDISK");
-        else rayTracingMaterial.DisableKeyword("APPLY_SUNDISK");
-
-        if (applySunLighting) rayTracingMaterial.EnableKeyword("APPLY_SUN_LIGHTING");
-        else rayTracingMaterial.DisableKeyword("APPLY_SUN_LIGHTING");
-
-        if (impactParameterDebug) rayTracingMaterial.EnableKeyword("IMPACT_PARAMETER_DEBUG");
-        else rayTracingMaterial.DisableKeyword("IMPACT_PARAMETER_DEBUG");
-
-        if (useOrbitalPlaneCullingIfAble && blackHoleBuffer.count == 1)
-            rayTracingMaterial.EnableKeyword("ORBITAL_PLANE_TEST_POSSIBLE");
-        else
-            rayTracingMaterial.DisableKeyword("ORBITAL_PLANE_TEST_POSSIBLE");
-
-        if (displayTriTests) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_TRIANGLE_TESTS");
-        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_TRIANGLE_TESTS");
-
-        if (displayBVHNodeTests) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_BVH_NODES_VISITED");
-        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_BVH_NODES_VISITED");
-
-        if (displayTLASNodeVisits) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_TLAS_NODE_VISITS");
-        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_TLAS_NODE_VISITS");
-
-        if (displayBLASNodeVisits) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_BLAS_NODE_VISITS");
-        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_BLAS_NODE_VISITS");
-
-        if (displayInstanceBLASTraversals) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS");
-        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS");
-
-        if (displayTLASLeafRefs) rayTracingMaterial.EnableKeyword("DEBUG_DISPLAY_TLAS_LEAF_REFS");
-        else rayTracingMaterial.DisableKeyword("DEBUG_DISPLAY_TLAS_LEAF_REFS");
-        
-        if (useStepsPerCollision && StepsPerCollisionTest > 1) rayTracingMaterial.EnableKeyword("MARCH_CHORD_COLLISION_LIMIT");
-        else rayTracingMaterial.DisableKeyword("MARCH_CHORD_COLLISION_LIMIT");
-        
-        if (useRayMagnification) rayTracingMaterial.EnableKeyword("USE_RAY_MAGNIFICATION");
-        else rayTracingMaterial.DisableKeyword("USE_RAY_MAGNIFICATION");
-        
-        if (useNEE) rayTracingMaterial.EnableKeyword("APPLY_NEE");
-        else rayTracingMaterial.DisableKeyword("APPLY_NEE");
+    void SetKeyword(Material mat, string keyword, bool enabled)
+    {
+        if (enabled) mat.EnableKeyword(keyword);
+        else mat.DisableKeyword(keyword);
     }
 
     void UpdateShaderValues()
@@ -892,7 +868,6 @@ public class RayTracingManager : MonoBehaviour
                 Debug.LogError("BlackHoleSOIMultiplier is less than or equal to 0 for " + blackHoleObjects[i].name);
                 blackHoles[i].blackHoleSOIMultiplier = 1.0f;
             }
-            
         }
 
         if (blackHoleObjects.Length > 0)
