@@ -26,7 +26,7 @@ uint randomUint(inout uint state) {
 }
 int randomRange(inout uint state, int minVal, int maxVal) {
     uint range = (uint)(maxVal - minVal);
-    return minVal + (int)(randomValue(state) % range);
+    return minVal + (int)(randomUint(state) % range);
 }
 
 bool isNan(float value)

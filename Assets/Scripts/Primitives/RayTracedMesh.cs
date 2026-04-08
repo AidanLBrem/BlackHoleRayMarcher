@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 using System;
 using UnityEngine.Serialization;
+
 //Apply this to objects to make the raytracer see them
 [ExecuteAlways]
 public class RayTracedMesh : MonoBehaviour
@@ -13,6 +14,7 @@ public class RayTracedMesh : MonoBehaviour
 
     public RayTracingMaterial material;
     [HideInInspector] public bool update = true;
+    [HideInInspector] public bool transformDirty = true;
     public bool rebuildBVH = false;
     
     public bool drawBVH = false;
@@ -20,11 +22,11 @@ public class RayTracedMesh : MonoBehaviour
     public int numVertices;
     public int numNormals;
     public int numTriangles;
-    
 
     void Start()
     {
         RebuildStaticData();
+        transformDirty = true;
     }
 
     void OnValidate()
@@ -36,6 +38,9 @@ public class RayTracedMesh : MonoBehaviour
 
         RebuildStaticData();
         rebuildBVH = false;
+        transformDirty = true;
+        update = true;
+
         if (material.emissiveStrength > 0)
         {
             transform.tag = "Light Source";
@@ -44,8 +49,11 @@ public class RayTracedMesh : MonoBehaviour
 
     void Update()
     {
-        // Transform changes are now handled on the GPU;
-        // no per-frame rebuild of vertices/BVH here.
+        if (transform.hasChanged)
+        {
+            transformDirty = true;
+            transform.hasChanged = false;
+        }
     }
 
     public void RebuildStaticData()
@@ -58,6 +66,5 @@ public class RayTracedMesh : MonoBehaviour
         {
             sharedMesh = SharedMeshRegistry.GetOrCreate(mesh);
         }
-        
     }
 }

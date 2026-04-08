@@ -990,10 +990,6 @@ Shader "Custom/RayTracer"
                 // =======================
                 if (material.emissionStrength > 0.0)
                 {
-                    #ifdef APPLY_NEE
-                    ray.rayEarlyKill = true;
-                    return ray;
-                    #else
                     float g = 1 / ray.energy;
                     #ifndef USE_REDSHIFTING
                     g = 1;
@@ -1003,7 +999,6 @@ Shader "Custom/RayTracer"
                     ray.incomingLight += emittedLight * ray.rayColor;
                     ray.rayEarlyKill = true;
                     return ray;
-                    #endif
                 }
 
                 // =======================
@@ -1038,7 +1033,7 @@ Shader "Custom/RayTracer"
 
                 if (bad3(ray.ray.direction) || bad3(ray.rayColor) || bad3(N) || bad3(Ng))
                 {
-                    ray.incomingLight = float3(1000, 0, 1000);
+                    ray.incomingLight = float3(0, 0, 0);
                     ray.rayEarlyKill = true;
                     return ray;
                 }
@@ -1122,7 +1117,7 @@ Shader "Custom/RayTracer"
                     if (NdotL <= 0)
                     {
                         ray.rayEarlyKill = true;
-                        ray.incomingLight = float3(1000,0,0);
+                        ray.incomingLight = float3(0,0,0);
                         return ray;
                     }
                     NdotH = saturate(dot(N, H));
@@ -1154,7 +1149,7 @@ Shader "Custom/RayTracer"
                     if (NdotL <= 0)
                     {
                         ray.rayEarlyKill = true;
-                        ray.incomingLight = float3(1000,0,0);
+                        ray.incomingLight = float3(0,0,0);
                         return ray;
                     }
 
@@ -1197,9 +1192,11 @@ Shader "Custom/RayTracer"
                 // NEE
                 // =======================
                 #ifdef APPLY_NEE
-                ray.incomingLight = NEE(ray.ray.position, N, rngState)/* * diffuseBRDF * preBounceColor*/;
-                ray.rayEarlyKill = true;
-                return ray;
+                if (ray.numBounces == 1)
+                {
+                    ray.incomingLight += NEE(ray.ray.position, N, rngState) * diffuseBRDF * preBounceColor;
+                }
+                
                 #endif
                 
                 // =======================
@@ -1373,7 +1370,8 @@ Shader "Custom/RayTracer"
                         }
                         //return float3(mu/100,mu/100,mu/100);
                         float3 starColor = getStarField(rayDir);
-                        pixel_marcher.incomingLight += starColor;
+                        if (pixel_marcher.numBounces == 0)
+                            pixel_marcher.incomingLight += starColor;
                     }
 
                     break;

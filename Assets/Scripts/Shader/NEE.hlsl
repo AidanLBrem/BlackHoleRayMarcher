@@ -1,71 +1,73 @@
-    struct LightSource
-    {
-        int instanceIndex;
-        float totalArea;
-    };
+struct LightSource
+{
+    int instanceIndex;
+    float totalArea;
+    int triStart;
+    int triCount;
+};
 
-    int numLightSources;
-    StructuredBuffer<LightSource> LightSources;
+struct LightTriangleData
+{
+    float worldSpaceArea;
+    float3 worldNormal;
+};
 
-    float3 RandomPointOnTriangleWorld(Triangle tri, float4x4 localToWorld, inout uint rngState)
-    {
-        float r1 = randomValue(rngState);
-        float r2 = randomValue(rngState);
-        
-        if (r1 + r2 > 1.0) { r1 = 1.0 - r1; r2 = 1.0 - r2; }
-        
-        float3 v0Local = Vertices[TriangleIndices[tri.baseIndex]];
-        float3 localPoint = v0Local + r1 * tri.edgeAB + r2 * tri.edgeAC;
-        
-        return mul(localToWorld, float4(localPoint, 1.0)).xyz;
-    }
+int numLightSources;
+StructuredBuffer<LightSource> LightSources;
+StructuredBuffer<int> LightTriangleIndices;
+StructuredBuffer<LightTriangleData> LightTrianglesData;
 
-    float3 NEE(float3 position, float3 N, inout uint rngState)
-    {
-        LightSource light = LightSources[randomRange(rngState, 0, numLightSources)];
-        int lightSourceIndex = light.instanceIndex;
-        int instanceBVHIndex = Instances[lightSourceIndex].firstBVHNodeIndex;
-        if (Instances[lightSourceIndex].material.emissionStrength == 0)
-        {
-            return float3(0,0,0);
-        }
-        int start = BVHNodes[instanceBVHIndex].firstIndex;
-        int count = BVHNodes[instanceBVHIndex].count;
-        int triIndex = randomRange(rngState, start, start + count);
-        Triangle triangleToAimFor = Triangles[triIndex];
-        float3 randomPositionOnTriangle = RandomPointOnTriangleWorld(
-            triangleToAimFor, Instances[lightSourceIndex].localToWorldMatrix, rngState);
-        
-        float3 dir = randomPositionOnTriangle - position;
-        float dist = length(dir);
-        float3 dirNorm = dir / dist;
-        //return float3(dirNorm * 0.5 + 0.5); // visualize direction as color
-        float NdotL = saturate(dot(N, dirNorm));
-        if (NdotL <= 0) return float3(0, 1000, 0);
+float3 RandomPointOnTriangleWorld(Triangle tri, float4x4 localToWorld, inout uint rngState)
+{
+    float r1 = randomValue(rngState);
+    float r2 = randomValue(rngState);
 
-        float3 lightNormalLocal = normalize(cross(triangleToAimFor.edgeAB, triangleToAimFor.edgeAC));
-        float3x3 normalMatrix = transpose((float3x3)Instances[lightSourceIndex].worldToLocalMatrix);
-        float3 lightNormal = normalize(mul(normalMatrix, lightNormalLocal));
-        float cosLight = abs(dot(-dirNorm, lightNormal));
-        
-        Ray NEERay;
-        NEERay.position = position;
-        NEERay.direction = dirNorm;
-        HitInfo hitInfo = queryCollisions(NEERay, dist + 1e-3, true);
+    if (r1 + r2 > 1.0) { r1 = 1.0 - r1; r2 = 1.0 - r2; }
 
-        if (!hitInfo.didHit || hitInfo.objectIndex != lightSourceIndex)
-            //return Instances[hitInfo.objectIndex].material.color;
-            return float3(1000, 0, 0);
+    float3 v0Local = Vertices[TriangleIndices[tri.baseIndex]];
+    float3 localPoint = v0Local + r1 * tri.edgeAB + r2 * tri.edgeAC;
 
-        RayTracingMaterial mat = Instances[lightSourceIndex].material;
-        float3 emission = mat.emissiveColor.rgb * mat.emissionStrength;
+    return mul(localToWorld, float4(localPoint, 1.0)).xyz;
+}
 
-        // geometry term: cosine at light / dist²
-        float geometryTerm = cosLight / (dist * dist);
+float3 NEE(float3 position, float3 N, inout uint rngState)
+{
+    // Select light -- emission check before any heavy fetches
+    LightSource light = LightSources[randomRange(rngState, 0, numLightSources)];
+    int lightIdx = light.instanceIndex;
+    RayTracingMaterial mat = Instances[lightIdx].material;
+    if (mat.emissionStrength <= 0) return float3(0, 0, 0);
 
-        // full estimator: emission * NdotL * geometryTerm * totalArea / pdf_selection
-        // totalArea/pdf_selection = totalArea * numLightSources * count
-        // this correctly weights large lights more than small ones
-        //return float3(1000,1000,1000);
-        return emission * NdotL * geometryTerm * light.totalArea / (float)numLightSources;
-    }
+    // Sample triangle from flat list -- no BVH lookup, works for quads and any mesh
+    int flatIdx = randomRange(rngState, light.triStart, light.triStart + light.triCount);
+    int triIdx = LightTriangleIndices[flatIdx];
+    Triangle tri = Triangles[triIdx];
+
+    // Sample point on triangle
+    float3 samplePos = RandomPointOnTriangleWorld(tri, Instances[lightIdx].localToWorldMatrix, rngState);
+    float3 toLight = samplePos - position;
+    float dist = length(toLight);
+    float3 dirNorm = toLight / dist;
+
+    float NdotL = dot(N, dirNorm);
+    if (NdotL <= 0) return float3(0, 0, 0);
+
+    // Shadow ray -- bias along ray direction, tighter max dist
+    Ray shadowRay;
+    shadowRay.position = position + dirNorm * 1e-4;
+    shadowRay.direction = dirNorm;
+    HitInfo hit = queryCollisions(shadowRay, dist - 1e-4, true);
+    if (!hit.didHit || hit.objectIndex != lightIdx) return float3(0, 0, 0);
+
+    // Fetch cold light data only on confirmed unoccluded hit -- cache miss paid rarely
+    LightTriangleData lightData = LightTrianglesData[hit.triIndex];
+    float cosLight = dot(-dirNorm, lightData.worldNormal);
+    if (cosLight <= 0) return float3(0, 0, 0);
+
+    float3 emission = mat.emissiveColor.rgb * mat.emissionStrength;
+    float geometryTerm = (NdotL * cosLight) / (dist * dist);
+
+    // pdf = 1 / (triCount * triArea), estimator cancels to:
+    return emission * geometryTerm * lightData.worldSpaceArea
+           * (float)(light.triCount * numLightSources);
+}

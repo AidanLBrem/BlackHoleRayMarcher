@@ -352,6 +352,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::RayTracingManager
   useShaderInSceneView: 0
   useTlas: 1
+  useNEE: 1
   useRedshifting: 1
   tlasMaxLeafSize: 2
   tlasMaxDepth: 32
@@ -384,15 +385,21 @@ MonoBehaviour:
   sun: {fileID: 0}
   rayTracingShader: {fileID: 4800000, guid: d779f3a711c21624381f1f9699fdec69, type: 3}
   accumulatorShader: {fileID: 4800000, guid: 32812c464f9bb7944bccf2042f6e3436, type: 3}
-  ditherShader: {fileID: 4800000, guid: 4d884bf0e9124245b4cc402bcbadeeda, type: 3}
-  ditherPostProcess: 1
+  accumWeight: 0
   ColorQuantizationShader: {fileID: 4800000, guid: bf1d279c767087b4cacb9b41d4104202, type: 3}
   colorQuantization: 1
   numColors: 64
+  ditherShader: {fileID: 4800000, guid: 4d884bf0e9124245b4cc402bcbadeeda, type: 3}
+  ditherPostProcess: 1
+  ditherBeforeUpscale: 0
   ditherMatrixSize: 4
+  atrousFilter: 0
+  atrousShader: {fileID: 0}
+  atrousColorSigma: 0.6
+  renderScale: 0.25
+  atrousBeforeUpscale: 0
   emergencyBreakMaxSteps: 500
   numFrames: 10000
-  accumWeight: 0
   renderSphere: 1
   renderTriangles: 1
   strongFieldRadPerMeterCuttoff: 1
@@ -576,7 +583,7 @@ GameObject:
   - component: {fileID: 717688492}
   m_Layer: 0
   m_Name: AcretionDisk
-  m_TagString: Untagged
+  m_TagString: Light Source
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -650,6 +657,7 @@ MonoBehaviour:
     roughness: 0
     metallicity: 0
   update: 0
+  transformDirty: 0
   rebuildBVH: 0
   drawBVH: 0
   numVertices: 0
@@ -6750,7 +6758,7 @@ GameObject:
   - component: {fileID: 948806656}
   m_Layer: 0
   m_Name: GameObject
-  m_TagString: Untagged
+  m_TagString: Light Source
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -6841,7 +6849,8 @@ MonoBehaviour:
     emissiveStrength: 1
     roughness: 0
     metallicity: 0
-  update: 0
+  update: 1
+  transformDirty: 1
   rebuildBVH: 0
   drawBVH: 0
   numVertices: 1368
@@ -7267,7 +7276,7 @@ MonoBehaviour:
   tracerProperties: {fileID: 330585546}
   path:
     hitInfos: []
-    time: 0.003836751
+    time: 0.00015866756
     debugInvalidBelowSurfaceCount: 0
     debugInvalidBRDFCount: 0
 --- !u!4 &1436880562

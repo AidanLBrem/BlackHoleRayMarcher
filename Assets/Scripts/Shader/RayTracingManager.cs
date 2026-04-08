@@ -32,12 +32,20 @@ public static class SharedMeshRegistry
     }
 }
 
-// Matches the HLSL struct in NEE.hlsl
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct GPULightSource
 {
     public int instanceIndex;
     public float totalArea;
+    public int triStart;
+    public int triCount;
+}
+
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct GPULightTriangleData
+{
+    public float worldSpaceArea;
+    public Vector3 worldNormal;
 }
 
 [ExecuteAlways, ImageEffectAllowedInSceneView]
@@ -78,6 +86,12 @@ public class RayTracingManager : MonoBehaviour
     [NonSerialized] ComputeBuffer TLASRefBuffer;
     [NonSerialized] ComputeBuffer InstanceBuffer;
     [NonSerialized] private ComputeBuffer LightSourceBuffer;
+    [NonSerialized] private ComputeBuffer LightTriangleIndicesBuffer;
+    [NonSerialized] private ComputeBuffer LightTrianglesDataBuffer;
+
+    // TLAS dirty tracking — prevents per-frame rebuild in static scenes
+    private bool tlasDirty = true;
+    private int lastInstanceCount = -1;
 
     [Header("Atmosphere")]
     public bool applyScattering = true;
@@ -110,12 +124,20 @@ public class RayTracingManager : MonoBehaviour
 
     [Header("Post Processing")]
     public Shader rayTracingShader;
+
+    [Header("Accumulation")]
     public Shader accumulatorShader;
-    public Shader ditherShader;
-    public bool ditherPostProcess = false;
+    public float accumWeight = 1.0f;
+
+    [Header("Color Quantization")]
     public Shader ColorQuantizationShader;
     public bool colorQuantization = false;
     public int numColors = 256;
+
+    [Header("Dithering")]
+    public Shader ditherShader;
+    public bool ditherPostProcess = false;
+    public bool ditherBeforeUpscale = false;
     public int ditherMatrixSize = 4;
 
     [Header("A-Trous Filter")]
@@ -124,12 +146,16 @@ public class RayTracingManager : MonoBehaviour
     public float atrousColorSigma = 0.6f;
     Material atrousMaterial;
 
+    [Header("Pixel Sizing")]
+    [Range(0.05f, 1.0f)]
+    public float renderScale = 0.5f;
+    public bool atrousBeforeUpscale = false;
+
     int numRenderedFrames = 0;
     private int baseSeed = 0;
     public int emergencyBreakMaxSteps = 1000;
     public float numFrames = 10000;
     bool stopRendering = false;
-    public float accumWeight = 1.0f;
 
     public bool renderSphere = true;
     public bool renderTriangles = true;
@@ -175,6 +201,9 @@ public class RayTracingManager : MonoBehaviour
     int lastScreenWidth;
     int lastScreenHeight;
     bool historyInitialized = false;
+
+    // --- Render scale tracking (accum buffer must be recreated on change) ---
+    private float lastRenderScale = -1f;
 
     void Swap(ref RenderTexture a, ref RenderTexture b) => (a, b) = (b, a);
 
@@ -303,6 +332,16 @@ public class RayTracingManager : MonoBehaviour
         return false;
     }
 
+    bool AnyTransformDirty(List<RayTracedMesh> validInstances)
+    {
+        for (int i = 0; i < validInstances.Count; i++)
+        {
+            if (validInstances[i].transformDirty)
+                return true;
+        }
+        return false;
+    }
+
     void BindDummyAccelerationBuffers()
     {
         ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, new Triangle[1]);
@@ -314,6 +353,8 @@ public class RayTracingManager : MonoBehaviour
         ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer, new Vector3[1]);
         ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer, new uint[1]);
         ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, new GPULightSource[1]);
+        ShaderHelper.CreateStructuredBuffer(ref LightTriangleIndicesBuffer, new int[1]);
+        ShaderHelper.CreateStructuredBuffer(ref LightTrianglesDataBuffer, new GPULightTriangleData[1]);
 
         rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
         rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
@@ -324,12 +365,16 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetBuffer("Normals", MeshNormalsBuffer);
         rayTracingMaterial.SetBuffer("TriangleIndices", MeshIndicesBuffer);
         rayTracingMaterial.SetBuffer("LightSources", LightSourceBuffer);
+        rayTracingMaterial.SetBuffer("LightTriangleIndices", LightTriangleIndicesBuffer);
+        rayTracingMaterial.SetBuffer("LightTrianglesData", LightTrianglesDataBuffer);
         rayTracingMaterial.SetInt("numMeshes", 0);
         rayTracingMaterial.SetInt("numBLASNodes", 0);
         rayTracingMaterial.SetInt("numTLASNodes", 0);
         rayTracingMaterial.SetInt("numInstances", 0);
         rayTracingMaterial.SetInt("TLASRootIndex", 0);
         rayTracingMaterial.SetInt("numLightSources", 0);
+
+        tlasDirty = true;
     }
 
     void AllocateAccelerationBuffers()
@@ -340,6 +385,13 @@ public class RayTracingManager : MonoBehaviour
         {
             BindDummyAccelerationBuffers();
             return;
+        }
+
+        // Instance count change always forces full rebuild
+        if (validInstances.Count != lastInstanceCount)
+        {
+            tlasDirty = true;
+            lastInstanceCount = validInstances.Count;
         }
 
         List<SharedMeshData> uniqueSharedMeshes = GetUniqueSharedMeshes(validInstances);
@@ -405,6 +457,9 @@ public class RayTracingManager : MonoBehaviour
 
         if (!(needTriangles || needBVH || needVertices))
             return;
+
+        // BLAS geometry changed — TLAS must also rebuild
+        tlasDirty = true;
 
         float startTime = Time.realtimeSinceStartup;
 
@@ -513,21 +568,40 @@ public class RayTracingManager : MonoBehaviour
         List<RayTracedMesh> meshObjects,
         Dictionary<SharedMeshData, MeshOffsets> offsets)
     {
+        // Check if any instance transform changed this frame
+        bool anyTransformDirty = AnyTransformDirty(meshObjects);
+        if (anyTransformDirty)
+            tlasDirty = true;
+        if (tlasDirty)
+        {
+            Debug.Log("TLAS dirty");
+        }
+        // Skip rebuild entirely if nothing changed
+        if (!tlasDirty && TLASBuffer != null)
+            return;
+
+        tlasDirty = false;
+
+        // Clear transform dirty flags now that we're rebuilding
+        for (int i = 0; i < meshObjects.Count; i++)
+            meshObjects[i].transformDirty = false;
+
         BvhInstance[] instances = new BvhInstance[meshObjects.Count];
         MeshStruct[] gpuInstances = new MeshStruct[meshObjects.Count];
+
         GPULightSource[] lightSources = new GPULightSource[meshObjects.Count];
+        List<int> lightTriangleIndices = new List<int>();
+        List<GPULightTriangleData> lightTrianglesData = new List<GPULightTriangleData>();
         int numLightSources = 0;
 
         for (int i = 0; i < meshObjects.Count; i++)
         {
             RayTracedMesh meshObj = meshObjects[i];
-
             MeshOffsets off = offsets[meshObj.sharedMesh];
 
             int localRootIndex = meshObj.sharedMesh.blas.RootIndex;
             Bounds localRootBounds = meshObj.sharedMesh.blas.Nodes[localRootIndex].bounds;
             Bounds worldBounds = TransformBoundsToWorld(localRootBounds, meshObj.transform);
-
             int globalBlasRootIndex = off.rootNodeIndex;
 
             instances[i] = new BvhInstance
@@ -555,26 +629,52 @@ public class RayTracingManager : MonoBehaviour
                 AABBRightY = worldBounds.max.y,
                 AABBRightZ = worldBounds.max.z,
             };
-            
-            // Compute world-space area for emissive meshes
+
             if (meshObj.material.emissiveStrength > 0)
             {
                 Matrix4x4 l2w = meshObj.transform.localToWorldMatrix;
                 SharedMeshData sm = meshObj.sharedMesh;
+
+                int triStart = lightTriangleIndices.Count;
                 float totalArea = 0f;
 
-                foreach (int triId in sm.blas.PrimitiveRefs)
+                int[] order = sm.blas.PrimitiveRefs;
+                for (int t = 0; t < order.Length; t++)
                 {
+                    int triId = order[t];
                     ref buildTri bt = ref sm.buildTriangles[triId];
-                    Vector3 worldAB = l2w.MultiplyVector(bt.posB - bt.posA);
-                    Vector3 worldAC = l2w.MultiplyVector(bt.posC - bt.posA);
-                    totalArea += Vector3.Cross(worldAB, worldAC).magnitude * 0.5f;
+
+                    Vector3 edgeAB = bt.posB - bt.posA;
+                    Vector3 edgeAC = bt.posC - bt.posA;
+
+                    Vector3 worldAB = l2w.MultiplyVector(edgeAB);
+                    Vector3 worldAC = l2w.MultiplyVector(edgeAC);
+                    Vector3 worldCross = Vector3.Cross(worldAB, worldAC);
+
+                    float area = worldCross.magnitude * 0.5f;
+                    totalArea += area;
+
+                    int globalTriIndex = off.triangleOffset + t;
+                    lightTriangleIndices.Add(globalTriIndex);
+
+                    while (lightTrianglesData.Count <= globalTriIndex)
+                        lightTrianglesData.Add(new GPULightTriangleData());
+
+                    lightTrianglesData[globalTriIndex] = new GPULightTriangleData
+                    {
+                        worldSpaceArea = area,
+                        worldNormal = worldCross.magnitude > 1e-10f
+                            ? worldCross.normalized
+                            : Vector3.up
+                    };
                 }
 
                 lightSources[numLightSources++] = new GPULightSource
                 {
                     instanceIndex = i,
-                    totalArea = totalArea
+                    totalArea = totalArea,
+                    triStart = triStart,
+                    triCount = order.Length
                 };
             }
         }
@@ -594,19 +694,29 @@ public class RayTracingManager : MonoBehaviour
         for (int i = 0; i < tlasRefs.Length; i++)
             tlasRefs[i] = (uint)tlasBuilder.PrimitiveRefs[i];
 
-        // Trim lightSources array to actual count
         GPULightSource[] trimmedLightSources = new GPULightSource[Mathf.Max(1, numLightSources)];
         Array.Copy(lightSources, trimmedLightSources, numLightSources);
+
+        if (lightTrianglesData.Count == 0)
+            lightTrianglesData.Add(new GPULightTriangleData());
+
+        int[] lightTriIndicesArray = lightTriangleIndices.Count > 0
+            ? lightTriangleIndices.ToArray()
+            : new int[1];
 
         ShaderHelper.CreateStructuredBuffer(ref TLASBuffer, tlasNodes);
         ShaderHelper.CreateStructuredBuffer(ref TLASRefBuffer, tlasRefs);
         ShaderHelper.CreateStructuredBuffer(ref InstanceBuffer, gpuInstances);
         ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, trimmedLightSources);
+        ShaderHelper.CreateStructuredBuffer(ref LightTriangleIndicesBuffer, lightTriIndicesArray);
+        ShaderHelper.CreateStructuredBuffer(ref LightTrianglesDataBuffer, lightTrianglesData.ToArray());
 
         rayTracingMaterial.SetBuffer("TLASNodes", TLASBuffer);
         rayTracingMaterial.SetBuffer("TLASRefs", TLASRefBuffer);
         rayTracingMaterial.SetBuffer("Instances", InstanceBuffer);
         rayTracingMaterial.SetBuffer("LightSources", LightSourceBuffer);
+        rayTracingMaterial.SetBuffer("LightTriangleIndices", LightTriangleIndicesBuffer);
+        rayTracingMaterial.SetBuffer("LightTrianglesData", LightTrianglesDataBuffer);
 
         rayTracingMaterial.SetInt("numMeshes", gpuInstances.Length);
         rayTracingMaterial.SetInt("numTLASNodes", tlasNodes.Length);
@@ -657,6 +767,8 @@ public class RayTracingManager : MonoBehaviour
 
     void OnValidate()
     {
+        tlasDirty = true;
+
         if (rayTracingShader != null)
             ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
 
@@ -684,37 +796,62 @@ public class RayTracingManager : MonoBehaviour
             Camera cam = GetComponent<Camera>();
             if (ShouldResetAccumulation(cam))
             {
-                Debug.Log("Moving!");
                 numRenderedFrames = 0;
                 baseSeed = UnityEngine.Random.Range(0, int.MaxValue);
-                Debug.Log("Base seed is now " + baseSeed);
                 stopRendering = false;
             }
 
             if (!accumulateInGameView)
                 numRenderedFrames = 0;
 
-            RenderTexture currentFrame =
-                RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
-            RenderTexture tempBuffer =
-                RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
+            int scaledW = Mathf.Max(1, Mathf.RoundToInt(source.width  * renderScale));
+            int scaledH = Mathf.Max(1, Mathf.RoundToInt(source.height * renderScale));
 
-            // 1. Render raw frame
+            RenderTexture scaledFrame  = RenderTexture.GetTemporary(scaledW, scaledH, 0, ShaderHelper.RGBA_SFloat);
+            RenderTexture scaledTemp   = RenderTexture.GetTemporary(scaledW, scaledH, 0, ShaderHelper.RGBA_SFloat);
+            RenderTexture currentFrame = RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
+            RenderTexture tempBuffer   = RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
+
+            // Raytrace at scaled resolution
             rayTracingMaterial.SetInt("numRenderedFrames", numRenderedFrames);
             rayTracingMaterial.SetInt("baseSeed", baseSeed);
-            Graphics.Blit(null, currentFrame, rayTracingMaterial);
+            Graphics.Blit(null, scaledFrame, rayTracingMaterial);
 
-            // 2. Accumulate against the clean buffer
+            // Accumulate at scaled resolution
             accumulatorMaterial.SetInt("numRenderedFrames", numRenderedFrames);
             accumulatorMaterial.SetTexture("_MainTexOld", cleanAccumBuffer);
-            Graphics.Blit(currentFrame, tempBuffer, accumulatorMaterial);
-            Swap(ref currentFrame, ref tempBuffer);
+            Graphics.Blit(scaledFrame, scaledTemp, accumulatorMaterial);
+            Swap(ref scaledFrame, ref scaledTemp);
 
-            // 3. Save clean accumulated result for next frame (before any post-processing)
-            Graphics.Blit(currentFrame, cleanAccumBuffer);
+            Graphics.Blit(scaledFrame, cleanAccumBuffer);
 
-            // 4. A-Trous spatial filter (display only, not fed back into accumulation)
-            if (atrousFilter && atrousMaterial != null)
+            // A-Trous before upscale (optional — preserves pixelated look)
+            if (atrousFilter && atrousMaterial != null && atrousBeforeUpscale)
+            {
+                int[] stepSizes = { 1, 2, 4, 8, 16 };
+                foreach (int step in stepSizes)
+                {
+                    atrousMaterial.SetInt("stepSize", step);
+                    atrousMaterial.SetFloat("colorSigma", atrousColorSigma);
+                    Graphics.Blit(scaledFrame, scaledTemp, atrousMaterial);
+                    Swap(ref scaledFrame, ref scaledTemp);
+                }
+            }
+
+            // Dither before upscale (aligns dither pattern to pixel grid)
+            if (ditherPostProcess && ditherBeforeUpscale)
+            {
+                ditherMaterial.SetInt("matrixSize", ditherMatrixSize);
+                Graphics.Blit(scaledFrame, scaledTemp, ditherMaterial);
+                Swap(ref scaledFrame, ref scaledTemp);
+            }
+
+            // Upscale to full res with point filtering for hard pixel edges
+            scaledFrame.filterMode = FilterMode.Point;
+            Graphics.Blit(scaledFrame, currentFrame);
+
+            // Post-processing at full res
+            if (atrousFilter && atrousMaterial != null && !atrousBeforeUpscale)
             {
                 int[] stepSizes = { 1, 2, 4, 8, 16 };
                 foreach (int step in stepSizes)
@@ -726,8 +863,7 @@ public class RayTracingManager : MonoBehaviour
                 }
             }
 
-            // 5. Apply stylistic post-processes for display only
-            if (ditherPostProcess)
+            if (ditherPostProcess && !ditherBeforeUpscale)
             {
                 ditherMaterial.SetInt("matrixSize", ditherMatrixSize);
                 Graphics.Blit(currentFrame, tempBuffer, ditherMaterial);
@@ -741,9 +877,10 @@ public class RayTracingManager : MonoBehaviour
                 Swap(ref currentFrame, ref tempBuffer);
             }
 
-            // 6. Output to screen
             Graphics.Blit(currentFrame, target);
 
+            RenderTexture.ReleaseTemporary(scaledFrame);
+            RenderTexture.ReleaseTemporary(scaledTemp);
             RenderTexture.ReleaseTemporary(currentFrame);
             RenderTexture.ReleaseTemporary(tempBuffer);
 
@@ -752,11 +889,6 @@ public class RayTracingManager : MonoBehaviour
                 numRenderedFrames++;
                 if (numRenderedFrames % 100 == 0)
                     Debug.Log("Num Rendered Frames: " + numRenderedFrames);
-
-                if (numRenderedFrames > numFrames)
-                {
-                    // stopRendering = true;
-                }
             }
         }
         else
@@ -784,10 +916,25 @@ public class RayTracingManager : MonoBehaviour
             "Result"
         );
 
+        // Accum buffer must match scaled resolution — recreate if render scale changed
+        int scaledW = Mathf.Max(1, Mathf.RoundToInt(Screen.width  * renderScale));
+        int scaledH = Mathf.Max(1, Mathf.RoundToInt(Screen.height * renderScale));
+
+        if (!Mathf.Approximately(renderScale, lastRenderScale))
+        {
+            if (cleanAccumBuffer != null)
+            {
+                cleanAccumBuffer.Release();
+                cleanAccumBuffer = null;
+            }
+            lastRenderScale = renderScale;
+            numRenderedFrames = 0;
+        }
+
         ShaderHelper.CreateRenderTexture(
             ref cleanAccumBuffer,
-            Screen.width,
-            Screen.height,
+            scaledW,
+            scaledH,
             FilterMode.Bilinear,
             ShaderHelper.RGBA_SFloat,
             "cleanAccumBuffer"
@@ -913,6 +1060,7 @@ public class RayTracingManager : MonoBehaviour
 
     void OnEnable()
     {
+        tlasDirty = true;
         Graphics.Blit(Texture2D.blackTexture, resultTexture);
         numRenderedFrames = 0;
     }
