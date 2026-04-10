@@ -99,36 +99,58 @@ public static RenderTexture CreateRenderTexture(int width, int height, FilterMod
 	// Create a compute buffer containing the given data (Note: data must be blittable)
 	public static void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, T[] data) where T : struct
 	{
-		// Cannot create 0 length buffer (not sure why?)
 		int length = Max(1, data.Length);
-		// The size (in bytes) of the given data type
 		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
 
-		// If buffer is null, wrong size, etc., then we'll need to create a new one
-		if (buffer == null || !buffer.IsValid() || buffer.count != length || buffer.stride != stride)
+		bool needsRecreate = buffer == null || !buffer.IsValid() || 
+		                     buffer.count != length || buffer.stride != stride;
+		if (needsRecreate)
 		{
-			if (buffer != null) { buffer.Release(); }
+			if (buffer != null) buffer.Release();
 			buffer = new ComputeBuffer(length, stride, ComputeBufferType.Structured);
+			buffer.SetData(data);
 		}
+	}
 
+	public static void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, List<T> data) where T : struct
+	{
+		int length = Max(1, data.Count);
+		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+
+		bool needsRecreate = buffer == null || !buffer.IsValid() || 
+		                     buffer.count != length || buffer.stride != stride;
+		if (needsRecreate)
+		{
+			if (buffer != null) buffer.Release();
+			buffer = new ComputeBuffer(length, stride, ComputeBufferType.Structured);
+			buffer.SetData(data);
+		}
+	}
+	// Only creates and uploads if buffer doesn't exist or size changed
+	public static void CreateStructuredBufferIfNeeded<T>(ref ComputeBuffer buffer, T[] data) where T : struct
+	{
+		int length = Mathf.Max(1, data.Length);
+		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+
+		if (buffer != null && buffer.IsValid() && buffer.count == length && buffer.stride == stride)
+			return;
+
+		if (buffer != null) buffer.Release();
+		buffer = new ComputeBuffer(length, stride, ComputeBufferType.Structured);
 		buffer.SetData(data);
 	}
 
-	// Create a compute buffer containing the given data (Note: data must be blittable)
-	public static void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, List<T> data) where T : struct
+// Always uploads — for small dynamic buffers
+	public static void UploadStructuredBuffer<T>(ref ComputeBuffer buffer, T[] data) where T : struct
 	{
-		// Cannot create 0 length buffer (not sure why?)
-		int length = Max(1, data.Count);
-		// The size (in bytes) of the given data type
+		int length = Mathf.Max(1, data.Length);
 		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
 
-		// If buffer is null, wrong size, etc., then we'll need to create a new one
 		if (buffer == null || !buffer.IsValid() || buffer.count != length || buffer.stride != stride)
 		{
-			if (buffer != null) { buffer.Release(); }
+			if (buffer != null) buffer.Release();
 			buffer = new ComputeBuffer(length, stride, ComputeBufferType.Structured);
 		}
-
 		buffer.SetData(data);
 	}
     public static void Release(ComputeBuffer buffer)

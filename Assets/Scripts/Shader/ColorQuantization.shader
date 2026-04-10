@@ -24,7 +24,6 @@ Shader "Custom/ColorQuantization"
 			#pragma fragment frag
 
 			#include "UnityCG.cginc"
-			#include "Math.hlsl"
 			struct v2f
 			{
 				float2 uv : TEXCOORD0;

@@ -24,12 +24,7 @@ Shader "Custom/Ditherer"
 			#pragma fragment frag
 
 			#include "UnityCG.cginc"
-			#include "Math.hlsl"
-			struct v2f
-			{
-				float2 uv : TEXCOORD0;
-				float4 vertex : SV_POSITION;
-			};
+			#include "Wavefront/Math.hlsl"
 
 			struct appdata
 			{

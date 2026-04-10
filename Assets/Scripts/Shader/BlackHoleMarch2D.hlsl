@@ -1,10 +1,4 @@
 
-bool PointInsideSphere(float3 p, float3 center, float radius)
-{
-    float3 d = p - center;
-    return dot(d, d) <= radius * radius;
-}
-
 bool SegmentCrossesSphere(float3 p0, float3 p1, float3 center, float radius)
 {
     if (PointInsideSphere(p0, center, radius) || PointInsideSphere(p1, center, radius))

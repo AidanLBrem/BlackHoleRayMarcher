@@ -48,6 +48,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Assets\TutorialInfo\Scripts\Editor\ReadmeEditor.cs" />
+    <Compile Include="Assets\Editor\BakeMaterialKeywords.cs" />
+    <Compile Include="Assets\Editor\StripProBuilderShaders.cs" />
     <Reference Include="UnityEngine">
       <HintPath>C:\Program Files\Unity\Hub\Editor\6000.3.7f1\Editor\Data\Managed\UnityEngine\UnityEngine.dll</HintPath>
     </Reference>
@@ -966,9 +968,6 @@
     <Reference Include="Unity.VisualScripting.Flow">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.VisualScripting.Flow.dll</HintPath>
     </Reference>
-    <Reference Include="Unity.ProBuilder.Editor">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.Editor.dll</HintPath>
-    </Reference>
     <Reference Include="Unity.TextMeshPro.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.TextMeshPro.Editor.dll</HintPath>
     </Reference>
@@ -983,9 +982,6 @@
     </Reference>
     <Reference Include="Unity.InputSystem.ForUI">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.InputSystem.ForUI.dll</HintPath>
-    </Reference>
-    <Reference Include="Unity.ProBuilder.AddOns.Editor">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.AddOns.Editor.dll</HintPath>
     </Reference>
     <Reference Include="Unity.Timeline.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.Timeline.Editor.dll</HintPath>
@@ -1020,14 +1016,8 @@
     <Reference Include="Unity.Multiplayer.Center.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.Multiplayer.Center.Editor.dll</HintPath>
     </Reference>
-    <Reference Include="Unity.ProBuilder.AssetIdRemapUtility">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.AssetIdRemapUtility.dll</HintPath>
-    </Reference>
     <Reference Include="Unity.RenderPipelines.Universal.Runtime">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.RenderPipelines.Universal.Runtime.dll</HintPath>
-    </Reference>
-    <Reference Include="Unity.ProBuilder">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.dll</HintPath>
     </Reference>
     <Reference Include="Unity.VisualScripting.State">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.VisualScripting.State.dll</HintPath>
@@ -1061,6 +1051,22 @@
     <ProjectReference Include="Assembly-CSharp.csproj">
       <Project>{0b55357e-81e7-ced6-90e5-bc96d2591dfc}</Project>
       <Name>Assembly-CSharp</Name>
+    </ProjectReference>
+    <ProjectReference Include="Unity.ProBuilder.Editor.csproj">
+      <Project>{ba696793-4224-8b5e-7695-45cbcfa61570}</Project>
+      <Name>Unity.ProBuilder.Editor</Name>
+    </ProjectReference>
+    <ProjectReference Include="Unity.ProBuilder.AddOns.Editor.csproj">
+      <Project>{a938d07e-421a-6eb9-8d26-9676430995e3}</Project>
+      <Name>Unity.ProBuilder.AddOns.Editor</Name>
+    </ProjectReference>
+    <ProjectReference Include="Unity.ProBuilder.AssetIdRemapUtility.csproj">
+      <Project>{848856aa-bf2e-e708-940d-8959288d2edf}</Project>
+      <Name>Unity.ProBuilder.AssetIdRemapUtility</Name>
+    </ProjectReference>
+    <ProjectReference Include="Unity.ProBuilder.csproj">
+      <Project>{7cd7d613-0006-4049-e31d-e63ed9318180}</Project>
+      <Name>Unity.ProBuilder</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

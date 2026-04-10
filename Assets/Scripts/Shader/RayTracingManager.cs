@@ -9,7 +9,10 @@ using UnityEngine.Profiling;
 using static RaytracerCPURay;
 using Random = System.Random;
 
-//TODO: Look into wavefront pipelining? This file is a mess
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 public static class SharedMeshRegistry
 {
     private static Dictionary<Mesh, SharedMeshData> cache = new();
@@ -17,10 +20,8 @@ public static class SharedMeshRegistry
     public static SharedMeshData GetOrCreate(Mesh mesh)
     {
         if (mesh == null) return null;
-
         if (cache.TryGetValue(mesh, out var data))
             return data;
-
         data = new SharedMeshData(mesh);
         cache.Add(mesh, data);
         return data;
@@ -75,13 +76,11 @@ public class RayTracingManager : MonoBehaviour
 
     [NonSerialized] ComputeBuffer sphereBuffer;
     [NonSerialized] ComputeBuffer blackHoleBuffer;
-
     [NonSerialized] ComputeBuffer MeshVerticesBuffer;
     [NonSerialized] ComputeBuffer MeshNormalsBuffer;
     [NonSerialized] ComputeBuffer MeshIndicesBuffer;
     [NonSerialized] ComputeBuffer TriangleBuffer;
     [NonSerialized] ComputeBuffer BVHBuffer;
-
     [NonSerialized] ComputeBuffer TLASBuffer;
     [NonSerialized] ComputeBuffer TLASRefBuffer;
     [NonSerialized] ComputeBuffer InstanceBuffer;
@@ -89,9 +88,12 @@ public class RayTracingManager : MonoBehaviour
     [NonSerialized] private ComputeBuffer LightTriangleIndicesBuffer;
     [NonSerialized] private ComputeBuffer LightTrianglesDataBuffer;
 
-    // TLAS dirty tracking — prevents per-frame rebuild in static scenes
     private bool tlasDirty = true;
     private int lastInstanceCount = -1;
+    private bool buffersHaveRealData = false;
+
+    [Header("Debug")]
+    public bool forceBufferRecreation = false;
 
     [Header("Atmosphere")]
     public bool applyScattering = true;
@@ -173,36 +175,27 @@ public class RayTracingManager : MonoBehaviour
 
     public bool displayTriTests = false;
     public int triTestFullSaturationValue = 1000;
-
     public bool displayBVHNodeTests = false;
     public int BVHNodeTestSaturationValue = 10;
-
     public bool displayTLASNodeVisits = false;
     public int TLASNodeVisitsSaturationValue = 1000;
-
     public bool displayBLASNodeVisits = false;
     public int BLASNodeVisitsSaturationValue = 1000;
-
     public bool displayInstanceBLASTraversals = false;
     public int InstanceBLASTraversalsSaturationValue = 1000;
-
     public bool displayTLASLeafRefs = false;
     public int TLASLeafRefsSaturationValue = 1000;
 
     public bool useStepsPerCollision = true;
     public int StepsPerCollisionTest = 3;
-
     public bool useRayMagnification = false;
 
-    // --- Accumulation tracking ---
     Vector3 lastCameraPosition;
     Quaternion lastCameraRotation;
     float lastCameraFov;
     int lastScreenWidth;
     int lastScreenHeight;
     bool historyInitialized = false;
-
-    // --- Render scale tracking (accum buffer must be recreated on change) ---
     private float lastRenderScale = -1f;
 
     void Swap(ref RenderTexture a, ref RenderTexture b) => (a, b) = (b, a);
@@ -251,6 +244,155 @@ public class RayTracingManager : MonoBehaviour
         return changed;
     }
 
+    void Awake()
+    {
+        ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
+        ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
+        ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
+        ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
+        ShaderHelper.InitMaterial(atrousShader, ref atrousMaterial);
+
+        EnsureBuffersCreated();
+        BindBuffersToMaterial();
+
+        UpdateCameraParams(Camera.current != null ? Camera.current : GetComponent<Camera>());
+
+        ShaderVariantCollection variants = Resources.Load<ShaderVariantCollection>("RayTracerVariants");
+        if (variants == null)
+            Debug.LogError("RayTracerVariants not found in Resources");
+        else
+        {
+            Debug.Log("Variant count: " + variants.variantCount);
+            variants.WarmUp();
+            Debug.Log("Warmed up: " + variants.isWarmedUp);
+        }
+    }
+
+    void OnEnable()
+    {
+        tlasDirty = true;
+        numRenderedFrames = 0;
+        if (resultTexture != null)
+            Graphics.Blit(Texture2D.blackTexture, resultTexture);
+    }
+
+    void OnValidate()
+    {
+        tlasDirty = true;
+        rayTracingMaterial = null;
+        accumulatorMaterial = null;
+        ditherMaterial = null;
+        colorQuantizationMaterial = null;
+        atrousMaterial = null;
+        numRenderedFrames = 0;
+    }
+
+    void OnDestroy()
+    {
+        ReleaseBuffers();
+    }
+
+    void OnApplicationQuit()
+    {
+        ReleaseBuffers();
+    }
+
+    void ReleaseBuffers()
+    {
+        sphereBuffer?.Release();
+        blackHoleBuffer?.Release();
+        MeshVerticesBuffer?.Release();
+        MeshNormalsBuffer?.Release();
+        MeshIndicesBuffer?.Release();
+        TriangleBuffer?.Release();
+        BVHBuffer?.Release();
+        TLASBuffer?.Release();
+        TLASRefBuffer?.Release();
+        InstanceBuffer?.Release();
+        LightSourceBuffer?.Release();
+        LightTriangleIndicesBuffer?.Release();
+        LightTrianglesDataBuffer?.Release();
+
+        sphereBuffer = null;
+        blackHoleBuffer = null;
+        MeshVerticesBuffer = null;
+        MeshNormalsBuffer = null;
+        MeshIndicesBuffer = null;
+        TriangleBuffer = null;
+        BVHBuffer = null;
+        TLASBuffer = null;
+        TLASRefBuffer = null;
+        InstanceBuffer = null;
+        LightSourceBuffer = null;
+        LightTriangleIndicesBuffer = null;
+        LightTrianglesDataBuffer = null;
+
+        buffersHaveRealData = false;
+    }
+
+    void EnsureBuffersCreated(bool forceRecreate = false)
+    {
+        if (forceRecreate)
+            ReleaseBuffers();
+
+        if (TriangleBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<Triangle>(ref TriangleBuffer, 1);
+        if (BVHBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<GPUBVHNode>(ref BVHBuffer, 1);
+        if (TLASBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<GPUBVHNode>(ref TLASBuffer, 1);
+        if (TLASRefBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<uint>(ref TLASRefBuffer, 1);
+        if (InstanceBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<MeshStruct>(ref InstanceBuffer, 1);
+        if (MeshVerticesBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<Vector3>(ref MeshVerticesBuffer, 1);
+        if (MeshNormalsBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<Vector3>(ref MeshNormalsBuffer, 1);
+        if (MeshIndicesBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<uint>(ref MeshIndicesBuffer, 1);
+        if (LightSourceBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<GPULightSource>(ref LightSourceBuffer, 1);
+        if (LightTriangleIndicesBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<int>(ref LightTriangleIndicesBuffer, 1);
+        if (LightTrianglesDataBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<GPULightTriangleData>(ref LightTrianglesDataBuffer, 1);
+        if (sphereBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<Sphere>(ref sphereBuffer, 1);
+        if (blackHoleBuffer == null)
+            ShaderHelper.CreateStructuredBuffer<BlackHole>(ref blackHoleBuffer, 1);
+    }
+
+    void BindBuffersToMaterial()
+    {
+        if (rayTracingMaterial == null) return;
+
+        rayTracingMaterial.SetBuffer("Triangles",            TriangleBuffer);
+        rayTracingMaterial.SetBuffer("BVHNodes",             BVHBuffer);
+        rayTracingMaterial.SetBuffer("TLASNodes",            TLASBuffer);
+        rayTracingMaterial.SetBuffer("TLASRefs",             TLASRefBuffer);
+        rayTracingMaterial.SetBuffer("Instances",            InstanceBuffer);
+        rayTracingMaterial.SetBuffer("Vertices",             MeshVerticesBuffer);
+        rayTracingMaterial.SetBuffer("Normals",              MeshNormalsBuffer);
+        rayTracingMaterial.SetBuffer("TriangleIndices",      MeshIndicesBuffer);
+        rayTracingMaterial.SetBuffer("LightSources",         LightSourceBuffer);
+        rayTracingMaterial.SetBuffer("LightTriangleIndices", LightTriangleIndicesBuffer);
+        rayTracingMaterial.SetBuffer("LightTrianglesData",   LightTrianglesDataBuffer);
+        rayTracingMaterial.SetBuffer("Spheres",              sphereBuffer);
+        rayTracingMaterial.SetBuffer("BlackHoles",           blackHoleBuffer);
+
+        rayTracingMaterial.SetInt("numMeshes",       0);
+        rayTracingMaterial.SetInt("numBLASNodes",    0);
+        rayTracingMaterial.SetInt("numTLASNodes",    0);
+        rayTracingMaterial.SetInt("numInstances",    0);
+        rayTracingMaterial.SetInt("TLASRootIndex",   0);
+        rayTracingMaterial.SetInt("numLightSources", 0);
+        rayTracingMaterial.SetInt("numSpheres",      0);
+        rayTracingMaterial.SetInt("numBlackHoles",   0);
+
+        tlasDirty = true;
+    }
+
     void UpdateAtmosphereParams()
     {
         rayTracingMaterial.SetFloat("atmosphereRadius", atmosphereRadius);
@@ -288,10 +430,8 @@ public class RayTracingManager : MonoBehaviour
         {
             RayTracedMesh m = allMeshes[i];
             if (m == null) continue;
-
             if (m.sharedMesh == null)
                 m.RebuildStaticData();
-
             if (m.sharedMesh == null) continue;
             if (m.sharedMesh.mesh == null) continue;
             if (m.sharedMesh.buildTriangles == null || m.sharedMesh.buildTriangles.Length == 0) continue;
@@ -299,7 +439,6 @@ public class RayTracingManager : MonoBehaviour
             if (m.sharedMesh.blas.Nodes == null || m.sharedMesh.blas.Nodes.Length == 0) continue;
             if (m.sharedMesh.blas.PrimitiveRefs == null || m.sharedMesh.blas.PrimitiveRefs.Length == 0) continue;
             if (m.sharedMesh.GPUBVH == null || m.sharedMesh.GPUBVH.Count == 0) continue;
-
             validMeshes.Add(m);
         }
 
@@ -325,69 +464,34 @@ public class RayTracingManager : MonoBehaviour
     bool AnyInstanceNeedsUpdate(List<RayTracedMesh> validInstances)
     {
         for (int i = 0; i < validInstances.Count; i++)
-        {
-            if (validInstances[i].update)
-                return true;
-        }
+            if (validInstances[i].update) return true;
         return false;
     }
 
     bool AnyTransformDirty(List<RayTracedMesh> validInstances)
     {
         for (int i = 0; i < validInstances.Count; i++)
-        {
-            if (validInstances[i].transformDirty)
-                return true;
-        }
+            if (validInstances[i].transformDirty) return true;
         return false;
-    }
-
-    void BindDummyAccelerationBuffers()
-    {
-        ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, new Triangle[1]);
-        ShaderHelper.CreateStructuredBuffer(ref BVHBuffer, new GPUBVHNode[1]);
-        ShaderHelper.CreateStructuredBuffer(ref TLASBuffer, new GPUBVHNode[1]);
-        ShaderHelper.CreateStructuredBuffer(ref TLASRefBuffer, new uint[1]);
-        ShaderHelper.CreateStructuredBuffer(ref InstanceBuffer, new MeshStruct[1]);
-        ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, new Vector3[1]);
-        ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer, new Vector3[1]);
-        ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer, new uint[1]);
-        ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, new GPULightSource[1]);
-        ShaderHelper.CreateStructuredBuffer(ref LightTriangleIndicesBuffer, new int[1]);
-        ShaderHelper.CreateStructuredBuffer(ref LightTrianglesDataBuffer, new GPULightTriangleData[1]);
-
-        rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
-        rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
-        rayTracingMaterial.SetBuffer("TLASNodes", TLASBuffer);
-        rayTracingMaterial.SetBuffer("TLASRefs", TLASRefBuffer);
-        rayTracingMaterial.SetBuffer("Instances", InstanceBuffer);
-        rayTracingMaterial.SetBuffer("Vertices", MeshVerticesBuffer);
-        rayTracingMaterial.SetBuffer("Normals", MeshNormalsBuffer);
-        rayTracingMaterial.SetBuffer("TriangleIndices", MeshIndicesBuffer);
-        rayTracingMaterial.SetBuffer("LightSources", LightSourceBuffer);
-        rayTracingMaterial.SetBuffer("LightTriangleIndices", LightTriangleIndicesBuffer);
-        rayTracingMaterial.SetBuffer("LightTrianglesData", LightTrianglesDataBuffer);
-        rayTracingMaterial.SetInt("numMeshes", 0);
-        rayTracingMaterial.SetInt("numBLASNodes", 0);
-        rayTracingMaterial.SetInt("numTLASNodes", 0);
-        rayTracingMaterial.SetInt("numInstances", 0);
-        rayTracingMaterial.SetInt("TLASRootIndex", 0);
-        rayTracingMaterial.SetInt("numLightSources", 0);
-
-        tlasDirty = true;
     }
 
     void AllocateAccelerationBuffers()
     {
+        if (forceBufferRecreation)
+        {
+            buffersHaveRealData = false;
+            tlasDirty = true;
+            forceBufferRecreation = false;
+        }
+
         List<RayTracedMesh> validInstances = GetValidMeshInstances();
 
         if (validInstances.Count == 0)
         {
-            BindDummyAccelerationBuffers();
+            EnsureBuffersCreated();
             return;
         }
 
-        // Instance count change always forces full rebuild
         if (validInstances.Count != lastInstanceCount)
         {
             tlasDirty = true;
@@ -451,14 +555,13 @@ public class RayTracingManager : MonoBehaviour
 
         bool anyMeshMarkedUpdated = AnyInstanceNeedsUpdate(validInstances);
 
-        bool needTriangles = TriangleBuffer == null || TriangleBuffer.count != Mathf.Max(1, totalTris) || anyMeshMarkedUpdated;
-        bool needBVH = BVHBuffer == null || BVHBuffer.count != Mathf.Max(1, totalBVHNodes) || anyMeshMarkedUpdated;
-        bool needVertices = MeshVerticesBuffer == null || MeshNormalsBuffer == null || MeshIndicesBuffer == null || anyMeshMarkedUpdated;
+        bool needTriangles = !buffersHaveRealData || TriangleBuffer == null || TriangleBuffer.count != Mathf.Max(1, totalTris) || anyMeshMarkedUpdated;
+        bool needBVH = !buffersHaveRealData || BVHBuffer == null || BVHBuffer.count != Mathf.Max(1, totalBVHNodes) || anyMeshMarkedUpdated;
+        bool needVertices = !buffersHaveRealData || MeshVerticesBuffer == null || MeshNormalsBuffer == null || MeshIndicesBuffer == null || anyMeshMarkedUpdated;
 
         if (!(needTriangles || needBVH || needVertices))
             return;
 
-        // BLAS geometry changed — TLAS must also rebuild
         tlasDirty = true;
 
         float startTime = Time.realtimeSinceStartup;
@@ -499,10 +602,8 @@ public class RayTracingManager : MonoBehaviour
             for (int j = 0; j < sharedMesh.GPUBVH.Count; j++)
             {
                 GPUBVHNode node = sharedMesh.GPUBVH[j];
-
                 if (node.left != -1) node.left += off.blasNodeOffset;
                 if (node.right != -1) node.right += off.blasNodeOffset;
-
                 node.firstIndex += (uint)off.triangleOffset;
                 blasNodes[off.blasNodeOffset + j] = node;
             }
@@ -548,12 +649,11 @@ public class RayTracingManager : MonoBehaviour
         ShaderHelper.CreateStructuredBuffer(ref BVHBuffer, blasNodes);
         ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer, triangleIndices);
 
-        rayTracingMaterial.SetBuffer("Triangles", TriangleBuffer);
-        rayTracingMaterial.SetBuffer("BVHNodes", BVHBuffer);
-        rayTracingMaterial.SetBuffer("Vertices", MeshVerticesBuffer);
-        rayTracingMaterial.SetBuffer("Normals", MeshNormalsBuffer);
+        rayTracingMaterial.SetBuffer("Triangles",       TriangleBuffer);
+        rayTracingMaterial.SetBuffer("BVHNodes",        BVHBuffer);
+        rayTracingMaterial.SetBuffer("Vertices",        MeshVerticesBuffer);
+        rayTracingMaterial.SetBuffer("Normals",         MeshNormalsBuffer);
         rayTracingMaterial.SetBuffer("TriangleIndices", MeshIndicesBuffer);
-
         rayTracingMaterial.SetInt("numBLASNodes", totalBVHNodes);
 
         for (int i = 0; i < validInstances.Count; i++)
@@ -568,21 +668,15 @@ public class RayTracingManager : MonoBehaviour
         List<RayTracedMesh> meshObjects,
         Dictionary<SharedMeshData, MeshOffsets> offsets)
     {
-        // Check if any instance transform changed this frame
         bool anyTransformDirty = AnyTransformDirty(meshObjects);
         if (anyTransformDirty)
             tlasDirty = true;
-        if (tlasDirty)
-        {
-            Debug.Log("TLAS dirty");
-        }
-        // Skip rebuild entirely if nothing changed
-        if (!tlasDirty && TLASBuffer != null)
+
+        if (!tlasDirty && TLASBuffer != null && buffersHaveRealData)
             return;
 
         tlasDirty = false;
 
-        // Clear transform dirty flags now that we're rebuilding
         for (int i = 0; i < meshObjects.Count; i++)
             meshObjects[i].transformDirty = false;
 
@@ -621,7 +715,6 @@ public class RayTracingManager : MonoBehaviour
                 worldToLocalMatrix = meshObj.transform.worldToLocalMatrix,
                 material = meshObj.material,
                 firstBVHNodeIndex = (uint)globalBlasRootIndex,
-
                 AABBLeftX = worldBounds.min.x,
                 AABBLeftY = worldBounds.min.y,
                 AABBLeftZ = worldBounds.min.z,
@@ -704,39 +797,40 @@ public class RayTracingManager : MonoBehaviour
             ? lightTriangleIndices.ToArray()
             : new int[1];
 
-        ShaderHelper.CreateStructuredBuffer(ref TLASBuffer, tlasNodes);
-        ShaderHelper.CreateStructuredBuffer(ref TLASRefBuffer, tlasRefs);
-        ShaderHelper.CreateStructuredBuffer(ref InstanceBuffer, gpuInstances);
-        ShaderHelper.CreateStructuredBuffer(ref LightSourceBuffer, trimmedLightSources);
-        ShaderHelper.CreateStructuredBuffer(ref LightTriangleIndicesBuffer, lightTriIndicesArray);
-        ShaderHelper.CreateStructuredBuffer(ref LightTrianglesDataBuffer, lightTrianglesData.ToArray());
+        ShaderHelper.UploadStructuredBuffer(ref TLASBuffer,                 tlasNodes);
+        ShaderHelper.UploadStructuredBuffer(ref TLASRefBuffer,              tlasRefs);
+        ShaderHelper.UploadStructuredBuffer(ref InstanceBuffer,             gpuInstances);
+        ShaderHelper.UploadStructuredBuffer(ref LightSourceBuffer,          trimmedLightSources);
+        ShaderHelper.UploadStructuredBuffer(ref LightTriangleIndicesBuffer, lightTriIndicesArray);
+        ShaderHelper.UploadStructuredBuffer(ref LightTrianglesDataBuffer,   lightTrianglesData.ToArray());
 
-        rayTracingMaterial.SetBuffer("TLASNodes", TLASBuffer);
-        rayTracingMaterial.SetBuffer("TLASRefs", TLASRefBuffer);
-        rayTracingMaterial.SetBuffer("Instances", InstanceBuffer);
-        rayTracingMaterial.SetBuffer("LightSources", LightSourceBuffer);
+        rayTracingMaterial.SetBuffer("TLASNodes",            TLASBuffer);
+        rayTracingMaterial.SetBuffer("TLASRefs",             TLASRefBuffer);
+        rayTracingMaterial.SetBuffer("Instances",            InstanceBuffer);
+        rayTracingMaterial.SetBuffer("LightSources",         LightSourceBuffer);
         rayTracingMaterial.SetBuffer("LightTriangleIndices", LightTriangleIndicesBuffer);
-        rayTracingMaterial.SetBuffer("LightTrianglesData", LightTrianglesDataBuffer);
+        rayTracingMaterial.SetBuffer("LightTrianglesData",   LightTrianglesDataBuffer);
 
-        rayTracingMaterial.SetInt("numMeshes", gpuInstances.Length);
-        rayTracingMaterial.SetInt("numTLASNodes", tlasNodes.Length);
-        rayTracingMaterial.SetInt("numInstances", gpuInstances.Length);
-        rayTracingMaterial.SetInt("TLASRootIndex", tlasBuilder.RootIndex);
+        rayTracingMaterial.SetInt("numMeshes",       gpuInstances.Length);
+        rayTracingMaterial.SetInt("numTLASNodes",    tlasNodes.Length);
+        rayTracingMaterial.SetInt("numInstances",    gpuInstances.Length);
+        rayTracingMaterial.SetInt("TLASRootIndex",   tlasBuilder.RootIndex);
         rayTracingMaterial.SetInt("numLightSources", numLightSources);
 
-        rayTracingMaterial.SetInt("BVHTestsSaturation", BVHNodeTestSaturationValue);
-        rayTracingMaterial.SetInt("triTestsSaturation", triTestFullSaturationValue);
-        rayTracingMaterial.SetInt("TLASNodeVisitsSaturation", TLASNodeVisitsSaturationValue);
-        rayTracingMaterial.SetInt("BLASNodeVisitsSaturation", BLASNodeVisitsSaturationValue);
+        rayTracingMaterial.SetInt("BVHTestsSaturation",               BVHNodeTestSaturationValue);
+        rayTracingMaterial.SetInt("triTestsSaturation",               triTestFullSaturationValue);
+        rayTracingMaterial.SetInt("TLASNodeVisitsSaturation",         TLASNodeVisitsSaturationValue);
+        rayTracingMaterial.SetInt("BLASNodeVisitsSaturation",         BLASNodeVisitsSaturationValue);
         rayTracingMaterial.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
-        rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation", TLASLeafRefsSaturationValue);
-        rayTracingMaterial.SetInt("u_StepsPerCollisionTest", StepsPerCollisionTest);
+        rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation",    TLASLeafRefsSaturationValue);
+        rayTracingMaterial.SetInt("u_StepsPerCollisionTest",          StepsPerCollisionTest);
+
+        buffersHaveRealData = true;
     }
 
     static GPUBVHNode[] PackNodes(BvhNode[] nodes)
     {
         GPUBVHNode[] packed = new GPUBVHNode[nodes.Length];
-
         for (int i = 0; i < nodes.Length; i++)
         {
             BvhNode n = nodes[i];
@@ -746,7 +840,6 @@ public class RayTracingManager : MonoBehaviour
                 right = n.rightChild,
                 firstIndex = (uint)n.start,
                 count = (uint)n.count,
-
                 AABBLeftX = n.bounds.min.x,
                 AABBLeftY = n.bounds.min.y,
                 AABBLeftZ = n.bounds.min.z,
@@ -755,7 +848,6 @@ public class RayTracingManager : MonoBehaviour
                 AABBRightZ = n.bounds.max.z,
             };
         }
-
         return packed;
     }
 
@@ -765,30 +857,15 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetFloat("strongFieldCurvatureRadPetMeterCutoff", strongFieldRadPerMeterCuttoff);
     }
 
-    void OnValidate()
-    {
-        tlasDirty = true;
-
-        if (rayTracingShader != null)
-            ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
-
-        if (accumulatorShader != null)
-            ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
-
-        if (ditherShader != null)
-            ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
-
-        if (ColorQuantizationShader != null)
-            ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
-
-        if (atrousShader != null)
-            ShaderHelper.InitMaterial(atrousShader, ref atrousMaterial);
-
-        numRenderedFrames = 0;
-    }
-
     void OnRenderImage(RenderTexture source, RenderTexture target)
     {
+        #if DEVELOPMENT_BUILD
+        Debug.Log("OnRenderImage - material null: " + (rayTracingMaterial == null));
+        if (rayTracingMaterial != null)
+            Debug.Log("Keywords at render start: " +
+                string.Join(", ", rayTracingMaterial.shaderKeywords));
+        #endif
+
         if (Camera.current.name != "SceneCamera" || useShaderInSceneView)
         {
             InitFrame();
@@ -812,12 +889,10 @@ public class RayTracingManager : MonoBehaviour
             RenderTexture currentFrame = RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
             RenderTexture tempBuffer   = RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
 
-            // Raytrace at scaled resolution
             rayTracingMaterial.SetInt("numRenderedFrames", numRenderedFrames);
             rayTracingMaterial.SetInt("baseSeed", baseSeed);
             Graphics.Blit(null, scaledFrame, rayTracingMaterial);
 
-            // Accumulate at scaled resolution
             accumulatorMaterial.SetInt("numRenderedFrames", numRenderedFrames);
             accumulatorMaterial.SetTexture("_MainTexOld", cleanAccumBuffer);
             Graphics.Blit(scaledFrame, scaledTemp, accumulatorMaterial);
@@ -825,7 +900,6 @@ public class RayTracingManager : MonoBehaviour
 
             Graphics.Blit(scaledFrame, cleanAccumBuffer);
 
-            // A-Trous before upscale (optional — preserves pixelated look)
             if (atrousFilter && atrousMaterial != null && atrousBeforeUpscale)
             {
                 int[] stepSizes = { 1, 2, 4, 8, 16 };
@@ -838,7 +912,6 @@ public class RayTracingManager : MonoBehaviour
                 }
             }
 
-            // Dither before upscale (aligns dither pattern to pixel grid)
             if (ditherPostProcess && ditherBeforeUpscale)
             {
                 ditherMaterial.SetInt("matrixSize", ditherMatrixSize);
@@ -846,11 +919,9 @@ public class RayTracingManager : MonoBehaviour
                 Swap(ref scaledFrame, ref scaledTemp);
             }
 
-            // Upscale to full res with point filtering for hard pixel edges
             scaledFrame.filterMode = FilterMode.Point;
             Graphics.Blit(scaledFrame, currentFrame);
 
-            // Post-processing at full res
             if (atrousFilter && atrousMaterial != null && !atrousBeforeUpscale)
             {
                 int[] stepSizes = { 1, 2, 4, 8, 16 };
@@ -901,11 +972,20 @@ public class RayTracingManager : MonoBehaviour
     {
         Camera.current.cullingMask = 0;
 
-        ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
-        ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
-        ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
-        ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
-        ShaderHelper.InitMaterial(atrousShader, ref atrousMaterial);
+        if (rayTracingMaterial == null)
+        {
+            ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
+            EnsureBuffersCreated();
+            BindBuffersToMaterial();
+        }
+        if (accumulatorMaterial == null)
+            ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
+        if (ditherMaterial == null)
+            ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
+        if (colorQuantizationMaterial == null)
+            ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
+        if (atrousMaterial == null)
+            ShaderHelper.InitMaterial(atrousShader, ref atrousMaterial);
 
         ShaderHelper.CreateRenderTexture(
             ref resultTexture,
@@ -916,7 +996,6 @@ public class RayTracingManager : MonoBehaviour
             "Result"
         );
 
-        // Accum buffer must match scaled resolution — recreate if render scale changed
         int scaledW = Mathf.Max(1, Mathf.RoundToInt(Screen.width  * renderScale));
         int scaledH = Mathf.Max(1, Mathf.RoundToInt(Screen.height * renderScale));
 
@@ -968,34 +1047,34 @@ public class RayTracingManager : MonoBehaviour
         rayTracingMaterial.SetInt("emergencyBreakMaxSteps", emergencyBreakMaxSteps);
         accumulatorMaterial.SetFloat("accumWeight", accumWeight);
 
-        rayTracingMaterial.SetInt("triTestsSaturation", triTestFullSaturationValue);
-        rayTracingMaterial.SetInt("BVHTestsSaturation", BVHNodeTestSaturationValue);
-        rayTracingMaterial.SetInt("TLASNodeVisitsSaturation", TLASNodeVisitsSaturationValue);
-        rayTracingMaterial.SetInt("BLASNodeVisitsSaturation", BLASNodeVisitsSaturationValue);
+        rayTracingMaterial.SetInt("triTestsSaturation",               triTestFullSaturationValue);
+        rayTracingMaterial.SetInt("BVHTestsSaturation",               BVHNodeTestSaturationValue);
+        rayTracingMaterial.SetInt("TLASNodeVisitsSaturation",         TLASNodeVisitsSaturationValue);
+        rayTracingMaterial.SetInt("BLASNodeVisitsSaturation",         BLASNodeVisitsSaturationValue);
         rayTracingMaterial.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
-        rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation", TLASLeafRefsSaturationValue);
+        rayTracingMaterial.SetInt("TLASLeafRefsVisitedSaturation",    TLASLeafRefsSaturationValue);
 
-        SetKeyword(rayTracingMaterial, "TEST_SPHERE", renderSphere);
-        SetKeyword(rayTracingMaterial, "TEST_TRIANGLE", renderTriangles);
-        SetKeyword(rayTracingMaterial, "ENABLE_LENSING", enable_lensing);
-        SetKeyword(rayTracingMaterial, "USE_TLAS", useTlas);
-        SetKeyword(rayTracingMaterial, "USE_REDSHIFTING", useRedshifting);
-        SetKeyword(rayTracingMaterial, "APPLY_SCATTERING", applyScattering);
-        SetKeyword(rayTracingMaterial, "APPLY_RAYLEIGH", applyRayleigh);
-        SetKeyword(rayTracingMaterial, "APPLY_MIE", applyMie);
-        SetKeyword(rayTracingMaterial, "APPLY_SUNDISK", applySundisk);
-        SetKeyword(rayTracingMaterial, "APPLY_SUN_LIGHTING", applySunLighting);
-        SetKeyword(rayTracingMaterial, "IMPACT_PARAMETER_DEBUG", impactParameterDebug);
-        SetKeyword(rayTracingMaterial, "ORBITAL_PLANE_TEST_POSSIBLE", useOrbitalPlaneCullingIfAble && blackHoleBuffer.count == 1);
-        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TRIANGLE_TESTS", displayTriTests);
-        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_BVH_NODES_VISITED", displayBVHNodeTests);
-        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TLAS_NODE_VISITS", displayTLASNodeVisits);
-        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_BLAS_NODE_VISITS", displayBLASNodeVisits);
+        SetKeyword(rayTracingMaterial, "TEST_SPHERE",                      renderSphere);
+        SetKeyword(rayTracingMaterial, "TEST_TRIANGLE",                    renderTriangles);
+        SetKeyword(rayTracingMaterial, "ENABLE_LENSING",                   enable_lensing);
+        SetKeyword(rayTracingMaterial, "USE_TLAS",                         useTlas);
+        SetKeyword(rayTracingMaterial, "USE_REDSHIFTING",                  useRedshifting);
+        SetKeyword(rayTracingMaterial, "APPLY_SCATTERING",                 applyScattering);
+        SetKeyword(rayTracingMaterial, "APPLY_RAYLEIGH",                   applyRayleigh);
+        SetKeyword(rayTracingMaterial, "APPLY_MIE",                        applyMie);
+        SetKeyword(rayTracingMaterial, "APPLY_SUNDISK",                    applySundisk);
+        SetKeyword(rayTracingMaterial, "APPLY_SUN_LIGHTING",               applySunLighting);
+        SetKeyword(rayTracingMaterial, "IMPACT_PARAMETER_DEBUG",           impactParameterDebug);
+        SetKeyword(rayTracingMaterial, "ORBITAL_PLANE_TEST_POSSIBLE",      useOrbitalPlaneCullingIfAble && blackHoleBuffer.count == 1);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TRIANGLE_TESTS",     displayTriTests);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_BVH_NODES_VISITED",  displayBVHNodeTests);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TLAS_NODE_VISITS",   displayTLASNodeVisits);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_BLAS_NODE_VISITS",   displayBLASNodeVisits);
         SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS", displayInstanceBLASTraversals);
-        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TLAS_LEAF_REFS", displayTLASLeafRefs);
-        SetKeyword(rayTracingMaterial, "MARCH_CHORD_COLLISION_LIMIT", useStepsPerCollision && StepsPerCollisionTest > 1);
-        SetKeyword(rayTracingMaterial, "USE_RAY_MAGNIFICATION", useRayMagnification);
-        SetKeyword(rayTracingMaterial, "APPLY_NEE", useNEE);
+        SetKeyword(rayTracingMaterial, "DEBUG_DISPLAY_TLAS_LEAF_REFS",     displayTLASLeafRefs);
+        SetKeyword(rayTracingMaterial, "MARCH_CHORD_COLLISION_LIMIT",      useStepsPerCollision && StepsPerCollisionTest > 1);
+        SetKeyword(rayTracingMaterial, "USE_RAY_MAGNIFICATION",            useRayMagnification);
+        SetKeyword(rayTracingMaterial, "APPLY_NEE",                        useNEE);
     }
 
     void SetKeyword(Material mat, string keyword, bool enabled)
@@ -1024,7 +1103,7 @@ public class RayTracingManager : MonoBehaviour
             };
         }
 
-        ShaderHelper.CreateStructuredBuffer(ref sphereBuffer, spheres);
+        ShaderHelper.UploadStructuredBuffer(ref sphereBuffer, spheres);
         rayTracingMaterial.SetBuffer("Spheres", sphereBuffer);
         rayTracingMaterial.SetInt("numSpheres", sphereObjects.Length);
     }
@@ -1053,15 +1132,8 @@ public class RayTracingManager : MonoBehaviour
         if (blackHoleObjects.Length > 0)
             ApplyBlackHoleLUT(rayTracingMaterial, blackHoleObjects[0]);
 
-        ShaderHelper.CreateStructuredBuffer(ref blackHoleBuffer, blackHoles);
+        ShaderHelper.UploadStructuredBuffer(ref blackHoleBuffer, blackHoles);
         rayTracingMaterial.SetBuffer("BlackHoles", blackHoleBuffer);
         rayTracingMaterial.SetInt("numBlackHoles", blackHoleObjects.Length);
-    }
-
-    void OnEnable()
-    {
-        tlasDirty = true;
-        Graphics.Blit(Texture2D.blackTexture, resultTexture);
-        numRenderedFrames = 0;
     }
 }

@@ -77,6 +77,7 @@
     <Compile Include="Assets\Scripts\BVH\BVHInstance.cs" />
     <Compile Include="Assets\Scripts\BVH\TLASBuilder.cs" />
     <Compile Include="Assets\Scripts\Primitives\RayTracedBlackHole.cs" />
+    <Compile Include="Assets\Scripts\Shader\RayTracingManagerWavefront.cs" />
     <Compile Include="Assets\Scripts\Debug\DebugSunTraversal.cs" />
     <Compile Include="Assets\Scripts\Primitives\Mesh.cs" />
     <Compile Include="Assets\Scripts\Shader\ShaderHelper.cs" />
@@ -87,42 +88,72 @@
     <Compile Include="Assets\Scripts\FlyControls.cs" />
     <Compile Include="Assets\Scripts\BlackHole\LUT\BlackHoleBendingLUT.cs" />
     <Compile Include="Assets\Scripts\BVH\InstanceAdapter.cs" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\ReferenceUnlit.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMPro.cginc" />
+    <None Include="Assets\Scripts\Shader\Wavefront\InitRay.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\NormalPreview.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile Overlay.shader" />
     <None Include="Assets\Scripts\Shader\ATrous.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile-2-Pass.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\DiffuseVertexColor.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_Bitmap.shader" />
     <None Include="Assets\Scripts\Shader\Accumulator.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\LineBillboard.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\ClassifyRay.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\LinearMarch.raytrace" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\VertexPicker.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\DiffuseTextureBlend.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\LineBillboardMetal.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMPro_Mobile.cginc" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\ScrollHighlight.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF SSD.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\UnlitSolidColor.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\Reflection.shader" />
     <None Include="Assets\Scripts\Shader\BlackHoleMarch2D.hlsl" />
     <None Include="Assets\Scripts\Shader\AtmosphereicScattering.hlsl" />
-    <None Include="Assets\Scripts\Shader\Math.hlsl" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\TransparentOverlay.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\UnlitVertexColor.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\Math.hlsl" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Surface-Mobile.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\EdgePicker.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\SDFFunctions.hlsl" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\VertexShader.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\BasicStructures.hlsl" />
     <None Include="Assets\Scripts\Shader\RayTracer.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Surface.shader" />
     <None Include="Assets\TextMesh Pro\Sprites\EmojiOne Attribution.txt" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_Bitmap-Custom-Atlas.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Upgrade\AssetIdRemap-4_0_0.json" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile SSD.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\FacePicker.shader" />
     <None Include="Assets\TextMesh Pro\Resources\LineBreaking Leading Characters.txt" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\SmoothingPreview.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMPro_Properties.cginc" />
+    <None Include="Packages\com.unity.probuilder\package.json" />
     <None Include="Assets\TextMesh Pro\Shaders\TMPro_Surface.cginc" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\ProBuilderCG.cginc" />
     <None Include="Assets\TextMesh Pro\Resources\LineBreaking Following Characters.txt" />
     <None Include="Assets\Scripts\Shader\StarRenderer.hlsl" />
-    <None Include="Assets\Scripts\Shader\GGX.hlsl" />
+    <None Include="Assets\Scripts\Shader\Wavefront\LinearMarch.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\PointBillboard.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\GGX.hlsl" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile Masking.shader" />
     <None Include="Assets\Scripts\Shader\Ditherer.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\FlagVisualizer.shader" />
     <None Include="Assets\Scripts\Shader\NEE.hlsl" />
     <None Include="Assets\Scripts\Shader\LUTConversion.hlsl" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF Overlay.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_Bitmap-Mobile.shader" />
     <None Include="Assets\TextMesh Pro\Fonts\LiberationSans - OFL.txt" />
+    <None Include="Assets\Scripts\Shader\Wavefront\PixelFlags.hlsl" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\SelectionPicker.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\FaceHighlight.shader" />
     <None Include="Assets\TextMesh Pro\Sprites\EmojiOne.json" />
     <None Include="Assets\Scripts\Shader\ColorQuantization.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_Sprite.shader" />
+    <None Include="Packages\com.unity.probuilder\Content\Shader\HideVertices.shader" />
     <Reference Include="UnityEngine">
       <HintPath>C:\Program Files\Unity\Hub\Editor\6000.3.7f1\Editor\Data\Managed\UnityEngine\UnityEngine.dll</HintPath>
     </Reference>
@@ -990,9 +1021,6 @@
     <Reference Include="Unity.VisualScripting.Flow">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.VisualScripting.Flow.dll</HintPath>
     </Reference>
-    <Reference Include="Unity.ProBuilder.Editor">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.Editor.dll</HintPath>
-    </Reference>
     <Reference Include="Unity.TextMeshPro.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.TextMeshPro.Editor.dll</HintPath>
     </Reference>
@@ -1007,9 +1035,6 @@
     </Reference>
     <Reference Include="Unity.InputSystem.ForUI">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.InputSystem.ForUI.dll</HintPath>
-    </Reference>
-    <Reference Include="Unity.ProBuilder.AddOns.Editor">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.AddOns.Editor.dll</HintPath>
     </Reference>
     <Reference Include="Unity.Timeline.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.Timeline.Editor.dll</HintPath>
@@ -1044,14 +1069,8 @@
     <Reference Include="Unity.Multiplayer.Center.Editor">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.Multiplayer.Center.Editor.dll</HintPath>
     </Reference>
-    <Reference Include="Unity.ProBuilder.AssetIdRemapUtility">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.AssetIdRemapUtility.dll</HintPath>
-    </Reference>
     <Reference Include="Unity.RenderPipelines.Universal.Runtime">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.RenderPipelines.Universal.Runtime.dll</HintPath>
-    </Reference>
-    <Reference Include="Unity.ProBuilder">
-      <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.ProBuilder.dll</HintPath>
     </Reference>
     <Reference Include="Unity.VisualScripting.State">
       <HintPath>C:\Users\trsai\BlackHoleRayMarcher\Library\ScriptAssemblies\Unity.VisualScripting.State.dll</HintPath>
@@ -1082,6 +1101,22 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="Unity.ProBuilder.Editor.csproj">
+      <Project>{ba696793-4224-8b5e-7695-45cbcfa61570}</Project>
+      <Name>Unity.ProBuilder.Editor</Name>
+    </ProjectReference>
+    <ProjectReference Include="Unity.ProBuilder.AddOns.Editor.csproj">
+      <Project>{a938d07e-421a-6eb9-8d26-9676430995e3}</Project>
+      <Name>Unity.ProBuilder.AddOns.Editor</Name>
+    </ProjectReference>
+    <ProjectReference Include="Unity.ProBuilder.AssetIdRemapUtility.csproj">
+      <Project>{848856aa-bf2e-e708-940d-8959288d2edf}</Project>
+      <Name>Unity.ProBuilder.AssetIdRemapUtility</Name>
+    </ProjectReference>
+    <ProjectReference Include="Unity.ProBuilder.csproj">
+      <Project>{7cd7d613-0006-4049-e31d-e63ed9318180}</Project>
+      <Name>Unity.ProBuilder</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it.

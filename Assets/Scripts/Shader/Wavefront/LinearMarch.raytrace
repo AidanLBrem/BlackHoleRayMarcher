@@ -1,0 +1,126 @@
+#pragma max_recursion_depth 1
+
+#include "Math.hlsl"
+#include "PixelFlags.hlsl"
+#include "BasicStructures.hlsl"
+
+struct control { uint flags; uint num_bounces; };
+struct ray     { float3 position; float3 direction; };
+struct blackhole
+{
+    float3 position;
+    float  schwarzchild_radius;
+    float  black_hole_soi_multiplier;
+};
+
+struct RayPayload
+{
+    bool   didHit;
+    float  t;
+    uint   instanceIndex;
+    uint   primitiveIndex;
+    float2 barycentrics;
+};
+
+RaytracingAccelerationStructure  _AccelStructure;
+RWStructuredBuffer<control>      controls  : register(u1);
+RWStructuredBuffer<ray>          main_rays : register(u2);
+RWStructuredBuffer<HitInfo>      hit_info_buffer : register(u3);
+StructuredBuffer<blackhole>      blackholes;
+int   num_black_holes;
+float renderDistance;
+
+float GetSOIRadius(int i)
+{
+    float rs = blackholes[i].schwarzchild_radius;
+    return max(rs * blackholes[i].black_hole_soi_multiplier, 4.0 * rs);
+}
+
+bool RayEntersSOI(float3 origin, float3 dir, float tMax, out float tEntry, out int bhIndex)
+{
+    tEntry  = tMax;
+    bhIndex = -1;
+    for (int i = 0; i < num_black_holes; i++)
+    {
+        float t = RaySphereEntryDistance(origin, dir, blackholes[i].position, GetSOIRadius(i));
+        if (t >= 0 && t < tEntry)
+        {
+            tEntry  = t;
+            bhIndex = i;
+        }
+    }
+    return bhIndex >= 0;
+}
+
+[shader("miss")]
+void Miss(inout RayPayload payload)
+{
+    payload.didHit = false;
+}
+
+[shader("closesthit")]
+void ClosestHit(inout RayPayload payload, BuiltInTriangleIntersectionAttributes attr)
+{
+    payload.didHit        = true;
+    payload.t             = RayTCurrent();
+    payload.instanceIndex = InstanceID();
+    payload.primitiveIndex = PrimitiveIndex();
+    payload.barycentrics  = attr.barycentrics;
+}
+
+[shader("raygeneration")]
+void RayGen()
+{
+    uint2 id         = DispatchRaysIndex().xy;
+    uint2 dims       = DispatchRaysDimensions().xy;
+    uint  pixelIndex = id.y * dims.x + id.x;
+    //hit_info_buffer is sent to reflection kernel and other places
+    hit_info_buffer[pixelIndex] = (HitInfo)0;
+    //dont march if we aren't set to!
+    if (!HasFlag(controls[pixelIndex].flags, FLAG_NEEDS_LINEAR_MARCH))
+        return;
+
+    ray r = main_rays[pixelIndex];
+
+    float tSOI;
+    int   bhIdx;
+    bool  entersSOI = RayEntersSOI(r.position, r.direction, renderDistance, tSOI, bhIdx);
+    float tMax      = entersSOI ? tSOI : renderDistance;
+
+    RayPayload payload = (RayPayload)0;
+
+    RayDesc rayDesc;
+    rayDesc.Origin    = r.position;
+    rayDesc.Direction = r.direction;
+    rayDesc.TMin      = 0.001;
+    rayDesc.TMax      = tMax;
+    //shoot ray and populate hit_info
+    TraceRay(_AccelStructure, RAY_FLAG_NONE, 0xFF, 0, 1, 0, rayDesc, payload);
+    hit_info_buffer[pixelIndex].didHit = payload.didHit;
+    hit_info_buffer[pixelIndex].distance = payload.t;
+    hit_info_buffer[pixelIndex].objectIndex = payload.instanceIndex;
+    hit_info_buffer[pixelIndex].triIndex = payload.primitiveIndex;
+    hit_info_buffer[pixelIndex].u = payload.barycentrics.x;
+    hit_info_buffer[pixelIndex].v = payload.barycentrics.y;
+    hit_info_buffer[pixelIndex].hitPoint = r.position;
+    //if we hit an object BEFORE entering an SOI
+    if (payload.didHit)
+    {
+        r.position = r.position + r.direction * payload.t;
+        main_rays[pixelIndex] = r;
+        controls[pixelIndex].flags = FLAG_NEEDS_SCATTER_LINEAR;
+
+    }
+    //if we hit an SOI BEFORE we hit an object (or if we miss entirely)
+    else if (entersSOI)
+    {
+        r.position = r.position + r.direction * tSOI;
+        main_rays[pixelIndex] = r;
+        controls[pixelIndex].flags = FLAG_NEEDS_GEODESIC_MARCH;
+    }
+    //Query skybox
+    else
+    {
+        controls[pixelIndex].flags = FLAG_NEEDS_SKYBOX;
+    }
+}

@@ -20,28 +20,29 @@ Shader "Custom/RayTracer"
             #pragma fragment frag
             #pragma target 5.0
 
-            #pragma shader_feature_local TEST_SPHERE
-            #pragma shader_feature_local TEST_TRIANGLE
-            #pragma shader_feature_local USE_LUT
-            #pragma shader_feature_local ENABLE_LENSING
-            #pragma shader_feature_local USE_TLAS
-            #pragma shader_feature_local USE_REDSHIFTING
-            #pragma shader_feature_local APPLY_RAYLEIGH
-            #pragma shader_feature_local APPLY_MIE
-            #pragma shader_feature_local APPLY_SUNDISK
-            #pragma shader_feature_local APPLY_SCATTERING
-            #pragma shader_feature_local APPLY_SUN_LIGHTING
-            #pragma shader_feature_local IMPACT_PARAMETER_DEBUG
-            #pragma shader_feature_local ORBITAL_PLANE_TEST_POSSIBLE
-            #pragma shader_feature_local DEBUG_DISPLAY_TRIANGLE_TESTS
-            #pragma shader_feature_local DEBUG_DISPLAY_BVH_NODES_VISITED
-            #pragma shader_feature_local DEBUG_DISPLAY_TLAS_NODE_VISITS
-            #pragma shader_feature_local DEBUG_DISPLAY_BLAS_NODE_VISITS
-            #pragma shader_feature_local DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS
-            #pragma shader_feature_local DEBUG_DISPLAY_TLAS_LEAF_REFS
-            #pragma shader_feature_local MARCH_CHORD_COLLISION_LIMIT
-            #pragma shader_feature_local USE_RAY_MAGNIFICATION
-            #pragma shader_feature_local APPLY_NEE
+            #pragma shader_feature  __ TEST_SPHERE
+            #pragma shader_feature  __ TEST_TRIANGLE
+            #pragma shader_feature  __ USE_LUT
+            #pragma shader_feature  __ ENABLE_LENSING
+            #pragma shader_feature  __ USE_TLAS
+            #pragma shader_feature  __ USE_REDSHIFTING
+            #pragma shader_feature  __ APPLY_RAYLEIGH
+            #pragma shader_feature  __ APPLY_MIE
+            #pragma shader_feature  __ APPLY_SUNDISK
+            #pragma shader_feature  __ APPLY_SCATTERING
+            #pragma shader_feature  __ APPLY_SUN_LIGHTING
+            #pragma shader_feature  __ IMPACT_PARAMETER_DEBUG
+            #pragma shader_feature  __ ORBITAL_PLANE_TEST_POSSIBLE
+            #pragma shader_feature  __ DEBUG_DISPLAY_TRIANGLE_TESTS
+            #pragma shader_feature  __ DEBUG_DISPLAY_BVH_NODES_VISITED
+            #pragma shader_feature  __ DEBUG_DISPLAY_TLAS_NODE_VISITS
+            #pragma shader_feature  __ DEBUG_DISPLAY_BLAS_NODE_VISITS
+            #pragma shader_feature  __ DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS
+            #pragma shader_feature  __ DEBUG_DISPLAY_TLAS_LEAF_REFS
+            #pragma shader_feature  __ MARCH_CHORD_COLLISION_LIMIT
+            #pragma shader_feature  __ USE_RAY_MAGNIFICATION
+            #pragma shader_feature  __ APPLY_NEE
+            #pragma enable_d3d11_debug_symbols
 			struct appdata
 			{
 				float4 vertex : POSITION;
@@ -150,12 +151,6 @@ Shader "Custom/RayTracer"
                 float blackHoleSOIMultiplier;
             };
 
-            struct v2f
-            {
-                float2 uv : TEXCOORD0;
-                float4 vertex : SV_POSITION;
-            };
-
             #define debug_steps 100
             #define MAX_MESHES 64
 
@@ -219,11 +214,11 @@ Shader "Custom/RayTracer"
             float inScatteringPoints;
             
             int u_StepsPerCollisionTest;
-            #include "Math.hlsl"
+            #include "Wavefront/Math.hlsl"
 
             #include "UnityCG.cginc"
             #include "StarRenderer.hlsl"
-            #include "GGX.hlsl"
+            #include "Wavefront/GGX.hlsl"
             struct OrbitalPlaneParameters
             {
                 float3 localOrbitalPlaneNormal;
@@ -412,12 +407,6 @@ Shader "Custom/RayTracer"
                 float bestWorldT = 3.402823e+38;
 
                 Mesh mesh = Instances[instanceIndex];
-
-                #ifdef ORBITAL_PLANE_TEST_POSSIBLE
-                    OrbitalPlaneParameters orbitalPlaneParameters =
-                        GetLocalOrbitalPlaneParameters(ray.position, BlackHoles[0].position, ray.direction, mesh.worldToLocalMatrix);
-                #endif
-
                 Ray localRay = ray;
                 localRay.position = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
 
@@ -496,14 +485,12 @@ Shader "Custom/RayTracer"
 
                     #ifdef ORBITAL_PLANE_TEST_POSSIBLE
                     AABBHitInfo lh = RayHitsBox(
-                        orbitalPlaneParameters,
                         localRay.position, localRay.direction, inverseDirection, 
                         leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
                         leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
                         bestLocalT);
 
                     AABBHitInfo rh = RayHitsBox(
-                        orbitalPlaneParameters,
                         localRay.position, localRay.direction, inverseDirection, 
                         rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
                         rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
@@ -571,12 +558,6 @@ Shader "Custom/RayTracer"
                 uint nodeIdx = TLASRootIndex;
                 float currentTNear = -1.0;
                 float3 inverseDirection = 1 / ray.direction;
-
-                #ifdef ORBITAL_PLANE_TEST_POSSIBLE
-                    OrbitalPlaneParameters orbitalPlaneParameters =
-                        GetWorldOrbitalPlaneParameters(ray.position, BlackHoles[0].position, ray.direction);
-                #endif
-
                 for (;;)
                 {
                     BVHTests++;
@@ -624,14 +605,12 @@ Shader "Custom/RayTracer"
 
                     #ifdef ORBITAL_PLANE_TEST_POSSIBLE
                     AABBHitInfo lh = RayHitsBox(
-                        orbitalPlaneParameters,
                         ray.position, ray.direction, inverseDirection, 
                         leftNode.AABBLeftX, leftNode.AABBLeftY, leftNode.AABBLeftZ,
                         leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ,
                         bestWorldT);
 
                     AABBHitInfo rh = RayHitsBox(
-                        orbitalPlaneParameters,
                         ray.position, ray.direction, inverseDirection, 
                         rightNode.AABBLeftX, rightNode.AABBLeftY, rightNode.AABBLeftZ,
                         rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ,
