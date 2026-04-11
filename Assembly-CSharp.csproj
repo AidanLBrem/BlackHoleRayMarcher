@@ -88,9 +88,9 @@
     <Compile Include="Assets\Scripts\FlyControls.cs" />
     <Compile Include="Assets\Scripts\BlackHole\LUT\BlackHoleBendingLUT.cs" />
     <Compile Include="Assets\Scripts\BVH\InstanceAdapter.cs" />
+    <None Include="Assets\Scripts\Shader\Wavefront\Accumulate.compute" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\ReferenceUnlit.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMPro.cginc" />
-    <None Include="Assets\Scripts\Shader\Wavefront\InitRay.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\NormalPreview.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile Overlay.shader" />
     <None Include="Assets\Scripts\Shader\ATrous.shader" />
@@ -99,7 +99,6 @@
     <None Include="Assets\TextMesh Pro\Shaders\TMP_Bitmap.shader" />
     <None Include="Assets\Scripts\Shader\Accumulator.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\LineBillboard.shader" />
-    <None Include="Assets\Scripts\Shader\Wavefront\ClassifyRay.shader" />
     <None Include="Assets\Scripts\Shader\Wavefront\LinearMarch.raytrace" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\VertexPicker.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\DiffuseTextureBlend.shader" />
@@ -108,7 +107,6 @@
     <None Include="Packages\com.unity.probuilder\Content\Shader\ScrollHighlight.shader" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF SSD.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\UnlitSolidColor.shader" />
-    <None Include="Assets\Scripts\Shader\Wavefront\Reflection.shader" />
     <None Include="Assets\Scripts\Shader\BlackHoleMarch2D.hlsl" />
     <None Include="Assets\Scripts\Shader\AtmosphereicScattering.hlsl" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\TransparentOverlay.shader" />
@@ -133,12 +131,14 @@
     <None Include="Packages\com.unity.probuilder\package.json" />
     <None Include="Assets\TextMesh Pro\Shaders\TMPro_Surface.cginc" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\ProBuilderCG.cginc" />
+    <None Include="Assets\Scripts\Shader\Wavefront\Classify.compute" />
     <None Include="Assets\TextMesh Pro\Resources\LineBreaking Following Characters.txt" />
     <None Include="Assets\Scripts\Shader\StarRenderer.hlsl" />
-    <None Include="Assets\Scripts\Shader\Wavefront\LinearMarch.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\PointBillboard.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\LinearMarch.compute" />
     <None Include="Assets\Scripts\Shader\Wavefront\GGX.hlsl" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile Masking.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\Reflection.compute" />
     <None Include="Assets\Scripts\Shader\Ditherer.shader" />
     <None Include="Assets\Scripts\Shader\Wavefront\FlagVisualizer.shader" />
     <None Include="Assets\Scripts\Shader\NEE.hlsl" />
@@ -147,8 +147,11 @@
     <None Include="Assets\TextMesh Pro\Shaders\TMP_Bitmap-Mobile.shader" />
     <None Include="Assets\TextMesh Pro\Fonts\LiberationSans - OFL.txt" />
     <None Include="Assets\Scripts\Shader\Wavefront\PixelFlags.hlsl" />
+    <None Include="Assets\Scripts\Shader\Wavefront\PixelIndex.hlsl" />
+    <None Include="Assets\Scripts\Shader\Wavefront\ShaderBoilerplate.hlsl" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\SelectionPicker.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\InitRay.compute" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\FaceHighlight.shader" />
     <None Include="Assets\TextMesh Pro\Sprites\EmojiOne.json" />
     <None Include="Assets\Scripts\Shader\ColorQuantization.shader" />

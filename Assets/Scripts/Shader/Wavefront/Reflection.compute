@@ -1,0 +1,282 @@
+#pragma kernel Main
+
+#include "Math.hlsl"
+#include "PixelFlags.hlsl"
+#include "BasicStructures.hlsl"
+#include "GGX.hlsl"
+
+uint _ScreenWidth;
+uint _ScreenHeight;
+
+RWStructuredBuffer<control>    controls;
+RWStructuredBuffer<ray>        main_rays;
+RWStructuredBuffer<HitInfo>    hit_info_buffer;
+RWStructuredBuffer<color_info> ray_color_info;
+RWStructuredBuffer<float3>     pixelAccum;
+
+bool HandleReflection(uint pixelIndex)
+{
+    HitInfo HitInfo = hit_info_buffer[pixelIndex];
+    if (!HitInfo.didHit)
+    {
+        controls[pixelIndex].flags = FLAG_NEEDS_SKYBOX;
+        return true;
+    }
+    ray ray = main_rays[pixelIndex];
+    color_info color_info = ray_color_info[pixelIndex];
+    float3 preBounceColor = color_info.rayColor;
+    RayTracingMaterial material = Instances[HitInfo.objectIndex].material;
+
+    // =======================
+    // EMISSION
+    // =======================
+    if (material.emissionStrength > 0.0)
+    {
+        //float g = 1 / ray.energy;
+        #ifndef USE_REDSHIFTING
+        //g = 1;
+        #endif
+        //float3 c = ApplyFakeRelativisticToneShift(material.emissiveColor.rgb, g, 1.0);
+        //float3 emittedLight = c * material.emissionStrength * (g * g * g);
+        float3 emittedLight = material.emissiveColor.rgb * material.emissionStrength/* * (g * g * g)*/;
+        color_info.incomingLight += emittedLight * preBounceColor;
+        ray_color_info[pixelIndex] = color_info;
+        controls[pixelIndex].flags = FLAG_DONE;
+        return true;
+    }
+
+    // =======================
+    // NORMAL SETUP
+    // =======================
+    Mesh mesh = Instances[HitInfo.objectIndex];
+    float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
+    float3 N;
+    float3 Ng;
+
+    if (HitInfo.triIndex == 0xFFFFFFFF)
+    {
+        // hardware RT path — normal already computed in world space by ClosestHit
+        N  = HitInfo.worldNormal;
+        Ng = N;
+    }
+    else
+    {
+        // software BVH path — compute from triangle data
+        uint triIndex = HitInfo.triIndex;
+        Triangle tri = Triangles[triIndex];
+
+        uint index1 = TriangleIndices[tri.baseIndex];
+        uint index2 = TriangleIndices[tri.baseIndex + 1];
+        uint index3 = TriangleIndices[tri.baseIndex + 2];
+
+        float3 n1 = Normals[index1];
+        float3 n2 = Normals[index2];
+        float3 n3 = Normals[index3];
+
+        N = normalize(
+            n1 * (1 - (HitInfo.u + HitInfo.v)) +
+            n2 * HitInfo.u +
+            n3 * HitInfo.v
+        );
+
+        N  = safeNormalize(mul(nMat, N));
+
+        float3 geomNormalLocal = normalize(cross(tri.edgeAB, tri.edgeAC));
+        Ng = safeNormalize(mul(nMat, geomNormalLocal));
+    }
+
+    if (dot(Ng, ray.direction) > 0) Ng = -Ng;
+    if (dot(N, Ng) < 0) N = -N;
+
+    /*if (bad3(ray.direction) || bad3(ray.rayColor) || bad3(N) || bad3(Ng))
+    {
+        ray.incomingLight = float3(0, 0, 0);
+        ray.rayEarlyKill = true;
+        return ray;
+    }*/
+
+    // =======================
+    // MATERIAL
+    // =======================
+    float3 baseColor = material.color;
+    float metallic   = saturate(material.metallicity);
+    float roughness  = saturate(material.roughness);
+
+    float3 dielectricF0 = float3(0.04, 0.04, 0.04);
+    float3 F0 = lerp(dielectricF0, baseColor, metallic);
+
+    float3 V    = -ray.direction;
+    float NdotV = max(dot(N, V), 1e-4);
+
+    float3 kd          = (1.0 - metallic);
+    float3 diffuseBRDF = kd * baseColor / PI;
+
+    // =======================
+    // DIRECT LIGHTING
+    // =======================
+    /*#ifdef APPLY_SUN_LIGHTING TODO: Impliment evaluateDirectSunAtHit
+    ray.incomingLight += evaluateDirectSunAtHit(
+        hitInfo.hitPoint, N, Ng, V,
+        material.color, material.metallicity, material.roughness, F0
+    );
+    #endif
+
+    #ifdef APPLY_SCATTERING
+    if (ray.numBounces == 1) TODO: Impliment Scattering
+    {
+        ray.incomingLight += calculateLight(
+            ray.ray.position,
+            ray.ray.direction,
+            hitInfo.distance,
+            rngState,
+            1
+        );
+    }
+    #endif*/
+
+    // =======================
+    // MIS SAMPLING
+    // =======================
+    float specWeight = luminance(F0);
+    float diffWeight = luminance(baseColor) * (1.0 - metallic);
+    float sum        = specWeight + diffWeight;
+    float specProb   = (sum > 0.0) ? specWeight / sum : 0.5;
+    specProb         = clamp(specProb, 0.01, 0.99);
+
+    float choose         = randomValue(controls[pixelIndex].rngState);
+    bool  sampleSpecular = (choose < specProb);
+
+    float3 L        = float3(0,0,0);
+    float  pdf_spec = 0.0;
+    float  pdf_diff = 0.0;
+    float3 specBRDF = float3(0,0,0);
+    float  NdotL    = 0.0;
+
+    if (sampleSpecular)
+    {
+        float2 xi = float2(0,0);
+        float3 H  = float3(0,0,0);
+        float NdotH, VdotH;
+        int attempts = 0;
+        const int maxAttempts = 10;
+        do
+        {
+            xi    = float2(randomValue(controls[pixelIndex].rngState), randomValue(controls[pixelIndex].rngState));
+            H     = sampleGGX_VNDF(xi, roughness, N, V);
+            L     = reflect(-V, H);
+            NdotL = dot(N, L);
+            attempts++;
+        } while (NdotL <= 0 && attempts < maxAttempts);
+
+        if (NdotL <= 0)
+        {
+            controls[pixelIndex].flags = FLAG_DONE;
+            return true;
+        }
+
+        NdotH = saturate(dot(N, H));
+        VdotH = max(dot(V, H), 1e-4);
+
+        float3 F  = FresnelSchlick(VdotH, F0);
+        float  D  = D_GGX(NdotH, roughness);
+        float  G  = G_SmithGGX(NdotV, NdotL, roughness);
+        specBRDF  = (F * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
+
+        float G1V   = G1_SmithGGX(NdotV, roughness);
+        float pdf_H = D * G1V * VdotH / max(NdotV, 1e-8);
+        pdf_spec    = pdf_H / max(4.0 * VdotH, 1e-8);
+        pdf_diff    = NdotL / PI;
+    }
+    else
+    {
+        float2 xi = float2(0,0);
+        int attempts    = 0;
+        int maxAttempts = 10;
+        do
+        {
+            xi    = float2(randomValue(controls[pixelIndex].rngState), randomValue((controls[pixelIndex].rngState)));
+            L     = toWorld(sampleCosineHemisphere(xi), N);
+            NdotL = dot(N, L);
+            attempts++;
+        } while (NdotL <= 0 && attempts < maxAttempts);
+
+        if (NdotL <= 0)
+        {
+            controls[pixelIndex].flags = FLAG_DONE;
+            return true;
+        }
+
+        pdf_diff = NdotL / PI;
+
+        float3 H    = normalize(V + L);
+        float NdotH = saturate(dot(N, H));
+        float VdotH = max(dot(V, H), 1e-4);
+
+        float D     = D_GGX(NdotH, roughness);
+        float G1V   = G1_SmithGGX(NdotV, roughness);
+        float pdf_H = D * G1V * VdotH / max(NdotV, 1e-8);
+        pdf_spec    = pdf_H / max(4.0 * VdotH, 1e-8);
+    }
+
+    // =======================
+    // MIS WEIGHTS
+    // =======================
+    float pdf_spec_w = pdf_spec * specProb;
+    float pdf_diff_w = pdf_diff * (1 - specProb);
+
+    float w_spec = (pdf_spec_w * pdf_spec_w) /
+        max(pdf_spec_w * pdf_spec_w + pdf_diff_w * pdf_diff_w, 1e-8);
+    float w_diff = (pdf_diff_w * pdf_diff_w) /
+        max(pdf_spec_w * pdf_spec_w + pdf_diff_w * pdf_diff_w, 1e-8);
+
+    float3 f      = diffuseBRDF + specBRDF;
+    float  pdf    = sampleSpecular ? pdf_spec_w : pdf_diff_w;
+    float  weight = sampleSpecular ? w_spec     : w_diff;
+
+    ray.direction = L;
+    color_info.rayColor *= f * NdotL * weight / max(pdf, 1e-8);
+    ray.position = HitInfo.hitPoint + (Ng * 1e-4);
+
+    // =======================
+    // NEE TODO: IMPLIMENT NEE
+    // =======================
+    /*#ifdef APPLY_NEE
+    if (ray.numBounces == 1)
+    {
+        ray.incomingLight += NEE(ray.ray.position, N, rngState) * diffuseBRDF * preBounceColor;
+    }
+    #endif*/
+
+    // =======================
+    // RUSSIAN ROULETTE
+    // =======================
+    float p = max(dot(color_info.rayColor, float3(0.2126, 0.7152, 0.0722)), 1e-4);
+    if (randomValue(controls[pixelIndex].rngState) > p)
+    {
+        controls[pixelIndex].flags = FLAG_DONE;
+        ray_color_info[pixelIndex] = color_info;
+        return true;
+    }
+
+    color_info.rayColor /= p;
+    ray_color_info[pixelIndex]      = color_info;
+    main_rays[pixelIndex].direction = ray.direction;
+    main_rays[pixelIndex].position  = ray.position;
+    controls[pixelIndex].flags      = FLAG_NEEDS_LINEAR_MARCH;
+    return false;
+}
+
+[numthreads(64,1,1)]
+void Main(uint3 id : SV_DispatchThreadID)
+{
+    uint pixelIndex = id.x;
+    if (pixelIndex >= _ScreenWidth * _ScreenHeight) return;
+
+    if (!HasFlag(controls[pixelIndex].flags, FLAG_NEEDS_REFLECTION))
+        return;
+
+    bool done = HandleReflection(pixelIndex);
+
+    if (done)
+        pixelAccum[pixelIndex] += ray_color_info[pixelIndex].incomingLight;
+}

@@ -16,4 +16,6 @@ struct MeshStruct {
     public float AABBRightY;
     public float AABBRightZ;
 
+    public uint triangleOffset;
+
 };

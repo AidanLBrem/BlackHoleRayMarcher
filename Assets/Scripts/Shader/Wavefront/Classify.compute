@@ -1,0 +1,46 @@
+#pragma kernel Main
+
+#include "Math.hlsl"
+#include "PixelFlags.hlsl"
+#include "BasicStructures.hlsl"
+
+uint _ScreenWidth;
+uint _ScreenHeight;
+
+RWStructuredBuffer<control> controls;
+RWStructuredBuffer<ray>     main_rays;
+
+float GetBlackHoleMarchShellRadius(int i)
+{
+    float rs = blackholes[i].schwarzchild_radius;
+    return max(rs * blackholes[i].black_hole_soi_multiplier, 4.0 * rs);
+}
+
+// True if the point is inside any BH march shell.
+bool IsInsideAnyMarchShell(float3 pos)
+{
+    for (int i = 0; i < num_black_holes; i++)
+    {
+        float shell = GetBlackHoleMarchShellRadius(i);
+        if (PointInsideSphere(pos, blackholes[i].position, shell))
+            return true;
+    }
+    return false;
+}
+
+[numthreads(64,1,1)]
+void Main(uint3 id : SV_DispatchThreadID)
+{
+    uint pixelIndex = id.x;
+    if (pixelIndex >= _ScreenWidth * _ScreenHeight) return;
+
+    if (HasFlag(controls[pixelIndex].flags, FLAG_DONE)) // no need to reclassify if done
+        return;
+
+    float3 position = main_rays[pixelIndex].position;
+
+    if (IsInsideAnyMarchShell(position))
+        controls[pixelIndex].flags = FLAG_NEEDS_GEODESIC_MARCH;
+    else
+        controls[pixelIndex].flags = FLAG_NEEDS_LINEAR_MARCH;
+}

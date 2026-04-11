@@ -43,11 +43,8 @@ Shader "Custom/RayTracer"
             #pragma shader_feature  __ USE_RAY_MAGNIFICATION
             #pragma shader_feature  __ APPLY_NEE
             #pragma enable_d3d11_debug_symbols
-			struct appdata
-			{
-				float4 vertex : POSITION;
-				float2 uv : TEXCOORD0;
-			};
+			struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
+            struct v2f     { float4 vertex : SV_POSITION; float2 uv : TEXCOORD0; };
             
             struct RayTracingMaterial
 			{
@@ -127,6 +124,7 @@ Shader "Custom/RayTracer"
                 float AABBRightX;
                 float AABBRightY;
                 float AABBRightZ;
+                uint triangleOffset;
             };
 
             struct BVHNode
@@ -214,9 +212,9 @@ Shader "Custom/RayTracer"
             float inScatteringPoints;
             
             int u_StepsPerCollisionTest;
-            #include "Wavefront/Math.hlsl"
-
+            
             #include "UnityCG.cginc"
+            #include "Wavefront/Math.hlsl"
             #include "StarRenderer.hlsl"
             #include "Wavefront/GGX.hlsl"
             struct OrbitalPlaneParameters

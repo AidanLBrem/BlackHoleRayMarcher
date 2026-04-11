@@ -4,6 +4,7 @@ struct HitInfo
     bool didHit;
     float distance;
     float3 hitPoint;
+    float3 worldNormal;  
     float u;
     float v;
     uint triIndex;
@@ -58,6 +59,8 @@ struct Mesh
     float AABBRightX;
     float AABBRightY;
     float AABBRightZ;
+    
+    uint triangleOffset;
 };
 
 struct BVHNode
@@ -74,6 +77,19 @@ struct BVHNode
     float AABBRightY;
     float AABBRightZ;
 };
+struct color_info
+{
+    float3 rayColor;
+    float3 incomingLight;
+};
+struct control   { uint flags; uint rngState; };
+struct ray       { float3 position; float3 direction; };
+struct blackhole
+{
+    float3 position;
+    float  schwarzchild_radius;
+    float  black_hole_soi_multiplier;
+};
 StructuredBuffer<Mesh>     Instances;
 StructuredBuffer<Triangle> Triangles;
 StructuredBuffer<uint>     TriangleIndices;
@@ -82,6 +98,9 @@ StructuredBuffer<float3>   Vertices;
 StructuredBuffer<BVHNode>  BVHNodes;
 StructuredBuffer<BVHNode>  TLASNodes;
 StructuredBuffer<uint>     TLASRefs;
+StructuredBuffer<blackhole>      blackholes;
+uint num_black_holes;
+
 AABBHitInfo RayAABB(float3 rayOrigin, float3 rayDirection, float3 inverseDirection, float3 boxMin, float3 boxMax, float distanceToBeat)
 {
     float3 invDir = inverseDirection;

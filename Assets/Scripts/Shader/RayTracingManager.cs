@@ -721,6 +721,7 @@ public class RayTracingManager : MonoBehaviour
                 AABBRightX = worldBounds.max.x,
                 AABBRightY = worldBounds.max.y,
                 AABBRightZ = worldBounds.max.z,
+                triangleOffset = (uint)off.triangleOffset
             };
 
             if (meshObj.material.emissiveStrength > 0)

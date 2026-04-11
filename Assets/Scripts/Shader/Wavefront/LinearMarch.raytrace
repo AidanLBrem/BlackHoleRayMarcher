@@ -1,17 +1,9 @@
 #pragma max_recursion_depth 1
-
+#include "UnityCG.cginc"
+#include "ShaderBoilerplate.hlsl"
 #include "Math.hlsl"
 #include "PixelFlags.hlsl"
 #include "BasicStructures.hlsl"
-
-struct control { uint flags; uint num_bounces; };
-struct ray     { float3 position; float3 direction; };
-struct blackhole
-{
-    float3 position;
-    float  schwarzchild_radius;
-    float  black_hole_soi_multiplier;
-};
 
 struct RayPayload
 {
@@ -20,14 +12,15 @@ struct RayPayload
     uint   instanceIndex;
     uint   primitiveIndex;
     float2 barycentrics;
+    float3 worldNormal;
+    float3 hitPoint;    
 };
 
 RaytracingAccelerationStructure  _AccelStructure;
-RWStructuredBuffer<control>      controls  : register(u1);
-RWStructuredBuffer<ray>          main_rays : register(u2);
+RWStructuredBuffer<control>      controls        : register(u1);
+RWStructuredBuffer<ray>          main_rays       : register(u2);
 RWStructuredBuffer<HitInfo>      hit_info_buffer : register(u3);
-StructuredBuffer<blackhole>      blackholes;
-int   num_black_holes;
+
 float renderDistance;
 
 float GetSOIRadius(int i)
@@ -66,6 +59,27 @@ void ClosestHit(inout RayPayload payload, BuiltInTriangleIntersectionAttributes 
     payload.instanceIndex = InstanceID();
     payload.primitiveIndex = PrimitiveIndex();
     payload.barycentrics  = attr.barycentrics;
+
+    // look up normal from our own buffers — built in original mesh order,
+    // so triangleOffset + PrimitiveIndex() maps correctly
+    uint triIndex  = Instances[InstanceID()].triangleOffset + PrimitiveIndex();
+    uint baseIndex = triIndex * 3;
+
+    uint i0 = TriangleIndices[baseIndex + 0];
+    uint i1 = TriangleIndices[baseIndex + 1];
+    uint i2 = TriangleIndices[baseIndex + 2];
+
+    float3 n0 = Normals[i0];
+    float3 n1 = Normals[i1];
+    float3 n2 = Normals[i2];
+
+    float2 uv          = attr.barycentrics;
+    float3 localNormal = n0 * (1 - uv.x - uv.y) + n1 * uv.x + n2 * uv.y;
+
+    // transform normal to world space
+    float3x3 normalMat  = (float3x3)WorldToObject3x4();
+    payload.worldNormal = normalize(mul(transpose(normalMat), localNormal));
+    payload.hitPoint    = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
 }
 
 [shader("raygeneration")]
@@ -97,19 +111,20 @@ void RayGen()
     //shoot ray and populate hit_info
     TraceRay(_AccelStructure, RAY_FLAG_NONE, 0xFF, 0, 1, 0, rayDesc, payload);
     hit_info_buffer[pixelIndex].didHit = payload.didHit;
-    hit_info_buffer[pixelIndex].distance = payload.t;
-    hit_info_buffer[pixelIndex].objectIndex = payload.instanceIndex;
-    hit_info_buffer[pixelIndex].triIndex = payload.primitiveIndex;
-    hit_info_buffer[pixelIndex].u = payload.barycentrics.x;
-    hit_info_buffer[pixelIndex].v = payload.barycentrics.y;
-    hit_info_buffer[pixelIndex].hitPoint = r.position;
-    //if we hit an object BEFORE entering an SOI
+
     if (payload.didHit)
     {
-        r.position = r.position + r.direction * payload.t;
+        hit_info_buffer[pixelIndex].distance    = payload.t;
+        hit_info_buffer[pixelIndex].objectIndex = payload.instanceIndex;
+        hit_info_buffer[pixelIndex].triIndex    = 0xFFFFFFFF; // signals precomputed normal to reflection shader
+        hit_info_buffer[pixelIndex].u           = payload.barycentrics.x;
+        hit_info_buffer[pixelIndex].v           = payload.barycentrics.y;
+        hit_info_buffer[pixelIndex].hitPoint    = payload.hitPoint;
+        hit_info_buffer[pixelIndex].worldNormal = payload.worldNormal;
+        r.position = payload.hitPoint;
         main_rays[pixelIndex] = r;
-        controls[pixelIndex].flags = FLAG_NEEDS_SCATTER_LINEAR;
-
+        controls[pixelIndex].flags = SetFlag(controls[pixelIndex].flags, FLAG_NEEDS_REFLECTION);
+        return;
     }
     //if we hit an SOI BEFORE we hit an object (or if we miss entirely)
     else if (entersSOI)

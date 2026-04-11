@@ -1,10 +1,4 @@
 #define PI 3.1415926
-#include "UnityShaderVariables.cginc"
-struct v2f
-{
-    float2 uv : TEXCOORD0;
-    float4 vertex : SV_POSITION;
-};
 const float2x2 bayerMatrix2x2 = float2x2(
     0.0, 2.0,
     3.0, 1.0
@@ -199,34 +193,3 @@ float RaySphereExitDistance(
     return -1.0;
 }
 
-float3 orderedDither(float2 uv , float3 color, float lum, int matrixSize)
-{
-    float threshold = 0;
-    int x,y;
-    switch (matrixSize)
-    {
-    case 2:
-        x = int(uv.x * _ScreenParams.x) % 2;
-        y = int(uv.y * _ScreenParams.y) % 2;   
-        threshold = bayerMatrix2x2[y][x];
-        break;
-    case 4:
-        x = int(uv.x * _ScreenParams.x) % 4;
-        y = int(uv.y * _ScreenParams.y) % 4;
-        threshold = bayerMatrix4x4[y][x];
-        break;
-    }
-    if (lum < threshold)
-    {
-        return float3(0,0,0);
-    }
-    return color;
-}
-
-int getPixelIndex(v2f i)
-{
-    uint2 numPixels = _ScreenParams.xy;
-    uint2 pixelCoord = i.uv * numPixels;
-    uint pixelIndex = pixelCoord.y * numPixels.x + pixelCoord.x; //get pixel index
-    return pixelIndex;
-}

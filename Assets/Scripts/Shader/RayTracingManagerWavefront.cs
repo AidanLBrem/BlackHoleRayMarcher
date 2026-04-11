@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.VisualScripting;
@@ -27,9 +26,13 @@ public class RayTracingManagerWavefront : MonoBehaviour
     public int tlasMaxDepth = 32;
     public int tlasNumBins = 8;
 
-    Material initMaterial;
-    private Material classifyMaterial;
-    private Material LinearMarchMaterial;
+    [Header("Compute Kernels")]
+    public ComputeShader initCompute;
+    public ComputeShader classifyCompute;
+    public ComputeShader linearMarchCompute;
+    public ComputeShader reflectionCompute;
+    public ComputeShader accumulateCompute;
+
     public int marchStepsCount;
     public float renderDistance;
     public int raysPerPixel;
@@ -53,16 +56,20 @@ public class RayTracingManagerWavefront : MonoBehaviour
     [NonSerialized] private ComputeBuffer controlBuffer;
     [NonSerialized] private ComputeBuffer mainRayBuffer;
     [NonSerialized] private ComputeBuffer HitInfoBuffer;
+    [NonSerialized] private ComputeBuffer rayColorInfoBuffer;
     [NonSerialized] ComputeBuffer blackHoleBuffer;
+    [NonSerialized] private ComputeBuffer pixelAccumBuffer;
 
     private bool tlasDirty = true;
     private int lastInstanceCount = -1;
     private bool buffersHaveRealData = false;
+    private bool lastForceSoftware = false;
 
     [Header("Debug")]
     public bool forceBufferRecreation = false;
     public Shader flagVisualizerShader;
     private Material flagVisualizerMaterial;
+
     [Header("Atmosphere")]
     public bool applyScattering = true;
     public bool applyRayleigh = true;
@@ -90,54 +97,50 @@ public class RayTracingManagerWavefront : MonoBehaviour
     public Transform sun;
 
     RenderTexture resultTexture;
-    private RenderTexture cleanAccumBuffer;
-
-    [Header("Post Processing")]
-    //public Shader rayTracingShader;
-    public Shader InitShader;
-    public Shader ClassifyShader;
 
     [Header("Ray Tracing")]
     public bool forceSoftwareRaytracing;
-    public Shader linearMarchShader;
     public RayTracingShader linearMarchRaytraceShader;
     private RayTracingAccelerationStructure accelStructure;
 
-    [Header("Accumulation")]
+    [Header("Temporal Accumulation")]
     public Shader accumulatorShader;
+    private Material accumulatorMaterial;
     public float accumWeight = 1.0f;
+    private RenderTexture cleanAccumBuffer;
+    private float lastRenderScale = -1f;
 
     [Header("Color Quantization")]
     public Shader ColorQuantizationShader;
     public bool colorQuantization = false;
     public int numColors = 256;
+    private Material colorQuantizationMaterial;
 
     [Header("Dithering")]
     public Shader ditherShader;
     public bool ditherPostProcess = false;
     public bool ditherBeforeUpscale = false;
     public int ditherMatrixSize = 4;
+    private Material ditherMaterial;
 
     [Header("A-Trous Filter")]
     public bool atrousFilter = false;
     public Shader atrousShader;
     public float atrousColorSigma = 0.6f;
-    Material atrousMaterial;
+    private Material atrousMaterial;
+    public bool atrousBeforeUpscale = false;
 
     [Header("Pixel Sizing")]
     [Range(0.05f, 1.0f)]
     public float renderScale = 0.5f;
-    public bool atrousBeforeUpscale = false;
 
     int numRenderedFrames = 0;
     private int baseSeed = 0;
     public int emergencyBreakMaxSteps = 1000;
     public float numFrames = 10000;
-    bool stopRendering = false;
 
     public bool renderSphere = true;
     public bool renderTriangles = true;
-
     public float strongFieldRadPerMeterCuttoff = 0.01f;
 
     static readonly List<Vector3> tV = new();
@@ -172,9 +175,12 @@ public class RayTracingManagerWavefront : MonoBehaviour
     int lastScreenWidth;
     int lastScreenHeight;
     bool historyInitialized = false;
-    private float lastRenderScale = -1f;
+
+    int scaledW = 1;
+    int scaledH = 1;
 
     void Swap(ref RenderTexture a, ref RenderTexture b) => (a, b) = (b, a);
+
     [Flags]
     public enum PixelFlags : uint
     {
@@ -188,29 +194,12 @@ public class RayTracingManagerWavefront : MonoBehaviour
         NeedsSkybox         = 1 << 6,
         Done                = 1 << 7,
     }
-    struct Control //carries flags and numBounces, needs to be sent to everyone
-    {
-        private uint flags;
-        private uint numBounces;
-    }
 
-    struct MainRay //Carried between pretty much all structs. Needs to be persistant as these numbers are used as starting points for NEE and Scattering
-    {
-        public Vector3 rayOrigin;
-        public Vector3 rayDirection;
-    }
+    struct Control       { private uint flags; private uint rngState; }
+    struct MainRay       { public Vector3 rayOrigin; public Vector3 rayDirection; }
+    struct RayColorInfo  { private float3 rayColor; private float3 incomingLight; }
+    struct Energy        { private float energy; }
 
-    struct RayColorInfo 
-    {
-        private float3 rayColor;
-        private float3 incomingLight;
-    }
-
-    struct Energy
-    {
-        private float energy;
-    }
-    
     struct MeshOffsets
     {
         public int vertexOffset;
@@ -224,6 +213,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
         private uint didHit;
         private float distance;
         private Vector3 hitPoint;
+        private Vector3 worldNormal;  
         private float u;
         private float v;
         private uint triIndex;
@@ -249,11 +239,8 @@ public class RayTracingManagerWavefront : MonoBehaviour
         float fovDelta = Mathf.Abs(cam.fieldOfView - lastCameraFov);
 
         bool changed =
-            posDelta > 0.0005f ||
-            rotDelta > 0.05f ||
-            fovDelta > 0.01f ||
-            Screen.width != lastScreenWidth ||
-            Screen.height != lastScreenHeight;
+            posDelta > 0.0005f || rotDelta > 0.05f || fovDelta > 0.01f ||
+            Screen.width != lastScreenWidth || Screen.height != lastScreenHeight;
 
         if (changed)
         {
@@ -269,28 +256,14 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
     void Awake()
     {
-        /*
-        ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
-        ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
-        ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
-        ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
-        ShaderHelper.InitMaterial(atrousShader, ref atrousMaterial);*/
-    
         EnsureBuffersCreated();
         EnsureMaterialsCreated();
-        BindBuffersToMaterial();
-
+        BindBuffersToShaders();
         UpdateCameraParams(Camera.current != null ? Camera.current : GetComponent<Camera>());
         ApplyRaytracingMode();
         ShaderVariantCollection variants = Resources.Load<ShaderVariantCollection>("RayTracerVariants");
-        if (variants == null)
-            Debug.LogError("RayTracerVariants not found in Resources");
-        else
-        {
-            //Debug.Log("Variant count: " + variants.variantCount);
-            variants.WarmUp();
-            //Debug.Log("Warmed up: " + variants.isWarmedUp);
-        }
+        if (variants == null) Debug.LogError("RayTracerVariants not found in Resources");
+        else variants.WarmUp();
     }
 
     void OnEnable()
@@ -304,167 +277,146 @@ public class RayTracingManagerWavefront : MonoBehaviour
     void OnValidate()
     {
         tlasDirty = true;
-        /*
-        rayTracingMaterial = null;
+        buffersHaveRealData = false;
+        lastInstanceCount = -1;
+        flagVisualizerMaterial = null;
         accumulatorMaterial = null;
         ditherMaterial = null;
         colorQuantizationMaterial = null;
-        atrousMaterial = null;*/
-        classifyMaterial = null;
-        initMaterial = null;
-        LinearMarchMaterial = null;
-        buffersHaveRealData = false;
+        atrousMaterial = null;
         numRenderedFrames = 0;
+        EnsureBuffersCreated();
+        EnsureMaterialsCreated();
+        BindBuffersToShaders();
+        UpdateCameraParams(Camera.current != null ? Camera.current : GetComponent<Camera>());
+        ApplyRaytracingMode();
     }
 
-    void OnDestroy()
-    {
-        ReleaseBuffers();
-    }
-
-    void OnApplicationQuit()
-    {
-        ReleaseBuffers();
-    }
+    void OnDestroy()         { ReleaseBuffers(); }
+    void OnApplicationQuit() { ReleaseBuffers(); }
 
     void ReleaseBuffers()
     {
-        /*sphereBuffer?.Release();
-
-        MeshVerticesBuffer?.Release();
-        MeshNormalsBuffer?.Release();
-        MeshIndicesBuffer?.Release();
-        TriangleBuffer?.Release();
-        BVHBuffer?.Release();
-        TLASBuffer?.Release();
-        TLASRefBuffer?.Release();
-        InstanceBuffer?.Release();
-        LightSourceBuffer?.Release();
-        LightTriangleIndicesBuffer?.Release();
-        LightTrianglesDataBuffer?.Release();
-
-        sphereBuffer = null;
-
-        MeshVerticesBuffer = null;
-        MeshNormalsBuffer = null;
-        MeshIndicesBuffer = null;
-        TriangleBuffer = null;
-        BVHBuffer = null;
-        TLASBuffer = null;
-        TLASRefBuffer = null;
-        InstanceBuffer = null;
-        LightSourceBuffer = null;
-        LightTriangleIndicesBuffer = null;
-        LightTrianglesDataBuffer = null;*/
         controlBuffer?.Release();
         mainRayBuffer?.Release();
         blackHoleBuffer?.Release();
         HitInfoBuffer?.Release();
         blackHoleBuffer = null;
         buffersHaveRealData = false;
-        if (accelStructure != null)
-        {
-            accelStructure.Release();
-            accelStructure = null;
-        }
+        rayColorInfoBuffer?.Release();
+        rayColorInfoBuffer = null;
+        pixelAccumBuffer?.Release();
+        pixelAccumBuffer = null;
+        if (accelStructure != null) { accelStructure.Release(); accelStructure = null; }
     }
 
     void EnsureBuffersCreated(bool forceRecreate = false)
     {
         int pixelCount = Screen.width * Screen.height;
-        if (forceRecreate)
-            ReleaseBuffers();
+        if (forceRecreate) ReleaseBuffers();
 
-        if (TriangleBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<Triangle>(ref TriangleBuffer, 1);
-        if (BVHBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<GPUBVHNode>(ref BVHBuffer, 1);
-        if (TLASBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<GPUBVHNode>(ref TLASBuffer, 1);
-        if (TLASRefBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<uint>(ref TLASRefBuffer, 1);
-        if (InstanceBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<MeshStruct>(ref InstanceBuffer, 1);
-        if (MeshVerticesBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<Vector3>(ref MeshVerticesBuffer, 1);
-        if (MeshNormalsBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<Vector3>(ref MeshNormalsBuffer, 1);
-        if (MeshIndicesBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<uint>(ref MeshIndicesBuffer, 1);
-        if (LightSourceBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<GPULightSource>(ref LightSourceBuffer, 1);
-        if (LightTriangleIndicesBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<int>(ref LightTriangleIndicesBuffer, 1);
-        if (LightTrianglesDataBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<GPULightTriangleData>(ref LightTrianglesDataBuffer, 1);
-        if (sphereBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<Sphere>(ref sphereBuffer, 1);
-        if (controlBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<Control>(ref controlBuffer, pixelCount);
-        if (mainRayBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<MainRay>(ref mainRayBuffer, pixelCount);
-        if (blackHoleBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<BlackHole>(ref blackHoleBuffer, 1);
-        if (HitInfoBuffer == null)
-            ShaderHelper.CreateStructuredBuffer<HitInfo>(ref HitInfoBuffer, pixelCount);
+        if (TriangleBuffer == null)             ShaderHelper.CreateStructuredBuffer<Triangle>(ref TriangleBuffer, 1);
+        if (BVHBuffer == null)                  ShaderHelper.CreateStructuredBuffer<GPUBVHNode>(ref BVHBuffer, 1);
+        if (TLASBuffer == null)                 ShaderHelper.CreateStructuredBuffer<GPUBVHNode>(ref TLASBuffer, 1);
+        if (TLASRefBuffer == null)              ShaderHelper.CreateStructuredBuffer<uint>(ref TLASRefBuffer, 1);
+        if (InstanceBuffer == null)             ShaderHelper.CreateStructuredBuffer<MeshStruct>(ref InstanceBuffer, 1);
+        if (MeshVerticesBuffer == null)         ShaderHelper.CreateStructuredBuffer<Vector3>(ref MeshVerticesBuffer, 1);
+        if (MeshNormalsBuffer == null)          ShaderHelper.CreateStructuredBuffer<Vector3>(ref MeshNormalsBuffer, 1);
+        if (MeshIndicesBuffer == null)          ShaderHelper.CreateStructuredBuffer<uint>(ref MeshIndicesBuffer, 1);
+        if (LightSourceBuffer == null)          ShaderHelper.CreateStructuredBuffer<GPULightSource>(ref LightSourceBuffer, 1);
+        if (LightTriangleIndicesBuffer == null) ShaderHelper.CreateStructuredBuffer<int>(ref LightTriangleIndicesBuffer, 1);
+        if (LightTrianglesDataBuffer == null)   ShaderHelper.CreateStructuredBuffer<GPULightTriangleData>(ref LightTrianglesDataBuffer, 1);
+        if (sphereBuffer == null)               ShaderHelper.CreateStructuredBuffer<Sphere>(ref sphereBuffer, 1);
+        if (controlBuffer == null)              ShaderHelper.CreateStructuredBuffer<Control>(ref controlBuffer, pixelCount);
+        if (mainRayBuffer == null)              ShaderHelper.CreateStructuredBuffer<MainRay>(ref mainRayBuffer, pixelCount);
+        if (blackHoleBuffer == null)            ShaderHelper.CreateStructuredBuffer<BlackHole>(ref blackHoleBuffer, 1);
+        if (HitInfoBuffer == null)              ShaderHelper.CreateStructuredBuffer<HitInfo>(ref HitInfoBuffer, pixelCount);
+        if (rayColorInfoBuffer == null)         ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref rayColorInfoBuffer, pixelCount);
+        if (pixelAccumBuffer == null)           ShaderHelper.CreateStructuredBuffer<Vector3>(ref pixelAccumBuffer, pixelCount);
     }
 
     void EnsureMaterialsCreated()
     {
-        if (initMaterial == null)
-            ShaderHelper.InitMaterial(InitShader, ref initMaterial);
-        if (classifyMaterial == null) 
-            ShaderHelper.InitMaterial(ClassifyShader, ref classifyMaterial);
         if (flagVisualizerMaterial == null && flagVisualizerShader != null)
             flagVisualizerMaterial = new Material(flagVisualizerShader);
-        if (LinearMarchMaterial == null)
-        {
-            ShaderHelper.InitMaterial(linearMarchShader, ref LinearMarchMaterial);
-            ApplyRaytracingMode();
-        }
+        if (accumulatorMaterial == null && accumulatorShader != null)
+            ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
+        if (ditherMaterial == null && ditherShader != null)
+            ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
+        if (colorQuantizationMaterial == null && ColorQuantizationShader != null)
+            ShaderHelper.InitMaterial(ColorQuantizationShader, ref colorQuantizationMaterial);
+        if (atrousMaterial == null && atrousShader != null)
+            ShaderHelper.InitMaterial(atrousShader, ref atrousMaterial);
     }
 
-    void BindBuffersToMaterial()
+    void BindBuffersToShaders()
     {
-        if (initMaterial == null || classifyMaterial == null || LinearMarchMaterial == null || flagVisualizerMaterial == null) return;
-    
+        if (initCompute == null || classifyCompute == null || linearMarchCompute == null ||
+            reflectionCompute == null || accumulateCompute == null || flagVisualizerMaterial == null) return;
+
         BindInitBuffers();
         BindClassifyBuffers();
         BindLinearMarchBuffers();
+        BindReflectionBuffers();
+        BindAccumulateBuffers();
         BindFlagVisualizerBuffers();
     }
 
     void BindInitBuffers()
     {
-        initMaterial.SetBuffer("controls",  controlBuffer);
-        initMaterial.SetBuffer("main_rays", mainRayBuffer);
+        if (initCompute == null) return;
+        initCompute.SetBuffer(0, "controls",        controlBuffer);
+        initCompute.SetBuffer(0, "main_rays",       mainRayBuffer);
+        initCompute.SetBuffer(0, "ray_color_info",  rayColorInfoBuffer);
+        initCompute.SetBuffer(0, "hit_info_buffer", HitInfoBuffer);
     }
 
     void BindClassifyBuffers()
     {
-        classifyMaterial.SetBuffer("controls",   controlBuffer);
-        classifyMaterial.SetBuffer("main_rays",  mainRayBuffer);
-        classifyMaterial.SetBuffer("blackholes", blackHoleBuffer);
+        if (classifyCompute == null) return;
+        classifyCompute.SetBuffer(0, "controls",   controlBuffer);
+        classifyCompute.SetBuffer(0, "main_rays",  mainRayBuffer);
+        classifyCompute.SetBuffer(0, "blackholes", blackHoleBuffer);
     }
 
     void BindLinearMarchBuffers()
     {
-        bool usingSoftware = !SystemInfo.supportsRayTracing || forceSoftwareRaytracing;
-        if (usingSoftware)
-        {
-            LinearMarchMaterial.SetBuffer("Triangles",       TriangleBuffer);
-            LinearMarchMaterial.SetBuffer("BVHNodes",        BVHBuffer);
-            LinearMarchMaterial.SetBuffer("TLASNodes",       TLASBuffer);
-            LinearMarchMaterial.SetBuffer("TLASRefs",        TLASRefBuffer);
-            LinearMarchMaterial.SetBuffer("Instances",       InstanceBuffer);
-            LinearMarchMaterial.SetBuffer("Vertices",        MeshVerticesBuffer);
-            LinearMarchMaterial.SetBuffer("Normals",         MeshNormalsBuffer);
-            LinearMarchMaterial.SetBuffer("TriangleIndices", MeshIndicesBuffer);
-        }
-        LinearMarchMaterial.SetBuffer("controls",        controlBuffer);
-        LinearMarchMaterial.SetBuffer("main_rays",       mainRayBuffer);
-        LinearMarchMaterial.SetBuffer("blackholes",      blackHoleBuffer);
-        LinearMarchMaterial.SetBuffer("hit_info_buffer", HitInfoBuffer);
+        if (linearMarchCompute == null) return;
+        linearMarchCompute.SetBuffer(0, "controls",        controlBuffer);
+        linearMarchCompute.SetBuffer(0, "main_rays",       mainRayBuffer);
+        linearMarchCompute.SetBuffer(0, "hit_infos",       HitInfoBuffer);
+        linearMarchCompute.SetBuffer(0, "blackholes",      blackHoleBuffer);
+        linearMarchCompute.SetBuffer(0, "Triangles",       TriangleBuffer);
+        linearMarchCompute.SetBuffer(0, "BVHNodes",        BVHBuffer);
+        linearMarchCompute.SetBuffer(0, "TLASNodes",       TLASBuffer);
+        linearMarchCompute.SetBuffer(0, "TLASRefs",        TLASRefBuffer);
+        linearMarchCompute.SetBuffer(0, "Instances",       InstanceBuffer);
+        linearMarchCompute.SetBuffer(0, "Vertices",        MeshVerticesBuffer);
+        linearMarchCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
+        linearMarchCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
+    }
+
+    void BindReflectionBuffers()
+    {
+        if (reflectionCompute == null) return;
+        reflectionCompute.SetBuffer(0, "controls",        controlBuffer);
+        reflectionCompute.SetBuffer(0, "main_rays",       mainRayBuffer);
+        reflectionCompute.SetBuffer(0, "hit_info_buffer", HitInfoBuffer);
+        reflectionCompute.SetBuffer(0, "ray_color_info",  rayColorInfoBuffer);
+        reflectionCompute.SetBuffer(0, "pixelAccum",      pixelAccumBuffer);
+        reflectionCompute.SetBuffer(0, "Instances",       InstanceBuffer);
+        reflectionCompute.SetBuffer(0, "Triangles",       TriangleBuffer);
+        reflectionCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
+        reflectionCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
+        reflectionCompute.SetBuffer(0, "BVHNodes",        BVHBuffer);
+        reflectionCompute.SetBuffer(0, "TLASNodes",       TLASBuffer);
+        reflectionCompute.SetBuffer(0, "TLASRefs",        TLASRefBuffer);
+    }
+
+    void BindAccumulateBuffers()
+    {
+        if (accumulateCompute == null) return;
+        accumulateCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
     }
 
     void BindFlagVisualizerBuffers()
@@ -472,15 +424,102 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (flagVisualizerMaterial == null) return;
         flagVisualizerMaterial.SetBuffer("controls",        controlBuffer);
         flagVisualizerMaterial.SetBuffer("hit_info_buffer", HitInfoBuffer);
-        flagVisualizerMaterial.SetBuffer("Instances", InstanceBuffer);
+        flagVisualizerMaterial.SetBuffer("Instances",       InstanceBuffer);
     }
-    private int[] accelStructureInstanceIDs;
-    private RayTracedMesh[] lastBuiltMeshOrder; // ADD THIS FIELD
-    void BuildAccelStructure()
-    {
 
-        if (accelStructure != null)
-            accelStructure.Release();
+    void DispatchCompute(ComputeShader cs, int pixelCount)
+    {
+        cs.Dispatch(0, Mathf.CeilToInt(pixelCount / 64f), 1, 1);
+    }
+
+    private int[] accelStructureInstanceIDs;
+    private RayTracedMesh[] lastBuiltMeshOrder;
+
+    // Builds vertex/normal/index/triangle buffers in ORIGINAL mesh order to match
+    // hardware RT's PrimitiveIndex(), which also returns original mesh triangle order.
+    // Populates gpuInstances[i].triangleOffset = sum of raw tri counts of prior meshes.
+    void BuildHardwareGeometryBuffers(List<RayTracedMesh> meshes, MeshStruct[] gpuInstances)
+    {
+        int totalVerts = 0, totalTris = 0;
+        for (int i = 0; i < meshes.Count; i++)
+        {
+            MeshFilter filter = meshes[i].GetComponent<MeshFilter>();
+            if (filter == null) continue;
+            totalVerts += filter.sharedMesh.vertexCount;
+            totalTris  += (int)filter.sharedMesh.GetIndexCount(0) / 3;
+        }
+
+        List<float3> vertices        = new(totalVerts);
+        List<float3> normals         = new(totalVerts);
+        Triangle[]   triangles       = new Triangle[Mathf.Max(1, totalTris)];
+        uint[]       triangleIndices = new uint[Mathf.Max(1, totalTris * 3)];
+
+        int vertexOffset   = 0;
+        int triangleOffset = 0;
+
+        for (int i = 0; i < meshes.Count; i++)
+        {
+            MeshFilter filter = meshes[i].GetComponent<MeshFilter>();
+            if (filter == null) continue;
+            Mesh mesh = filter.sharedMesh;
+
+            mesh.GetVertices(tV);
+            mesh.GetNormals(tN);
+
+            for (int v = 0; v < tV.Count; v++) vertices.Add(tV[v]);
+            if (tN.Count == tV.Count)
+                for (int n = 0; n < tN.Count; n++) normals.Add(tN[n]);
+            else
+                for (int n = 0; n < tV.Count; n++) normals.Add(Vector3.up);
+
+            int[] meshTris    = mesh.triangles;
+            int   rawTriCount = meshTris.Length / 3;
+
+            // store triangleOffset so shader can do triangleOffset + PrimitiveIndex()
+            gpuInstances[i].triangleOffset = (uint)triangleOffset;
+
+            for (int t = 0; t < rawTriCount; t++)
+            {
+                int globalTriIndex = triangleOffset + t;
+                int triIndexBase   = globalTriIndex * 3;
+                int v0 = meshTris[t * 3 + 0];
+                int v1 = meshTris[t * 3 + 1];
+                int v2 = meshTris[t * 3 + 2];
+
+                triangles[globalTriIndex] = new Triangle
+                {
+                    baseIndex = (uint)triIndexBase,
+                    edgeAB    = (Vector3)tV[v1] - (Vector3)tV[v0],
+                    edgeAC    = (Vector3)tV[v2] - (Vector3)tV[v0],
+                };
+
+                triangleIndices[triIndexBase + 0] = (uint)(vertexOffset + v0);
+                triangleIndices[triIndexBase + 1] = (uint)(vertexOffset + v1);
+                triangleIndices[triIndexBase + 2] = (uint)(vertexOffset + v2);
+            }
+
+            vertexOffset   += mesh.vertexCount;
+            triangleOffset += rawTriCount;
+            tV.Clear(); tN.Clear();
+        }
+
+        ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, vertices);
+        ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer,  normals);
+        ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer,     triangles);
+        ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer,  triangleIndices);
+
+        // bind to reflection shader so normal lookup works on hardware RT hits
+        if (reflectionCompute != null)
+        {
+            reflectionCompute.SetBuffer(0, "Triangles",       TriangleBuffer);
+            reflectionCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
+            reflectionCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
+        }
+    }
+
+    void BuildAccelStructure(List<RayTracedMesh> meshes)
+    {
+        if (accelStructure != null) accelStructure.Release();
 
         RayTracingAccelerationStructure.Settings settings = new RayTracingAccelerationStructure.Settings
         {
@@ -491,89 +530,70 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
         accelStructure = new RayTracingAccelerationStructure(settings);
 
-        RayTracedMesh[] meshes = FindObjectsOfType<RayTracedMesh>();
-        lastBuiltMeshOrder = meshes; // STORE THE ORDER
-        accelStructureInstanceIDs = new int[meshes.Length];
-        MeshStruct[] gpuInstances = new MeshStruct[meshes.Length];
-        for (int i = 0; i < meshes.Length; i++)
+        lastBuiltMeshOrder = meshes.ToArray();
+        accelStructureInstanceIDs = new int[meshes.Count];
+        MeshStruct[] gpuInstances = new MeshStruct[meshes.Count];
+
+        // build geometry buffers first — populates gpuInstances[i].triangleOffset
+        BuildHardwareGeometryBuffers(meshes, gpuInstances);
+
+        for (int i = 0; i < meshes.Count; i++)
         {
-            RayTracedMesh m = meshes[i];
+            RayTracedMesh m       = meshes[i];
             MeshRenderer renderer = m.GetComponent<MeshRenderer>();
-            MeshFilter filter = m.GetComponent<MeshFilter>();
+            MeshFilter   filter   = m.GetComponent<MeshFilter>();
             if (renderer == null || filter == null) continue;
 
             RayTracingMeshInstanceConfig config = new RayTracingMeshInstanceConfig
             {
-                mesh         = filter.sharedMesh,
-                subMeshIndex = 0,
-                material     = renderer.sharedMaterial,
+                mesh                  = filter.sharedMesh,
+                subMeshIndex          = 0,
+                material              = renderer.sharedMaterial,
+                enableTriangleCulling = false, // off for future refraction support
             };
 
-            accelStructureInstanceIDs[i] = accelStructure.AddInstance(config, m.transform.localToWorldMatrix, null, (uint)i);
-            gpuInstances[i] = new MeshStruct
-            {
-                localToWorldMatrix = meshes[i].transform.localToWorldMatrix,
-                worldToLocalMatrix = meshes[i].transform.worldToLocalMatrix,
-                material           = meshes[i].material,
-            };
+            accelStructureInstanceIDs[i] = accelStructure.AddInstance(
+                config, m.transform.localToWorldMatrix, null, (uint)i);
+
+            // triangleOffset already set by BuildHardwareGeometryBuffers above
+            gpuInstances[i].localToWorldMatrix = m.transform.localToWorldMatrix;
+            gpuInstances[i].worldToLocalMatrix = m.transform.worldToLocalMatrix;
+            gpuInstances[i].material           = m.material;
+            gpuInstances[i].firstBVHNodeIndex  = 0; // not used on hardware path
         }
-        
+
         ShaderHelper.UploadStructuredBuffer(ref InstanceBuffer, gpuInstances);
-        flagVisualizerMaterial.SetBuffer("Instances", InstanceBuffer);
+
+        if (flagVisualizerMaterial != null)
+            flagVisualizerMaterial.SetBuffer("Instances", InstanceBuffer);
+        if (reflectionCompute != null)
+            reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
 
         accelStructure.Build();
     }
 
     void DispatchHardwareLinearMarch(int width, int height)
     {
-        if (linearMarchRaytraceShader == null)
-        {
-            Debug.LogError("linearMarchRaytraceShader is not assigned!");
-            return;
-        }
-        if (accelStructure == null)
-        {
-            Debug.LogError("accelStructure is null, was BuildAccelStructure called?");
-            return;
-        }
+        if (linearMarchRaytraceShader == null) { Debug.LogError("linearMarchRaytraceShader not assigned!"); return; }
+        if (accelStructure == null)            { Debug.LogError("accelStructure is null!"); return; }
 
         linearMarchRaytraceShader.SetAccelerationStructure("_AccelStructure", accelStructure);
-        linearMarchRaytraceShader.SetBuffer("controls",       controlBuffer);
-        linearMarchRaytraceShader.SetBuffer("main_rays",      mainRayBuffer);
-        flagVisualizerMaterial.SetBuffer("hit_info_buffer",      HitInfoBuffer);
-        flagVisualizerMaterial.SetBuffer("Instances", InstanceBuffer);
-        linearMarchRaytraceShader.SetBuffer("hit_info_buffer",      HitInfoBuffer);
-        linearMarchRaytraceShader.SetFloat ("renderDistance", renderDistance);
-        linearMarchRaytraceShader.Dispatch ("RayGen", width, height, 1);
+        linearMarchRaytraceShader.SetBuffer("controls",        controlBuffer);
+        linearMarchRaytraceShader.SetBuffer("main_rays",       mainRayBuffer);
+        linearMarchRaytraceShader.SetBuffer("hit_info_buffer", HitInfoBuffer);
+        linearMarchRaytraceShader.SetBuffer("Instances",       InstanceBuffer);
+        linearMarchRaytraceShader.SetBuffer("Normals",         MeshNormalsBuffer);
+        linearMarchRaytraceShader.SetBuffer("TriangleIndices", MeshIndicesBuffer);
+        if (flagVisualizerMaterial != null)
+        {
+            flagVisualizerMaterial.SetBuffer("hit_info_buffer", HitInfoBuffer);
+            flagVisualizerMaterial.SetBuffer("Instances",       InstanceBuffer);
+        }
+        linearMarchRaytraceShader.SetFloat("renderDistance",   renderDistance);
+        linearMarchRaytraceShader.Dispatch("RayGen",           width, height, 1);
     }
-    void UpdateAtmosphereParams()
-    {
-        /*
-        rayTracingMaterial.SetFloat("atmosphereRadius", atmosphereRadius);
-        rayTracingMaterial.SetFloat("planetRadius", planetRadius);
-        rayTracingMaterial.SetFloat("densityFalloffRayleigh", densityFalloffRayleigh);
-        rayTracingMaterial.SetFloat("densityFalloffMie", densityFalloffMie);
-        rayTracingMaterial.SetFloat("mieForwardScatter", mieForwardScatter);
-        rayTracingMaterial.SetFloat("mieBackwardScatter", mieBackwardScatter);
-        rayTracingMaterial.SetInt("numOpticalDepthPoints", numOpticalDepthPoints);
-        rayTracingMaterial.SetInt("inScatteringPoints", inScatteringPoints);
-        rayTracingMaterial.SetVector("rayleighScatteringCoefficients", rayleighScatteringCoefficients);
-        rayTracingMaterial.SetVector("mieScatteringCoefficients", new Vector3(
-            mieScatteringCoefficients.x,
-            mieScatteringCoefficients.y,
-            mieScatteringCoefficients.z));
-        rayTracingMaterial.SetVector("sunLightColor", new Vector3(
-            sunLightColor.r * sunLightIntensity,
-            sunLightColor.g * sunLightIntensity,
-            sunLightColor.b * sunLightIntensity));
-        rayTracingMaterial.SetVector("sunDirection", sun != null ? Vector3.Normalize(-sun.forward) : Vector3.up);
-        rayTracingMaterial.SetInt("framesPerScatter", framesPerScatter);
 
-        if (!accumulateInGameView)
-            rayTracingMaterial.SetInt("framesPerScatter", 1);
-
-        DirectionalGeodesic2DLutSolver.StepSize = blackHoleSOIStepSize;*/
-    }
+    void UpdateAtmosphereParams() { }
 
     List<RayTracedMesh> GetValidMeshInstances()
     {
@@ -584,8 +604,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
         {
             RayTracedMesh m = allMeshes[i];
             if (m == null) continue;
-            if (m.sharedMesh == null)
-                m.RebuildStaticData();
+            if (m.sharedMesh == null) m.RebuildStaticData();
             if (m.sharedMesh == null) continue;
             if (m.sharedMesh.mesh == null) continue;
             if (m.sharedMesh.buildTriangles == null || m.sharedMesh.buildTriangles.Length == 0) continue;
@@ -601,120 +620,98 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
     List<SharedMeshData> GetUniqueSharedMeshes(List<RayTracedMesh> validInstances)
     {
-        HashSet<SharedMeshData> seen = new();
-        List<SharedMeshData> unique = new();
+        HashSet<SharedMeshData> seen   = new();
+        List<SharedMeshData>    unique = new();
 
         for (int i = 0; i < validInstances.Count; i++)
         {
             SharedMeshData sm = validInstances[i].sharedMesh;
             if (sm == null) continue;
-            if (seen.Add(sm))
-                unique.Add(sm);
+            if (seen.Add(sm)) unique.Add(sm);
         }
 
         return unique;
     }
 
-    bool AnyInstanceNeedsUpdate(List<RayTracedMesh> validInstances)
-    {
-        for (int i = 0; i < validInstances.Count; i++)
-            if (validInstances[i].update) return true;
-        return false;
-    }
+    bool AnyInstanceNeedsUpdate(List<RayTracedMesh> v) { for (int i = 0; i < v.Count; i++) if (v[i].update) return true; return false; }
+    bool AnyTransformDirty(List<RayTracedMesh> v)      { for (int i = 0; i < v.Count; i++) if (v[i].transformDirty) return true; return false; }
 
-    bool AnyTransformDirty(List<RayTracedMesh> validInstances)
-    {
-        for (int i = 0; i < validInstances.Count; i++)
-            if (validInstances[i].transformDirty) return true;
-        return false;
-    }
-    void ApplyRaytracingMode()
-    {   
-    }
+    void ApplyRaytracingMode() { }
+
     void AllocateAccelerationBuffers()
     {
         bool useHardwareRT = SystemInfo.supportsRayTracing && !forceSoftwareRaytracing;
         List<RayTracedMesh> validInstances = GetValidMeshInstances();
+
+        // force full rebuild when switching between hardware/software
+        if (forceSoftwareRaytracing != lastForceSoftware)
+        {
+            tlasDirty = true;
+            buffersHaveRealData = false;
+            lastInstanceCount = -1;
+            lastForceSoftware = forceSoftwareRaytracing;
+        }
+
         if (useHardwareRT)
         {
-            bool anyTransformDirty = AnyTransformDirty(validInstances);
-            bool anyMeshUpdated = AnyInstanceNeedsUpdate(validInstances);
+            bool anyTransformDirty    = AnyTransformDirty(validInstances);
+            bool anyMeshUpdated       = AnyInstanceNeedsUpdate(validInstances);
             bool instanceCountChanged = validInstances.Count != lastInstanceCount;
 
             if (tlasDirty || anyMeshUpdated || instanceCountChanged)
             {
-                // full rebuild — geometry or instances changed
-                BuildAccelStructure();
+                // always build geometry first so offsets are ready for BuildAccelStructure
+                List<SharedMeshData> uniqueSharedMeshes = GetUniqueSharedMeshes(validInstances);
+                Dictionary<SharedMeshData, MeshOffsets> offsets = ComputeMeshOffsets(uniqueSharedMeshes);
+                //BuildGlobalBLASGeometry(uniqueSharedMeshes, validInstances, offsets);
+                BuildAccelStructure(validInstances);
+
                 tlasDirty = false;
                 lastInstanceCount = validInstances.Count;
-                for (int i = 0; i < validInstances.Count; i++)
-                    validInstances[i].update = false;
+                for (int i = 0; i < validInstances.Count; i++) validInstances[i].update = false;
             }
             else if (anyTransformDirty)
             {
-                MeshStruct[] gpuInstances = new MeshStruct[lastBuiltMeshOrder.Length];
                 for (int i = 0; i < lastBuiltMeshOrder.Length && i < accelStructureInstanceIDs.Length; i++)
-                {
-                    accelStructure.UpdateInstanceTransform(accelStructureInstanceIDs[i], lastBuiltMeshOrder[i].transform.localToWorldMatrix);
-                }
+                    accelStructure.UpdateInstanceTransform(
+                        accelStructureInstanceIDs[i],
+                        lastBuiltMeshOrder[i].transform.localToWorldMatrix);
                 accelStructure.Build();
             }
 
-            for (int i = 0; i < validInstances.Count; i++)
-                validInstances[i].transformDirty = false;
-
+            for (int i = 0; i < validInstances.Count; i++) validInstances[i].transformDirty = false;
             return;
         }
 
-        // software path — unchanged below
-        if (forceBufferRecreation)
-        {
-            buffersHaveRealData = false;
-            tlasDirty = true;
-            forceBufferRecreation = false;
-        }
-
-
+        // software path
+        if (forceBufferRecreation) { buffersHaveRealData = false; tlasDirty = true; forceBufferRecreation = false; }
         if (validInstances.Count == 0) { EnsureBuffersCreated(); return; }
+        if (validInstances.Count != lastInstanceCount) { tlasDirty = true; lastInstanceCount = validInstances.Count; }
 
-        if (validInstances.Count != lastInstanceCount)
-        {
-            tlasDirty = true;
-            lastInstanceCount = validInstances.Count;
-        }
-
-        List<SharedMeshData> uniqueSharedMeshes = GetUniqueSharedMeshes(validInstances);
-        Dictionary<SharedMeshData, MeshOffsets> offsets = ComputeMeshOffsets(uniqueSharedMeshes);
-        BuildGlobalBLASGeometry(uniqueSharedMeshes, validInstances, offsets);
-        BuildAndUploadTLAS(validInstances, offsets);
+        List<SharedMeshData> uniqueMeshes = GetUniqueSharedMeshes(validInstances);
+        Dictionary<SharedMeshData, MeshOffsets> softOffsets = ComputeMeshOffsets(uniqueMeshes);
+        BuildGlobalBLASGeometry(uniqueMeshes, validInstances, softOffsets);
+        BuildAndUploadTLAS(validInstances, softOffsets);
     }
 
     Dictionary<SharedMeshData, MeshOffsets> ComputeMeshOffsets(List<SharedMeshData> sharedMeshes)
     {
         Dictionary<SharedMeshData, MeshOffsets> offsets = new(sharedMeshes.Count);
-
-        int vertexOffset = 0;
-        int triangleOffset = 0;
-        int blasOffset = 0;
+        int vertexOffset = 0, triangleOffset = 0, blasOffset = 0;
 
         for (int i = 0; i < sharedMeshes.Count; i++)
         {
             SharedMeshData mesh = sharedMeshes[i];
-            int localRootIndex = mesh.blas.RootIndex;
-
-            MeshOffsets entry = new MeshOffsets
+            offsets.Add(mesh, new MeshOffsets
             {
-                vertexOffset = vertexOffset,
+                vertexOffset   = vertexOffset,
                 triangleOffset = triangleOffset,
                 blasNodeOffset = blasOffset,
-                rootNodeIndex = blasOffset + localRootIndex
-            };
-
-            offsets.Add(mesh, entry);
-
-            vertexOffset += mesh.mesh.vertexCount;
+                rootNodeIndex  = blasOffset + mesh.blas.RootIndex
+            });
+            vertexOffset   += mesh.mesh.vertexCount;
             triangleOffset += mesh.blas.PrimitiveRefs.Length;
-            blasOffset += mesh.GPUBVH.Count;
+            blasOffset     += mesh.GPUBVH.Count;
         }
 
         return offsets;
@@ -722,211 +719,182 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
     void BuildGlobalBLASGeometry(
         List<SharedMeshData> sharedMeshes,
-        List<RayTracedMesh> validInstances,
+        List<RayTracedMesh>  validInstances,
         Dictionary<SharedMeshData, MeshOffsets> offsets)
     {
-        int totalVertexCount = 0;
-        int totalTris = 0;
-        int totalBVHNodes = 0;
+        int totalVertexCount = 0, totalTris = 0, totalBVHNodes = 0;
 
         for (int i = 0; i < sharedMeshes.Count; i++)
         {
-            SharedMeshData sm = sharedMeshes[i];
-            totalVertexCount += sm.mesh.vertexCount;
-            totalTris += sm.blas.PrimitiveRefs.Length;
-            totalBVHNodes += sm.GPUBVH.Count;
+            totalVertexCount += sharedMeshes[i].mesh.vertexCount;
+            totalTris        += sharedMeshes[i].blas.PrimitiveRefs.Length;
+            totalBVHNodes    += sharedMeshes[i].GPUBVH.Count;
         }
 
         bool anyMeshMarkedUpdated = AnyInstanceNeedsUpdate(validInstances);
+        bool needTriangles = !buffersHaveRealData || TriangleBuffer == null || TriangleBuffer.count != Mathf.Max(1, totalTris)     || anyMeshMarkedUpdated;
+        bool needBVH       = !buffersHaveRealData || BVHBuffer      == null || BVHBuffer.count      != Mathf.Max(1, totalBVHNodes) || anyMeshMarkedUpdated;
+        bool needVertices  = !buffersHaveRealData || MeshVerticesBuffer == null || MeshNormalsBuffer == null || MeshIndicesBuffer == null || anyMeshMarkedUpdated;
 
-        bool needTriangles = !buffersHaveRealData || TriangleBuffer == null || TriangleBuffer.count != Mathf.Max(1, totalTris) || anyMeshMarkedUpdated;
-        bool needBVH = !buffersHaveRealData || BVHBuffer == null || BVHBuffer.count != Mathf.Max(1, totalBVHNodes) || anyMeshMarkedUpdated;
-        bool needVertices = !buffersHaveRealData || MeshVerticesBuffer == null || MeshNormalsBuffer == null || MeshIndicesBuffer == null || anyMeshMarkedUpdated;
-
-        if (!(needTriangles || needBVH || needVertices))
-            return;
+        if (!(needTriangles || needBVH || needVertices)) return;
 
         tlasDirty = true;
-
         float startTime = Time.realtimeSinceStartup;
 
-        Triangle[] triangles = new Triangle[Mathf.Max(1, totalTris)];
-        uint[] triangleIndices = new uint[Mathf.Max(1, totalTris * 3)];
-        GPUBVHNode[] blasNodes = new GPUBVHNode[Mathf.Max(1, totalBVHNodes)];
-
-        List<float3> vertices = new(totalVertexCount);
-        List<float3> normals = new(totalVertexCount);
-
+        Triangle[]   triangles       = new Triangle[Mathf.Max(1, totalTris)];
+        uint[]       triangleIndices = new uint[Mathf.Max(1, totalTris * 3)];
+        GPUBVHNode[] blasNodes       = new GPUBVHNode[Mathf.Max(1, totalBVHNodes)];
+        List<float3> vertices        = new(totalVertexCount);
+        List<float3> normals         = new(totalVertexCount);
         int degenerateTriangles = 0;
 
         for (int i = 0; i < sharedMeshes.Count; i++)
         {
             SharedMeshData sharedMesh = sharedMeshes[i];
-            MeshOffsets off = offsets[sharedMesh];
+            MeshOffsets    off        = offsets[sharedMesh];
 
             sharedMesh.mesh.GetVertices(tV);
             sharedMesh.mesh.GetNormals(tN);
 
-            for (int v = 0; v < tV.Count; v++)
-                vertices.Add(tV[v]);
-
+            for (int v = 0; v < tV.Count; v++) vertices.Add(tV[v]);
             if (tN.Count == tV.Count)
-            {
-                for (int n = 0; n < tN.Count; n++)
-                    normals.Add(tN[n]);
-            }
+                for (int n = 0; n < tN.Count; n++) normals.Add(tN[n]);
             else
-            {
-                for (int n = 0; n < tV.Count; n++)
-                    normals.Add(Vector3.up);
-            }
+                for (int n = 0; n < tV.Count; n++) normals.Add(Vector3.up);
 
             int[] meshTriangles = sharedMesh.mesh.triangles;
 
-            for (int j = 0; j < sharedMesh.GPUBVH.Count; j++)
-            {
-                GPUBVHNode node = sharedMesh.GPUBVH[j];
-                if (node.left != -1) node.left += off.blasNodeOffset;
-                if (node.right != -1) node.right += off.blasNodeOffset;
-                node.firstIndex += (uint)off.triangleOffset;
-                blasNodes[off.blasNodeOffset + j] = node;
-            }
-
+            // ── Build triangles in BVH ORDER (PrimitiveRefs) ─────────────
+            // Software BVH leaf firstIndex points to slots in this order.
+            // Hardware path uses BuildHardwareGeometryBuffers instead.
             int[] order = sharedMesh.blas.PrimitiveRefs;
             for (int t = 0; t < order.Length; t++)
             {
-                int triId = order[t];
-                ref buildTri bt = ref sharedMesh.buildTriangles[triId];
-
-                int baseIndex = bt.triangleIndex;
-                int v1 = meshTriangles[baseIndex + 0];
-                int v2 = meshTriangles[baseIndex + 1];
-                int v3 = meshTriangles[baseIndex + 2];
-
-                Vector3 edgeAB = bt.posB - bt.posA;
-                Vector3 edgeAC = bt.posC - bt.posA;
-
-                int globalTriIndex = off.triangleOffset + t;
-                int triIndexBase = globalTriIndex * 3;
+                ref buildTri bt             = ref sharedMesh.buildTriangles[order[t]];
+                int          globalTriIndex = off.triangleOffset + t;
+                int          triIndexBase   = globalTriIndex * 3;
 
                 triangles[globalTriIndex] = new Triangle
                 {
                     baseIndex = (uint)triIndexBase,
-                    edgeAB = edgeAB,
-                    edgeAC = edgeAC,
+                    edgeAB    = bt.posB - bt.posA,
+                    edgeAC    = bt.posC - bt.posA,
                 };
 
-                triangleIndices[triIndexBase + 0] = (uint)(off.vertexOffset + v1);
-                triangleIndices[triIndexBase + 1] = (uint)(off.vertexOffset + v2);
-                triangleIndices[triIndexBase + 2] = (uint)(off.vertexOffset + v3);
+                triangleIndices[triIndexBase + 0] = (uint)(off.vertexOffset + meshTriangles[bt.triangleIndex + 0]);
+                triangleIndices[triIndexBase + 1] = (uint)(off.vertexOffset + meshTriangles[bt.triangleIndex + 1]);
+                triangleIndices[triIndexBase + 2] = (uint)(off.vertexOffset + meshTriangles[bt.triangleIndex + 2]);
             }
 
-            tV.Clear();
-            tN.Clear();
+            // ── Build BVH nodes ───────────────────────────────────────────
+            for (int j = 0; j < sharedMesh.GPUBVH.Count; j++)
+            {
+                GPUBVHNode node = sharedMesh.GPUBVH[j];
+                if (node.left  != -1) node.left  += off.blasNodeOffset;
+                if (node.right != -1) node.right += off.blasNodeOffset;
+                // firstIndex is a slot index into the BVH-ordered triangle buffer
+                node.firstIndex += (uint)off.triangleOffset;
+                blasNodes[off.blasNodeOffset + j] = node;
+            }
+
+            tV.Clear(); tN.Clear();
         }
 
         PerfTimer.Time("StructuredVertexBufferCreation", () =>
             ShaderHelper.CreateStructuredBuffer(ref MeshVerticesBuffer, vertices));
 
-        ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer, normals);
-        ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer, triangles);
-        ShaderHelper.CreateStructuredBuffer(ref BVHBuffer, blasNodes);
-        ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer, triangleIndices);
+        ShaderHelper.CreateStructuredBuffer(ref MeshNormalsBuffer,  normals);
+        ShaderHelper.CreateStructuredBuffer(ref TriangleBuffer,     triangles);
+        ShaderHelper.CreateStructuredBuffer(ref BVHBuffer,          blasNodes);
+        ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer,  triangleIndices);
 
-        LinearMarchMaterial.SetBuffer("Triangles",       TriangleBuffer);
-        LinearMarchMaterial.SetBuffer("BVHNodes",        BVHBuffer);
-        LinearMarchMaterial.SetBuffer("Vertices",        MeshVerticesBuffer);
-        LinearMarchMaterial.SetBuffer("Normals",         MeshNormalsBuffer);
-        LinearMarchMaterial.SetBuffer("TriangleIndices", MeshIndicesBuffer);
-        LinearMarchMaterial.SetInt("numBLASNodes", totalBVHNodes);
+        if (linearMarchCompute != null)
+        {
+            linearMarchCompute.SetBuffer(0, "Triangles",       TriangleBuffer);
+            linearMarchCompute.SetBuffer(0, "BVHNodes",        BVHBuffer);
+            linearMarchCompute.SetBuffer(0, "Vertices",        MeshVerticesBuffer);
+            linearMarchCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
+            linearMarchCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
+            linearMarchCompute.SetInt("numBLASNodes",          totalBVHNodes);
+        }
 
-        for (int i = 0; i < validInstances.Count; i++)
-            validInstances[i].update = false;
+        if (reflectionCompute != null)
+        {
+            reflectionCompute.SetBuffer(0, "Triangles",       TriangleBuffer);
+            reflectionCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
+            reflectionCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
+            reflectionCompute.SetBuffer(0, "BVHNodes",        BVHBuffer);
+        }
 
-        float endTime = Time.realtimeSinceStartup;
-        Debug.Log($"BLAS/global geometry upload took {(endTime - startTime) * 1000f:F3} ms, allocated triangles" + TriangleBuffer.count);
-        Debug.Log("Warning: " + degenerateTriangles + " degenerate triangles detected");
+        for (int i = 0; i < validInstances.Count; i++) validInstances[i].update = false;
+
+        Debug.Log($"BLAS/global geometry upload took {(Time.realtimeSinceStartup - startTime) * 1000f:F3} ms, triangles: {TriangleBuffer.count}");
+        Debug.Log($"Warning: {degenerateTriangles} degenerate triangles detected");
     }
 
     void BuildAndUploadTLAS(
         List<RayTracedMesh> meshObjects,
         Dictionary<SharedMeshData, MeshOffsets> offsets)
     {
-        //Debug.Log($"BuildAndUploadTLAS LinearMarchMaterial instanceID: {LinearMarchMaterial.GetInstanceID()}\n{System.Environment.StackTrace}");
-        if (!tlasDirty && TLASBuffer != null && buffersHaveRealData)
-            return;
+        if (!tlasDirty && TLASBuffer != null && buffersHaveRealData) return;
         tlasDirty = false;
 
-        for (int i = 0; i < meshObjects.Count; i++)
-            meshObjects[i].transformDirty = false;
-        BvhInstance[] instances = new BvhInstance[meshObjects.Count];
-        MeshStruct[] gpuInstances = new MeshStruct[meshObjects.Count];
+        for (int i = 0; i < meshObjects.Count; i++) meshObjects[i].transformDirty = false;
 
-        GPULightSource[] lightSources = new GPULightSource[meshObjects.Count];
-        List<int> lightTriangleIndices = new List<int>();
-        List<GPULightTriangleData> lightTrianglesData = new List<GPULightTriangleData>();
+        BvhInstance[]              instances            = new BvhInstance[meshObjects.Count];
+        MeshStruct[]               gpuInstances         = new MeshStruct[meshObjects.Count];
+        GPULightSource[]           lightSources         = new GPULightSource[meshObjects.Count];
+        List<int>                  lightTriangleIndices = new List<int>();
+        List<GPULightTriangleData> lightTrianglesData   = new List<GPULightTriangleData>();
         int numLightSources = 0;
 
         for (int i = 0; i < meshObjects.Count; i++)
         {
-            RayTracedMesh meshObj = meshObjects[i];
-            MeshOffsets off = offsets[meshObj.sharedMesh];
-
-            int localRootIndex = meshObj.sharedMesh.blas.RootIndex;
-            Bounds localRootBounds = meshObj.sharedMesh.blas.Nodes[localRootIndex].bounds;
-            Bounds worldBounds = TransformBoundsToWorld(localRootBounds, meshObj.transform);
-            int globalBlasRootIndex = off.rootNodeIndex;
+            RayTracedMesh meshObj             = meshObjects[i];
+            MeshOffsets   off                 = offsets[meshObj.sharedMesh];
+            int           localRootIndex      = meshObj.sharedMesh.blas.RootIndex;
+            Bounds        localRootBounds     = meshObj.sharedMesh.blas.Nodes[localRootIndex].bounds;
+            Bounds        worldBounds         = TransformBoundsToWorld(localRootBounds, meshObj.transform);
+            int           globalBlasRootIndex = off.rootNodeIndex;
 
             instances[i] = new BvhInstance
             {
-                blasIndex = i,
-                blasRootIndex = globalBlasRootIndex,
+                blasIndex = i, blasRootIndex = globalBlasRootIndex,
                 localToWorld = meshObj.transform.localToWorldMatrix,
                 worldToLocal = meshObj.transform.worldToLocalMatrix,
-                localBounds = localRootBounds,
-                worldBounds = worldBounds,
-                materialIndex = i
+                localBounds = localRootBounds, worldBounds = worldBounds, materialIndex = i
             };
 
             gpuInstances[i] = new MeshStruct
             {
                 localToWorldMatrix = meshObj.transform.localToWorldMatrix,
                 worldToLocalMatrix = meshObj.transform.worldToLocalMatrix,
-                material = meshObj.material,
-                firstBVHNodeIndex = (uint)globalBlasRootIndex,
-                AABBLeftX = worldBounds.min.x,
-                AABBLeftY = worldBounds.min.y,
-                AABBLeftZ = worldBounds.min.z,
-                AABBRightX = worldBounds.max.x,
-                AABBRightY = worldBounds.max.y,
-                AABBRightZ = worldBounds.max.z,
+                material           = meshObj.material,
+                firstBVHNodeIndex  = (uint)globalBlasRootIndex,
+                triangleOffset     = (uint)off.triangleOffset,
+                AABBLeftX  = worldBounds.min.x, AABBLeftY  = worldBounds.min.y, AABBLeftZ  = worldBounds.min.z,
+                AABBRightX = worldBounds.max.x, AABBRightY = worldBounds.max.y, AABBRightZ = worldBounds.max.z,
             };
 
             if (meshObj.material.emissiveStrength > 0)
             {
-                Matrix4x4 l2w = meshObj.transform.localToWorldMatrix;
-                SharedMeshData sm = meshObj.sharedMesh;
+                Matrix4x4      l2w      = meshObj.transform.localToWorldMatrix;
+                SharedMeshData sm       = meshObj.sharedMesh;
+                int            triStart = lightTriangleIndices.Count;
+                float          totalArea = 0f;
+                int[]          order    = sm.blas.PrimitiveRefs;
 
-                int triStart = lightTriangleIndices.Count;
-                float totalArea = 0f;
-
-                int[] order = sm.blas.PrimitiveRefs;
                 for (int t = 0; t < order.Length; t++)
                 {
-                    int triId = order[t];
-                    ref buildTri bt = ref sm.buildTriangles[triId];
-
-                    Vector3 edgeAB = bt.posB - bt.posA;
-                    Vector3 edgeAC = bt.posC - bt.posA;
-
-                    Vector3 worldAB = l2w.MultiplyVector(edgeAB);
-                    Vector3 worldAC = l2w.MultiplyVector(edgeAC);
-                    Vector3 worldCross = Vector3.Cross(worldAB, worldAC);
-
-                    float area = worldCross.magnitude * 0.5f;
+                    ref buildTri bt        = ref sm.buildTriangles[order[t]];
+                    Vector3      worldAB   = l2w.MultiplyVector(bt.posB - bt.posA);
+                    Vector3      worldAC   = l2w.MultiplyVector(bt.posC - bt.posA);
+                    Vector3      worldCross = Vector3.Cross(worldAB, worldAC);
+                    float        area      = worldCross.magnitude * 0.5f;
                     totalArea += area;
 
-                    int globalTriIndex = off.triangleOffset + t;
+                    // original tri index is order[t], which maps directly into our buffer
+                    int globalTriIndex = off.triangleOffset + order[t];
                     lightTriangleIndices.Add(globalTriIndex);
 
                     while (lightTrianglesData.Count <= globalTriIndex)
@@ -935,46 +903,33 @@ public class RayTracingManagerWavefront : MonoBehaviour
                     lightTrianglesData[globalTriIndex] = new GPULightTriangleData
                     {
                         worldSpaceArea = area,
-                        worldNormal = worldCross.magnitude > 1e-10f
-                            ? worldCross.normalized
-                            : Vector3.up
+                        worldNormal    = worldCross.magnitude > 1e-10f ? worldCross.normalized : Vector3.up
                     };
                 }
 
                 lightSources[numLightSources++] = new GPULightSource
                 {
-                    instanceIndex = i,
-                    totalArea = totalArea,
-                    triStart = triStart,
-                    triCount = order.Length
+                    instanceIndex = i, totalArea = totalArea, triStart = triStart, triCount = order.Length
                 };
             }
         }
 
-        TLASBuilder tlasBuilder = new TLASBuilder();
+        TLASBuilder      tlasBuilder  = new TLASBuilder();
         BvhBuildSettings tlasSettings = new BvhBuildSettings
         {
-            maxLeafSize = tlasMaxLeafSize,
-            maxDepth = tlasMaxDepth,
-            numBins = tlasNumBins
+            maxLeafSize = tlasMaxLeafSize, maxDepth = tlasMaxDepth, numBins = tlasNumBins
         };
-
         tlasBuilder.Build(instances, tlasSettings);
 
         GPUBVHNode[] tlasNodes = PackNodes(tlasBuilder.Nodes);
-        uint[] tlasRefs = new uint[tlasBuilder.PrimitiveRefs.Length];
-        for (int i = 0; i < tlasRefs.Length; i++)
-            tlasRefs[i] = (uint)tlasBuilder.PrimitiveRefs[i];
+        uint[]       tlasRefs  = new uint[tlasBuilder.PrimitiveRefs.Length];
+        for (int i = 0; i < tlasRefs.Length; i++) tlasRefs[i] = (uint)tlasBuilder.PrimitiveRefs[i];
 
         GPULightSource[] trimmedLightSources = new GPULightSource[Mathf.Max(1, numLightSources)];
         Array.Copy(lightSources, trimmedLightSources, numLightSources);
 
-        if (lightTrianglesData.Count == 0)
-            lightTrianglesData.Add(new GPULightTriangleData());
-
-        int[] lightTriIndicesArray = lightTriangleIndices.Count > 0
-            ? lightTriangleIndices.ToArray()
-            : new int[1];
+        if (lightTrianglesData.Count == 0) lightTrianglesData.Add(new GPULightTriangleData());
+        int[] lightTriIndicesArray = lightTriangleIndices.Count > 0 ? lightTriangleIndices.ToArray() : new int[1];
 
         ShaderHelper.UploadStructuredBuffer(ref TLASBuffer,                 tlasNodes);
         ShaderHelper.UploadStructuredBuffer(ref TLASRefBuffer,              tlasRefs);
@@ -983,30 +938,39 @@ public class RayTracingManagerWavefront : MonoBehaviour
         ShaderHelper.UploadStructuredBuffer(ref LightTriangleIndicesBuffer, lightTriIndicesArray);
         ShaderHelper.UploadStructuredBuffer(ref LightTrianglesDataBuffer,   lightTrianglesData.ToArray());
 
-        LinearMarchMaterial.SetBuffer("TLASNodes",            TLASBuffer);
-        LinearMarchMaterial.SetBuffer("TLASRefs",             TLASRefBuffer);
-        LinearMarchMaterial.SetBuffer("Instances",            InstanceBuffer);
-        flagVisualizerMaterial.SetBuffer("Instances",            InstanceBuffer);
-        LinearMarchMaterial.SetBuffer("LightSources",         LightSourceBuffer);
-        LinearMarchMaterial.SetBuffer("LightTriangleIndices", LightTriangleIndicesBuffer);
-        LinearMarchMaterial.SetBuffer("LightTrianglesData",   LightTrianglesDataBuffer);
+        if (linearMarchCompute != null)
+        {
+            linearMarchCompute.SetBuffer(0, "TLASNodes",            TLASBuffer);
+            linearMarchCompute.SetBuffer(0, "TLASRefs",             TLASRefBuffer);
+            linearMarchCompute.SetBuffer(0, "Instances",            InstanceBuffer);
+            linearMarchCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+            linearMarchCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
+            linearMarchCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
+            linearMarchCompute.SetInt("numMeshes",                  gpuInstances.Length);
+            linearMarchCompute.SetInt("numTLASNodes",               tlasNodes.Length);
+            linearMarchCompute.SetInt("numInstances",               gpuInstances.Length);
+            linearMarchCompute.SetInt("TLASRootIndex",              tlasBuilder.RootIndex);
+            linearMarchCompute.SetInt("numLightSources",            numLightSources);
+            linearMarchCompute.SetInt("BVHTestsSaturation",               BVHNodeTestSaturationValue);
+            linearMarchCompute.SetInt("triTestsSaturation",               triTestFullSaturationValue);
+            linearMarchCompute.SetInt("TLASNodeVisitsSaturation",         TLASNodeVisitsSaturationValue);
+            linearMarchCompute.SetInt("BLASNodeVisitsSaturation",         BLASNodeVisitsSaturationValue);
+            linearMarchCompute.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
+            linearMarchCompute.SetInt("TLASLeafRefsVisitedSaturation",    TLASLeafRefsSaturationValue);
+            linearMarchCompute.SetInt("u_StepsPerCollisionTest",          StepsPerCollisionTest);
+        }
 
-        LinearMarchMaterial.SetInt("numMeshes",       gpuInstances.Length);
-        LinearMarchMaterial.SetInt("numTLASNodes",    tlasNodes.Length);
-        LinearMarchMaterial.SetInt("numInstances",    gpuInstances.Length);
-        LinearMarchMaterial.SetInt("TLASRootIndex",   tlasBuilder.RootIndex);
-        LinearMarchMaterial.SetInt("numLightSources", numLightSources);
+        if (reflectionCompute != null)
+        {
+            reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
+            reflectionCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
+            reflectionCompute.SetBuffer(0, "TLASRefs",  TLASRefBuffer);
+        }
 
-        LinearMarchMaterial.SetInt("BVHTestsSaturation",               BVHNodeTestSaturationValue);
-        LinearMarchMaterial.SetInt("triTestsSaturation",               triTestFullSaturationValue);
-        LinearMarchMaterial.SetInt("TLASNodeVisitsSaturation",         TLASNodeVisitsSaturationValue);
-        LinearMarchMaterial.SetInt("BLASNodeVisitsSaturation",         BLASNodeVisitsSaturationValue);
-        LinearMarchMaterial.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
-        LinearMarchMaterial.SetInt("TLASLeafRefsVisitedSaturation",    TLASLeafRefsSaturationValue);
-        LinearMarchMaterial.SetInt("u_StepsPerCollisionTest",          StepsPerCollisionTest);
-        //Debug.Log($"Instance 0 position in gpuInstances: {meshObjects[0].transform.position}");
+        if (flagVisualizerMaterial != null)
+            flagVisualizerMaterial.SetBuffer("Instances", InstanceBuffer);
+
         buffersHaveRealData = true;
-        
     }
 
     static GPUBVHNode[] PackNodes(BvhNode[] nodes)
@@ -1017,25 +981,19 @@ public class RayTracingManagerWavefront : MonoBehaviour
             BvhNode n = nodes[i];
             packed[i] = new GPUBVHNode
             {
-                left = n.leftChild,
-                right = n.rightChild,
-                firstIndex = (uint)n.start,
-                count = (uint)n.count,
-                AABBLeftX = n.bounds.min.x,
-                AABBLeftY = n.bounds.min.y,
-                AABBLeftZ = n.bounds.min.z,
-                AABBRightX = n.bounds.max.x,
-                AABBRightY = n.bounds.max.y,
-                AABBRightZ = n.bounds.max.z,
+                left = n.leftChild, right = n.rightChild,
+                firstIndex = (uint)n.start, count = (uint)n.count,
+                AABBLeftX  = n.bounds.min.x, AABBLeftY  = n.bounds.min.y, AABBLeftZ  = n.bounds.min.z,
+                AABBRightX = n.bounds.max.x, AABBRightY = n.bounds.max.y, AABBRightZ = n.bounds.max.z,
             };
         }
         return packed;
     }
 
-    void ApplyBlackHoleLUT(Material rayTracingMaterial, RayTracedBlackHole blackHole)
+    void ApplyBlackHoleLUT(ComputeShader cs, RayTracedBlackHole blackHole)
     {
-        rayTracingMaterial.SetFloat("bendStrength", bendStrength);
-        rayTracingMaterial.SetFloat("strongFieldCurvatureRadPetMeterCutoff", strongFieldRadPerMeterCuttoff);
+        cs.SetFloat("bendStrength", bendStrength);
+        cs.SetFloat("strongFieldCurvatureRadPetMeterCutoff", strongFieldRadPerMeterCuttoff);
     }
 
     void OnRenderImage(RenderTexture source, RenderTexture target)
@@ -1045,128 +1003,239 @@ public class RayTracingManagerWavefront : MonoBehaviour
             Graphics.Blit(source, target);
             return;
         }
-        Graphics.ClearRandomWriteTargets();
+
         InitFrame();
 
+        Camera cam = GetComponent<Camera>();
+        if (ShouldResetAccumulation(cam))
+        {
+            numRenderedFrames = 0;
+            baseSeed = UnityEngine.Random.Range(0, int.MaxValue);
+        }
+
+        if (!accumulateInGameView)
+            numRenderedFrames = 0;
 
         bool useHardwareRT = SystemInfo.supportsRayTracing && !forceSoftwareRaytracing;
 
-        int scaledW = Mathf.Max(1, Mathf.RoundToInt(source.width  * renderScale));
-        int scaledH = Mathf.Max(1, Mathf.RoundToInt(source.height * renderScale));
+        scaledW = Mathf.Max(1, Mathf.RoundToInt(source.width  * renderScale));
+        scaledH = Mathf.Max(1, Mathf.RoundToInt(source.height * renderScale));
+        int pixelCount = scaledW * scaledH;
+
+        ShaderHelper.CreateRenderTexture(ref resultTexture, scaledW, scaledH,
+            FilterMode.Bilinear, ShaderHelper.RGBA_SFloat, "Result");
 
         RenderTexture scaledFrame  = RenderTexture.GetTemporary(scaledW, scaledH, 0, ShaderHelper.RGBA_SFloat);
         RenderTexture scaledTemp   = RenderTexture.GetTemporary(scaledW, scaledH, 0, ShaderHelper.RGBA_SFloat);
         RenderTexture currentFrame = RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
         RenderTexture tempBuffer   = RenderTexture.GetTemporary(source.width, source.height, 0, ShaderHelper.RGBA_SFloat);
-        LinearMarchMaterial.SetFloat("renderDistance", renderDistance);
-        // init and classify always run as blits — they don't do traversal
-        Graphics.SetRandomWriteTarget(1, controlBuffer, false);
-        Graphics.SetRandomWriteTarget(2, mainRayBuffer, false);
-        Graphics.SetRandomWriteTarget(3, HitInfoBuffer, false);
-        Graphics.Blit(null, scaledFrame, initMaterial);
-        Graphics.Blit(null, scaledFrame, classifyMaterial);
-        // linear march — hardware RT dispatch or software BVH blit
-        if (useHardwareRT)
-        {
-            //Debug.Log("Running hardware RT");   
-            DispatchHardwareLinearMarch(scaledW, scaledH);
-        }
-        else
-        {
-            //Debug.Log($"Blit LinearMarchMaterial instanceID: {LinearMarchMaterial.GetInstanceID()}");
-            Graphics.Blit(null, scaledFrame, LinearMarchMaterial);
-        }
-        Graphics.ClearRandomWriteTargets();
-        Graphics.Blit(null, scaledFrame, flagVisualizerMaterial);
-        Graphics.Blit(scaledFrame, target);
 
-        RenderTexture.ReleaseTemporary(scaledFrame);
-        RenderTexture.ReleaseTemporary(scaledTemp);
-        RenderTexture.ReleaseTemporary(currentFrame);
-        RenderTexture.ReleaseTemporary(tempBuffer);
+        try
+        {
+            initCompute.SetInt("_ScreenWidth",      scaledW);
+            initCompute.SetInt("_ScreenHeight",     scaledH);
+            initCompute.SetInt("numRenderedFrames", numRenderedFrames);
+
+            classifyCompute.SetInt("_ScreenWidth",  scaledW);
+            classifyCompute.SetInt("_ScreenHeight", scaledH);
+
+            linearMarchCompute.SetInt("_ScreenWidth",     scaledW);
+            linearMarchCompute.SetInt("_ScreenHeight",    scaledH);
+            linearMarchCompute.SetFloat("renderDistance", renderDistance);
+
+            reflectionCompute.SetInt("_ScreenWidth",  scaledW);
+            reflectionCompute.SetInt("_ScreenHeight", scaledH);
+
+            for (int ray = 0; ray < raysPerPixel; ray++)
+            {
+                initCompute.SetInt("currentRayNum", ray);
+                DispatchCompute(initCompute, pixelCount);
+
+                for (int bounce = 0; bounce < maxBounces; bounce++)
+                {
+                    DispatchCompute(classifyCompute, pixelCount);
+
+                    if (useHardwareRT)
+                        DispatchHardwareLinearMarch(scaledW, scaledH);
+                    else
+                        DispatchCompute(linearMarchCompute, pixelCount);
+
+                    DispatchCompute(reflectionCompute, pixelCount);
+                }
+            }
+
+            accumulateCompute.SetInt("_ScreenWidth",  scaledW);
+            accumulateCompute.SetInt("_ScreenHeight", scaledH);
+            accumulateCompute.SetInt("raysPerPixel",  raysPerPixel);
+            accumulateCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
+            accumulateCompute.SetTexture(0, "_Output",   resultTexture);
+            DispatchCompute(accumulateCompute, pixelCount);
+
+            if (accumulatorMaterial != null)
+            {
+                accumulatorMaterial.SetInt("numRenderedFrames", numRenderedFrames);
+                accumulatorMaterial.SetTexture("_MainTexOld",   cleanAccumBuffer);
+                accumulatorMaterial.SetFloat("accumWeight",     accumWeight);
+                Graphics.Blit(resultTexture, scaledTemp, accumulatorMaterial);
+                Swap(ref scaledTemp, ref scaledFrame);
+                Graphics.Blit(scaledFrame, cleanAccumBuffer);
+            }
+            else
+            {
+                Graphics.Blit(resultTexture, scaledFrame);
+            }
+
+            if (atrousFilter && atrousMaterial != null && atrousBeforeUpscale)
+            {
+                int[] stepSizes = { 1, 2, 4, 8, 16 };
+                foreach (int step in stepSizes)
+                {
+                    atrousMaterial.SetInt("stepSize", step);
+                    atrousMaterial.SetFloat("colorSigma", atrousColorSigma);
+                    Graphics.Blit(scaledFrame, scaledTemp, atrousMaterial);
+                    Swap(ref scaledFrame, ref scaledTemp);
+                }
+            }
+
+            if (ditherPostProcess && ditherBeforeUpscale && ditherMaterial != null)
+            {
+                ditherMaterial.SetInt("matrixSize", ditherMatrixSize);
+                Graphics.Blit(scaledFrame, scaledTemp, ditherMaterial);
+                Swap(ref scaledFrame, ref scaledTemp);
+            }
+
+            scaledFrame.filterMode = FilterMode.Point;
+            Graphics.Blit(scaledFrame, currentFrame);
+
+            if (atrousFilter && atrousMaterial != null && !atrousBeforeUpscale)
+            {
+                int[] stepSizes = { 1, 2, 4, 8, 16 };
+                foreach (int step in stepSizes)
+                {
+                    atrousMaterial.SetInt("stepSize", step);
+                    atrousMaterial.SetFloat("colorSigma", atrousColorSigma);
+                    Graphics.Blit(currentFrame, tempBuffer, atrousMaterial);
+                    Swap(ref currentFrame, ref tempBuffer);
+                }
+            }
+
+            if (ditherPostProcess && !ditherBeforeUpscale && ditherMaterial != null)
+            {
+                ditherMaterial.SetInt("matrixSize", ditherMatrixSize);
+                Graphics.Blit(currentFrame, tempBuffer, ditherMaterial);
+                Swap(ref currentFrame, ref tempBuffer);
+            }
+
+            if (colorQuantization && colorQuantizationMaterial != null)
+            {
+                colorQuantizationMaterial.SetInt("numColors", numColors);
+                Graphics.Blit(currentFrame, tempBuffer, colorQuantizationMaterial);
+                Swap(ref currentFrame, ref tempBuffer);
+            }
+
+            Graphics.Blit(currentFrame, target);
+
+            numRenderedFrames++;
+            if (numRenderedFrames % 100 == 0)
+                Debug.Log("Num Rendered Frames: " + numRenderedFrames);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("OnRenderImage error: " + e);
+            Graphics.Blit(source, target);
+        }
+        finally
+        {
+            RenderTexture.ReleaseTemporary(scaledFrame);
+            RenderTexture.ReleaseTemporary(scaledTemp);
+            RenderTexture.ReleaseTemporary(currentFrame);
+            RenderTexture.ReleaseTemporary(tempBuffer);
+        }
     }
 
     void InitFrame()
     {
         RayTracedMesh[] meshObjects = FindObjectsOfType<RayTracedMesh>();
-        bool anyTransformDirty = AnyTransformDirty(meshObjects.ToList());
+        if (AnyTransformDirty(meshObjects.ToList())) tlasDirty = true;
 
-        if (anyTransformDirty)
-            tlasDirty = true;
         EnsureMaterialsCreated();
         EnsureBuffersCreated();
-        ShaderHelper.CreateRenderTexture(
-            ref resultTexture,
-            Screen.width,
-            Screen.height,
-            FilterMode.Bilinear,
-            ShaderHelper.RGBA_SFloat,
-            "Result"
-        );
+
+        if (!Mathf.Approximately(renderScale, lastRenderScale))
+        {
+            if (cleanAccumBuffer != null) { cleanAccumBuffer.Release(); cleanAccumBuffer = null; }
+            lastRenderScale = renderScale;
+            numRenderedFrames = 0;
+        }
+
+        int sw = Mathf.Max(1, Mathf.RoundToInt(Screen.width  * renderScale));
+        int sh = Mathf.Max(1, Mathf.RoundToInt(Screen.height * renderScale));
+
+        ShaderHelper.CreateRenderTexture(ref cleanAccumBuffer, sw, sh,
+            FilterMode.Bilinear, ShaderHelper.RGBA_SFloat, "cleanAccumBuffer");
 
         AllocateAccelerationBuffers();
-        BindBuffersToMaterial();
+        BindBuffersToShaders();
         allocateBlackHoleBuffer();
         UpdateAtmosphereParams();
         UpdateCameraParams(Camera.current);
         UpdateRayTracingParams();
-
     }
 
     void UpdateCameraParams(Camera camera)
     {
         float planeHeight = camera.nearClipPlane * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad) * 2f;
-        float planeWidth = planeHeight * camera.aspect;
-        initMaterial.SetVector("ViewParams", new Vector3(planeWidth, planeHeight, camera.nearClipPlane));
-        initMaterial.SetMatrix("CameraLocalToWorldMatrix", camera.transform.localToWorldMatrix);
-        initMaterial.SetVector("CameraWorldPos", camera.transform.position);
-        initMaterial.SetInt("numRenderedFrames", numRenderedFrames);
-        if (blackHoleSOIStepSize == 0)
-            blackHoleSOIStepSize = 1.0f;
+        float planeWidth  = planeHeight * camera.aspect;
+
+        if (initCompute != null)
+        {
+            initCompute.SetVector("ViewParams",               new Vector3(planeWidth, planeHeight, camera.nearClipPlane));
+            initCompute.SetMatrix("CameraLocalToWorldMatrix", camera.transform.localToWorldMatrix);
+            initCompute.SetVector("CameraWorldPos",           camera.transform.position);
+            initCompute.SetInt   ("numRenderedFrames",        numRenderedFrames);
+        }
+
+        if (blackHoleSOIStepSize == 0) blackHoleSOIStepSize = 1.0f;
     }
 
     void UpdateRayTracingParams()
     {
-        SetKeyword(LinearMarchMaterial, "USE_TLAS", useTlas);
+        if (linearMarchCompute == null) return;
+        if (useTlas) linearMarchCompute.EnableKeyword("USE_TLAS");
+        else         linearMarchCompute.DisableKeyword("USE_TLAS");
     }
-
-    void SetKeyword(Material mat, string keyword, bool enabled)
-    {
-        if (enabled) mat.EnableKeyword(keyword);
-        else mat.DisableKeyword(keyword);
-    }
-    
-    
 
     void allocateBlackHoleBuffer()
     {
         RayTracedBlackHole[] blackHoleObjects = FindObjectsOfType<RayTracedBlackHole>();
-        BlackHole[] blackHoles = new BlackHole[blackHoleObjects.Length];
+        BlackHole[]          blackHoles       = new BlackHole[blackHoleObjects.Length];
 
         for (int i = 0; i < blackHoleObjects.Length; i++)
         {
             blackHoles[i] = new BlackHole()
             {
-                position = blackHoleObjects[i].transform.position,
-                radius = blackHoleObjects[i].transform.localScale.x * 0.5f,
+                position               = blackHoleObjects[i].transform.position,
+                radius                 = blackHoleObjects[i].transform.localScale.x * 0.5f,
                 blackHoleSOIMultiplier = blackHoleObjects[i].blackHoleSOIMultiplier,
             };
 
             if (blackHoles[i].blackHoleSOIMultiplier <= 0)
             {
-                Debug.LogError("BlackHoleSOIMultiplier is less than or equal to 0 for " + blackHoleObjects[i].name);
+                Debug.LogError("BlackHoleSOIMultiplier is <= 0 for " + blackHoleObjects[i].name);
                 blackHoles[i].blackHoleSOIMultiplier = 1.0f;
             }
         }
 
         if (blackHoleObjects.Length > 0)
-            ApplyBlackHoleLUT(classifyMaterial, blackHoleObjects[0]);
+            ApplyBlackHoleLUT(classifyCompute, blackHoleObjects[0]);
 
         ShaderHelper.UploadStructuredBuffer(ref blackHoleBuffer, blackHoles);
-        classifyMaterial.SetBuffer("blackholes", blackHoleBuffer);
-        classifyMaterial.SetInt("num_black_holes", blackHoleObjects.Length);
-        LinearMarchMaterial.SetBuffer("blackholes",   blackHoleBuffer);
-        LinearMarchMaterial.SetInt("num_black_holes", blackHoleObjects.Length);
+
+        classifyCompute.SetBuffer(0, "blackholes",      blackHoleBuffer);
+        classifyCompute.SetInt   ("num_black_holes",    blackHoleObjects.Length);
+
+        linearMarchCompute.SetBuffer(0, "blackholes",   blackHoleBuffer);
+        linearMarchCompute.SetInt   ("num_black_holes", blackHoleObjects.Length);
 
         if (SystemInfo.supportsRayTracing && !forceSoftwareRaytracing && linearMarchRaytraceShader != null)
         {
