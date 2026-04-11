@@ -11,7 +11,8 @@ uint _ScreenHeight;
 RWStructuredBuffer<control> controls;
 RWStructuredBuffer<ray>     main_rays;
 RWStructuredBuffer<HitInfo> hit_infos;
-
+RWStructuredBuffer<uint> activeRayIndices;
+uint                     activeRayCount;
 float renderDistance;
 int   TLASRootIndex;
 int   numInstances;
@@ -361,11 +362,9 @@ HitInfo TraceRay(float3 origin, float3 direction, float tMax)
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
-    uint pixelIndex = id.x;
-    if (pixelIndex >= _ScreenWidth * _ScreenHeight) return;
-
-    if (!HasFlag(controls[pixelIndex].flags, FLAG_NEEDS_LINEAR_MARCH))
-        return;
+    uint slot = id.x;
+    if (slot >= activeRayCount) return;
+    uint pixelIndex = activeRayIndices[slot];
 
     ray r = main_rays[pixelIndex];
 

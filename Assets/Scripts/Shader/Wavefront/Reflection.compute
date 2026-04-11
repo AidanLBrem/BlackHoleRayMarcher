@@ -13,7 +13,8 @@ RWStructuredBuffer<ray>        main_rays;
 RWStructuredBuffer<HitInfo>    hit_info_buffer;
 RWStructuredBuffer<color_info> ray_color_info;
 RWStructuredBuffer<float3>     pixelAccum;
-
+RWStructuredBuffer<uint> activeRayIndices;
+uint                     activeRayCount;
 bool HandleReflection(uint pixelIndex)
 {
     HitInfo HitInfo = hit_info_buffer[pixelIndex];
@@ -269,11 +270,9 @@ bool HandleReflection(uint pixelIndex)
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
-    uint pixelIndex = id.x;
-    if (pixelIndex >= _ScreenWidth * _ScreenHeight) return;
-
-    if (!HasFlag(controls[pixelIndex].flags, FLAG_NEEDS_REFLECTION))
-        return;
+    uint slot = id.x;
+    if (slot >= activeRayCount) return;
+    uint pixelIndex = activeRayIndices[slot];
 
     bool done = HandleReflection(pixelIndex);
 

@@ -16,6 +16,8 @@ using UnityEditor;
 [ExecuteAlways, ImageEffectAllowedInSceneView]
 public class RayTracingManagerWavefront : MonoBehaviour
 {
+    const uint FLAG_NEEDS_LINEAR_MARCH = (1u << 0);
+    const uint FLAG_NEEDS_REFLECTION   = (1u << 2);
     [SerializeField] bool useShaderInSceneView = true;
     [SerializeField] public bool useTlas = true;
     [SerializeField] public bool useNEE = true;
@@ -32,7 +34,10 @@ public class RayTracingManagerWavefront : MonoBehaviour
     public ComputeShader linearMarchCompute;
     public ComputeShader reflectionCompute;
     public ComputeShader accumulateCompute;
-
+    public ComputeShader compactCompute;
+    public ComputeShader writeIndirectArgsCompute;
+    public ComputeShader resetCountCompute;
+    
     public int marchStepsCount;
     public float renderDistance;
     public int raysPerPixel;
@@ -59,7 +64,9 @@ public class RayTracingManagerWavefront : MonoBehaviour
     [NonSerialized] private ComputeBuffer rayColorInfoBuffer;
     [NonSerialized] ComputeBuffer blackHoleBuffer;
     [NonSerialized] private ComputeBuffer pixelAccumBuffer;
-
+    [NonSerialized] private ComputeBuffer activeRayIndicesBuffer;
+    [NonSerialized] private ComputeBuffer activeRayCountBuffer;
+    [NonSerialized] private ComputeBuffer indirectArgsBuffer;
     private bool tlasDirty = true;
     private int lastInstanceCount = -1;
     private bool buffersHaveRealData = false;
@@ -308,6 +315,9 @@ public class RayTracingManagerWavefront : MonoBehaviour
         pixelAccumBuffer?.Release();
         pixelAccumBuffer = null;
         if (accelStructure != null) { accelStructure.Release(); accelStructure = null; }
+        activeRayIndicesBuffer?.Release();
+        activeRayCountBuffer?.Release();
+        indirectArgsBuffer?.Release();
     }
 
     void EnsureBuffersCreated(bool forceRecreate = false)
@@ -333,6 +343,14 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (HitInfoBuffer == null)              ShaderHelper.CreateStructuredBuffer<HitInfo>(ref HitInfoBuffer, pixelCount);
         if (rayColorInfoBuffer == null)         ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref rayColorInfoBuffer, pixelCount);
         if (pixelAccumBuffer == null)           ShaderHelper.CreateStructuredBuffer<Vector3>(ref pixelAccumBuffer, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayIndicesBuffer, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayCountBuffer, 1);
+
+        if (indirectArgsBuffer == null || !indirectArgsBuffer.IsValid())
+        {
+            indirectArgsBuffer?.Release();
+            indirectArgsBuffer = new ComputeBuffer(3, sizeof(uint), ComputeBufferType.IndirectArguments);
+        }
     }
 
     void EnsureMaterialsCreated()
@@ -360,6 +378,30 @@ public class RayTracingManagerWavefront : MonoBehaviour
         BindReflectionBuffers();
         BindAccumulateBuffers();
         BindFlagVisualizerBuffers();
+        BindWavefrontBuffers();
+    }
+    
+    void BindWavefrontBuffers()
+    {
+        if (compactCompute != null)
+        {
+            compactCompute.SetBuffer(0, "controls",         controlBuffer);
+            compactCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
+            compactCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
+        }
+        if (writeIndirectArgsCompute != null)
+        {
+            writeIndirectArgsCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
+            writeIndirectArgsCompute.SetBuffer(0, "indirectArgs",   indirectArgsBuffer);
+        }
+        if (resetCountCompute != null)
+        {
+            resetCountCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
+        }
+        if (linearMarchCompute != null)
+            linearMarchCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
+        if (reflectionCompute != null)
+            reflectionCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
     }
 
     void BindInitBuffers()
@@ -394,6 +436,13 @@ public class RayTracingManagerWavefront : MonoBehaviour
         linearMarchCompute.SetBuffer(0, "Vertices",        MeshVerticesBuffer);
         linearMarchCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
         linearMarchCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
+        linearMarchRaytraceShader.SetAccelerationStructure("_AccelStructure", accelStructure);
+        linearMarchRaytraceShader.SetBuffer("controls",        controlBuffer);
+        linearMarchRaytraceShader.SetBuffer("main_rays",       mainRayBuffer);
+        linearMarchRaytraceShader.SetBuffer("hit_info_buffer", HitInfoBuffer);
+        linearMarchRaytraceShader.SetBuffer("Instances",       InstanceBuffer);
+        linearMarchRaytraceShader.SetBuffer("Normals",         MeshNormalsBuffer);
+        linearMarchRaytraceShader.SetBuffer("TriangleIndices", MeshIndicesBuffer);
     }
 
     void BindReflectionBuffers()
@@ -427,9 +476,36 @@ public class RayTracingManagerWavefront : MonoBehaviour
         flagVisualizerMaterial.SetBuffer("Instances",       InstanceBuffer);
     }
 
-    void DispatchCompute(ComputeShader cs, int pixelCount)
+    void DispatchCompute(ComputeShader cs, int pixelCount, string label = "")
     {
+        UnityEngine.Profiling.Profiler.BeginSample(label == "" ? cs.name : label);
         cs.Dispatch(0, Mathf.CeilToInt(pixelCount / 64f), 1, 1);
+        UnityEngine.Profiling.Profiler.EndSample();
+    }
+    void ResetActiveCount()
+    {
+        resetCountCompute.Dispatch(0, 1, 1, 1);
+    }
+
+    void DispatchCompact(uint flagBit, int totalPixels)
+    {
+        compactCompute.SetInt("filterFlag",  (int)flagBit);
+        compactCompute.SetInt("totalPixels", totalPixels);
+        compactCompute.Dispatch(0, Mathf.CeilToInt(totalPixels / 64f), 1, 1);
+    }
+
+    void DispatchWavefront(ComputeShader cs, uint flagBit, int totalPixels, string label = "")
+    {
+        UnityEngine.Profiling.Profiler.BeginSample("Compact_" + label);
+        ResetActiveCount();
+        DispatchCompact(flagBit, totalPixels);
+        writeIndirectArgsCompute.Dispatch(0, 1, 1, 1);
+        UnityEngine.Profiling.Profiler.EndSample();
+
+        UnityEngine.Profiling.Profiler.BeginSample(label);
+        cs.SetInt("activeRayCount", totalPixels);
+        cs.DispatchIndirect(0, indirectArgsBuffer, 0);
+        UnityEngine.Profiling.Profiler.EndSample();
     }
 
     private int[] accelStructureInstanceIDs;
@@ -577,19 +653,6 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (linearMarchRaytraceShader == null) { Debug.LogError("linearMarchRaytraceShader not assigned!"); return; }
         if (accelStructure == null)            { Debug.LogError("accelStructure is null!"); return; }
 
-        linearMarchRaytraceShader.SetAccelerationStructure("_AccelStructure", accelStructure);
-        linearMarchRaytraceShader.SetBuffer("controls",        controlBuffer);
-        linearMarchRaytraceShader.SetBuffer("main_rays",       mainRayBuffer);
-        linearMarchRaytraceShader.SetBuffer("hit_info_buffer", HitInfoBuffer);
-        linearMarchRaytraceShader.SetBuffer("Instances",       InstanceBuffer);
-        linearMarchRaytraceShader.SetBuffer("Normals",         MeshNormalsBuffer);
-        linearMarchRaytraceShader.SetBuffer("TriangleIndices", MeshIndicesBuffer);
-        if (flagVisualizerMaterial != null)
-        {
-            flagVisualizerMaterial.SetBuffer("hit_info_buffer", HitInfoBuffer);
-            flagVisualizerMaterial.SetBuffer("Instances",       InstanceBuffer);
-        }
-        linearMarchRaytraceShader.SetFloat("renderDistance",   renderDistance);
         linearMarchRaytraceShader.Dispatch("RayGen",           width, height, 1);
     }
 
@@ -1042,25 +1105,25 @@ public class RayTracingManagerWavefront : MonoBehaviour
             linearMarchCompute.SetInt("_ScreenWidth",     scaledW);
             linearMarchCompute.SetInt("_ScreenHeight",    scaledH);
             linearMarchCompute.SetFloat("renderDistance", renderDistance);
-
+            linearMarchRaytraceShader.SetFloat("renderDistance",   renderDistance);
             reflectionCompute.SetInt("_ScreenWidth",  scaledW);
             reflectionCompute.SetInt("_ScreenHeight", scaledH);
 
             for (int ray = 0; ray < raysPerPixel; ray++)
             {
                 initCompute.SetInt("currentRayNum", ray);
-                DispatchCompute(initCompute, pixelCount);
+                DispatchCompute(initCompute, pixelCount, "Init");
 
                 for (int bounce = 0; bounce < maxBounces; bounce++)
                 {
-                    DispatchCompute(classifyCompute, pixelCount);
+                    DispatchCompute(classifyCompute, pixelCount, "Classify");
 
                     if (useHardwareRT)
                         DispatchHardwareLinearMarch(scaledW, scaledH);
                     else
-                        DispatchCompute(linearMarchCompute, pixelCount);
+                        DispatchWavefront(linearMarchCompute, FLAG_NEEDS_LINEAR_MARCH, pixelCount, "Linear March");
 
-                    DispatchCompute(reflectionCompute, pixelCount);
+                    DispatchWavefront(reflectionCompute, FLAG_NEEDS_REFLECTION, pixelCount, "Reflection");
                 }
             }
 

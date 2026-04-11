@@ -1,0 +1,14 @@
+// ResetCount.compute
+// Resets activeRayCount[0] to 0 on the GPU so we never stall on
+// SetData / readback between stages.
+// Dispatch with exactly 1 thread (1,1,1).
+
+#pragma kernel ResetCount
+
+RWStructuredBuffer<uint> activeRayCount;
+
+[numthreads(1,1,1)]
+void ResetCount(uint3 id : SV_DispatchThreadID)
+{
+    activeRayCount[0] = 0u;
+}

@@ -1,0 +1,31 @@
+// Compact.compute
+// Scans the full controls buffer and appends the indices of pixels
+// whose flags match `filterFlag` into activeRayIndices[].
+// activeRayCount[0] must be cleared to 0 before this dispatch.
+// Dispatch with ceil(totalPixels / 64) groups.
+
+#pragma kernel Compact
+
+#include "PixelFlags.hlsl"
+#include "BasicStructures.hlsl"
+
+RWStructuredBuffer<control> controls;
+RWStructuredBuffer<uint>    activeRayIndices;   // output: packed list of pixel indices
+RWStructuredBuffer<uint>    activeRayCount;     // [0] = atomic counter (reset before dispatch)
+
+uint filterFlag;    // e.g. FLAG_NEEDS_LINEAR_MARCH
+uint totalPixels;
+
+[numthreads(64,1,1)]
+void Compact(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= totalPixels) return;
+
+    if (HasFlag(controls[i].flags, filterFlag))
+    {
+        uint slot;
+        InterlockedAdd(activeRayCount[0], 1u, slot);
+        activeRayIndices[slot] = i;
+    }
+}
