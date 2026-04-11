@@ -22,7 +22,10 @@ public class RayTracedMesh : MonoBehaviour
     public int numVertices;
     public int numNormals;
     public int numTriangles;
+    public static readonly List<RayTracedMesh> All = new();
 
+    void OnEnable()  { All.Add(this);    }
+    void OnDisable() { All.Remove(this); }
     void Start()
     {
         RebuildStaticData();

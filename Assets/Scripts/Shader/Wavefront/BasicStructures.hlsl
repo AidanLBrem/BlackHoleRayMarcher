@@ -1,15 +1,13 @@
 
 struct HitInfo 
 {
-    bool didHit;
+    bool  didHit;
     float distance;
-    float3 hitPoint;
-    float3 worldNormal;  
     float u;
     float v;
-    uint triIndex;
-    uint objectType;
-    int objectIndex;
+    uint  triIndex;
+    int   objectIndex;
+    float3 worldNormal;  // hardware RT path only
 };
             
 struct AABBHitInfo {
@@ -164,7 +162,6 @@ HitInfo rayTriangle(Ray ray, Triangle tri)
 
     HitInfo hitInfo = (HitInfo)0;
     hitInfo.didHit = true;
-    hitInfo.hitPoint = ray.position + ray.direction * dst;
     hitInfo.distance = dst;
     hitInfo.u = u;
     hitInfo.v = v;

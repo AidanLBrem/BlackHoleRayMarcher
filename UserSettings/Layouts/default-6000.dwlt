@@ -1161,7 +1161,7 @@ MonoBehaviour:
   m_Position:
     m_Target: {x: 12.9, y: 0, z: 0}
     speed: 2
-    m_Value: {x: 6.8882694, y: 10.91, z: -6.8899994}
+    m_Value: {x: 12.9, y: 0, z: 0}
   m_RenderMode: 0
   m_CameraMode:
     drawMode: 0
@@ -1207,13 +1207,13 @@ MonoBehaviour:
     m_GridAxis: 1
     m_gridOpacity: 0.5
   m_Rotation:
-    m_Target: {x: 0.17687768, y: -0.5776581, z: 0.13274357, w: 0.78622925}
+    m_Target: {x: 0.06928613, y: -0.7383696, z: 0.07990235, w: 0.6666168}
     speed: 2
-    m_Value: {x: 0.08024057, y: 0.8899719, z: -0.16604407, w: 0.41796187}
+    m_Value: {x: -0.17687769, y: 0.5776581, z: -0.13274357, w: -0.78622925}
   m_Size:
-    m_Target: 0.8660254
+    m_Target: 12.966616
     speed: 2
-    m_Value: 23.500586
+    m_Value: 0.8660254
   m_Ortho:
     m_Target: 1
     speed: 2
@@ -1389,51 +1389,51 @@ MonoBehaviour:
       m_Data: 0
     m_ExpandedIDs:
     - m_Data: 0
-    - m_Data: 48000
-    - m_Data: 48002
-    - m_Data: 48004
-    - m_Data: 48006
-    - m_Data: 48008
-    - m_Data: 48010
-    - m_Data: 48012
-    - m_Data: 48014
-    - m_Data: 48016
-    - m_Data: 48018
-    - m_Data: 48020
-    - m_Data: 48022
-    - m_Data: 48024
-    - m_Data: 48026
-    - m_Data: 48028
-    - m_Data: 48030
-    - m_Data: 48032
-    - m_Data: 48034
-    - m_Data: 48036
-    - m_Data: 48038
-    - m_Data: 48040
-    - m_Data: 48042
-    - m_Data: 48044
-    - m_Data: 48046
-    - m_Data: 48048
-    - m_Data: 48050
-    - m_Data: 48052
-    - m_Data: 48054
-    - m_Data: 48056
-    - m_Data: 48058
-    - m_Data: 48060
-    - m_Data: 48062
-    - m_Data: 48064
-    - m_Data: 48066
-    - m_Data: 48068
-    - m_Data: 48070
-    - m_Data: 48072
-    - m_Data: 48074
-    - m_Data: 48076
-    - m_Data: 48078
-    - m_Data: 48080
-    - m_Data: 48082
-    - m_Data: 48084
-    - m_Data: 48086
-    - m_Data: 48088
+    - m_Data: 48534
+    - m_Data: 48536
+    - m_Data: 48538
+    - m_Data: 48540
+    - m_Data: 48542
+    - m_Data: 48544
+    - m_Data: 48546
+    - m_Data: 48548
+    - m_Data: 48550
+    - m_Data: 48552
+    - m_Data: 48554
+    - m_Data: 48556
+    - m_Data: 48558
+    - m_Data: 48560
+    - m_Data: 48562
+    - m_Data: 48564
+    - m_Data: 48566
+    - m_Data: 48568
+    - m_Data: 48570
+    - m_Data: 48572
+    - m_Data: 48574
+    - m_Data: 48576
+    - m_Data: 48578
+    - m_Data: 48580
+    - m_Data: 48582
+    - m_Data: 48584
+    - m_Data: 48586
+    - m_Data: 48588
+    - m_Data: 48590
+    - m_Data: 48592
+    - m_Data: 48594
+    - m_Data: 48596
+    - m_Data: 48598
+    - m_Data: 48600
+    - m_Data: 48602
+    - m_Data: 48604
+    - m_Data: 48606
+    - m_Data: 48608
+    - m_Data: 48610
+    - m_Data: 48612
+    - m_Data: 48614
+    - m_Data: 48616
+    - m_Data: 48618
+    - m_Data: 48620
+    - m_Data: 48622
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -1467,51 +1467,51 @@ MonoBehaviour:
       m_Data: 49768
     m_ExpandedIDs:
     - m_Data: 0
-    - m_Data: 48000
-    - m_Data: 48002
-    - m_Data: 48004
-    - m_Data: 48006
-    - m_Data: 48008
-    - m_Data: 48010
-    - m_Data: 48012
-    - m_Data: 48014
-    - m_Data: 48016
-    - m_Data: 48018
-    - m_Data: 48020
-    - m_Data: 48022
-    - m_Data: 48024
-    - m_Data: 48026
-    - m_Data: 48028
-    - m_Data: 48030
-    - m_Data: 48032
-    - m_Data: 48034
-    - m_Data: 48036
-    - m_Data: 48038
-    - m_Data: 48040
-    - m_Data: 48042
-    - m_Data: 48044
-    - m_Data: 48046
-    - m_Data: 48048
-    - m_Data: 48050
-    - m_Data: 48052
-    - m_Data: 48054
-    - m_Data: 48056
-    - m_Data: 48058
-    - m_Data: 48060
-    - m_Data: 48062
-    - m_Data: 48064
-    - m_Data: 48066
-    - m_Data: 48068
-    - m_Data: 48070
-    - m_Data: 48072
-    - m_Data: 48074
-    - m_Data: 48076
-    - m_Data: 48078
-    - m_Data: 48080
-    - m_Data: 48082
-    - m_Data: 48084
-    - m_Data: 48086
-    - m_Data: 48088
+    - m_Data: 48534
+    - m_Data: 48536
+    - m_Data: 48538
+    - m_Data: 48540
+    - m_Data: 48542
+    - m_Data: 48544
+    - m_Data: 48546
+    - m_Data: 48548
+    - m_Data: 48550
+    - m_Data: 48552
+    - m_Data: 48554
+    - m_Data: 48556
+    - m_Data: 48558
+    - m_Data: 48560
+    - m_Data: 48562
+    - m_Data: 48564
+    - m_Data: 48566
+    - m_Data: 48568
+    - m_Data: 48570
+    - m_Data: 48572
+    - m_Data: 48574
+    - m_Data: 48576
+    - m_Data: 48578
+    - m_Data: 48580
+    - m_Data: 48582
+    - m_Data: 48584
+    - m_Data: 48586
+    - m_Data: 48588
+    - m_Data: 48590
+    - m_Data: 48592
+    - m_Data: 48594
+    - m_Data: 48596
+    - m_Data: 48598
+    - m_Data: 48600
+    - m_Data: 48602
+    - m_Data: 48604
+    - m_Data: 48606
+    - m_Data: 48608
+    - m_Data: 48610
+    - m_Data: 48612
+    - m_Data: 48614
+    - m_Data: 48616
+    - m_Data: 48618
+    - m_Data: 48620
+    - m_Data: 48622
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 

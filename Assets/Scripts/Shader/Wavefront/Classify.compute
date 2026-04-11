@@ -9,7 +9,8 @@ uint _ScreenHeight;
 
 RWStructuredBuffer<control> controls;
 RWStructuredBuffer<ray>     main_rays;
-
+RWStructuredBuffer<uint> activeRayIndices;
+uint                     activeRayCount;
 float GetBlackHoleMarchShellRadius(int i)
 {
     float rs = blackholes[i].schwarzchild_radius;
@@ -31,11 +32,9 @@ bool IsInsideAnyMarchShell(float3 pos)
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
-    uint pixelIndex = id.x;
-    if (pixelIndex >= _ScreenWidth * _ScreenHeight) return;
-
-    if (HasFlag(controls[pixelIndex].flags, FLAG_DONE)) // no need to reclassify if done
-        return;
+    uint slot = id.x;
+    if (slot >= activeRayCount) return;
+    uint pixelIndex = activeRayIndices[slot];
 
     float3 position = main_rays[pixelIndex].position;
 

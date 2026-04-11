@@ -236,7 +236,7 @@ bool HandleReflection(uint pixelIndex)
 
     ray.direction = L;
     color_info.rayColor *= f * NdotL * weight / max(pdf, 1e-8);
-    ray.position = HitInfo.hitPoint + (Ng * 1e-4);
+    ray.position = main_rays[pixelIndex].position + (Ng * 1e-4);
 
     // =======================
     // NEE TODO: IMPLIMENT NEE
@@ -263,7 +263,7 @@ bool HandleReflection(uint pixelIndex)
     ray_color_info[pixelIndex]      = color_info;
     main_rays[pixelIndex].direction = ray.direction;
     main_rays[pixelIndex].position  = ray.position;
-    controls[pixelIndex].flags      = FLAG_NEEDS_LINEAR_MARCH;
+    controls[pixelIndex].flags      = FLAG_NEEDS_CLASSIFY;
     return false;
 }
 

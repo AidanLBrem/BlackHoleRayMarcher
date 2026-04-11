@@ -51,7 +51,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     main_rays[pixelIndex].direction = normalize(vp - CameraWorldPos);
 
     // ── Reset per-sample state ───────────────────────────────────────
-    controls[pixelIndex].flags      = 0;
+    controls[pixelIndex].flags      = FLAG_NEEDS_CLASSIFY;
 
     color_info c   = (color_info)0;
     c.rayColor     = float3(1, 1, 1);

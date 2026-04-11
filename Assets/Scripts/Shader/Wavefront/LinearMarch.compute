@@ -18,10 +18,6 @@ int   TLASRootIndex;
 int   numInstances;
 int   numTLASNodes;
 int   numMeshes;
-int   InstanceBLASTraversals;
-int   BVHTests;
-int   triTests;
-int   BLASNodeVisits;
 
 float GetSOIRadius(int i)
 {
@@ -44,299 +40,175 @@ bool RayEntersSOI(float3 origin, float3 dir, float tMax, out float tEntry, out i
     }
     return bhIndex >= 0;
 }
-
-HitInfo TraverseInstanceBLAS(Ray ray, uint instanceIndex, float worldTMax, bool findClosestCollisionOnly)
-{
-    InstanceBLASTraversals++;
-
-    HitInfo closest = (HitInfo)0;
-    float bestWorldT = 3.402823e+38;
-
-    Mesh mesh = Instances[instanceIndex];
-    Ray localRay = ray;
-    localRay.position = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
-
-    float3 localDirUn = mul(mesh.worldToLocalMatrix, float4(ray.direction, 0)).xyz;
-    float dirScale = length(localDirUn);
-    if (dirScale < 1e-12)
-        return closest;
-
-    localRay.direction = localDirUn / dirScale;
-    float3 inverseDirection = 1 / localRay.direction;
-    float bestLocalT = min(worldTMax, bestWorldT) * dirScale;
-
-    int stack[32];
-    float stackT[32];
-    int sp = 0;
-
-    uint nodeIdx = mesh.firstBVHNodeIndex;
-    float currentTNear = -1.0;
-
-    for (;;)
-    {
-        BVHTests++;
-        BLASNodeVisits++;
-
-        if (currentTNear > bestLocalT)
-        {
-            if (sp == 0) break;
-            sp--;
-            nodeIdx = stack[sp];
-            currentTNear = stackT[sp];
-            continue;
-        }
-
-        BVHNode node = BVHNodes[nodeIdx];
-        bool isLeaf = (node.left == -1) && (node.right == -1);
-
-        if (isLeaf)
-        {
-            for (uint j = node.firstIndex; j < node.firstIndex + node.count; j++)
-            {
-                Triangle tri = Triangles[j];
-                HitInfo h = rayTriangle(localRay, tri);
-                triTests++;
-                if (!h.didHit) continue;
-
-                h.triIndex = j;
-
-                float localT = h.distance;
-                if (localT > bestLocalT) continue;
-
-                float worldT = localT / dirScale;
-                float3 hitWorld = ray.position + ray.direction * worldT;
-
-                bestLocalT = localT;
-                bestWorldT = worldT;
-
-                closest = h;
-                closest.hitPoint = hitWorld;
-                closest.distance = worldT;
-                closest.objectType = 2;
-                closest.objectIndex = instanceIndex;
-                uint i0 = TriangleIndices[tri.baseIndex + 0];
-                uint i1 = TriangleIndices[tri.baseIndex + 1];
-                uint i2 = TriangleIndices[tri.baseIndex + 2];
-
-                float3 n0 = Normals[i0];
-                float3 n1 = Normals[i1];
-                float3 n2 = Normals[i2];
-
-                float3 localNormal  = n0 * (1 - (h.u + h.v)) + n1 * h.u + n2 * h.v;
-                float3x3 normalMat  = transpose((float3x3)mesh.worldToLocalMatrix);
-                closest.worldNormal = safeNormalize(mul(normalMat, localNormal));
-                if (findClosestCollisionOnly)
-                    return closest;
-            }
-
-            if (sp == 0) break;
-            sp--;
-            nodeIdx = stack[sp];
-            currentTNear = stackT[sp];
-            continue;
-        }
-
-        BVHNode leftNode  = BVHNodes[node.left];
-        BVHNode rightNode = BVHNodes[node.right];
-
-        AABBHitInfo lh = RayHitsBox(
-            localRay.position, localRay.direction, inverseDirection,
-            leftNode.AABBLeftX,  leftNode.AABBLeftY,  leftNode.AABBLeftZ,
-            leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ, bestLocalT);
-        AABBHitInfo rh = RayHitsBox(
-            localRay.position, localRay.direction, inverseDirection,
-            rightNode.AABBLeftX,  rightNode.AABBLeftY,  rightNode.AABBLeftZ,
-            rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ, bestLocalT);
-
-        if (!lh.didHit && !rh.didHit)
-        {
-            if (sp == 0) break;
-            sp--;
-            nodeIdx = stack[sp];
-            currentTNear = stackT[sp];
-            continue;
-        }
-
-        bool leftFirst = lh.didHit && (!rh.didHit || lh.distance <= rh.distance);
-        int  nearIdx   = leftFirst ? node.left  : node.right;
-        float nearT    = leftFirst ? lh.distance : rh.distance;
-        int  farIdx    = leftFirst ? node.right : node.left;
-        float farT     = leftFirst ? rh.distance : lh.distance;
-        bool farHit    = leftFirst ? rh.didHit : lh.didHit;
-
-        if (farHit && sp < 32) { stack[sp] = farIdx; stackT[sp] = farT; sp++; }
-        nodeIdx = nearIdx;
-        currentTNear = nearT;
-    }
-
-    return closest;
-}
-
 HitInfo checkMeshCollisions(Ray ray, float worldTMax, bool findClosestCollisionOnly)
 {
     HitInfo closest = (HitInfo)0;
-
     if (numMeshes <= 0 || numInstances <= 0 || numTLASNodes <= 0 || TLASRootIndex < 0)
         return closest;
 
-#ifdef USE_TLAS
     float bestWorldT = 3.402823e+38;
-    int stack[32];
-    float stackT[32];
-    int sp = 0;
-    uint nodeIdx = TLASRootIndex;
-    float currentTNear = -1.0;
-    float3 inverseDirection = 1 / ray.direction;
+    float3 inverseDirection = 1.0 / ray.direction;
+
+    // separate stacks — TLAS is shallow, BLAS needs full depth
+    int   tlasStack[8];   float tlasStackT[8];   int tlasSp = 0;
+    int   blasStack[32];  float blasStackT[32];  int blasSp = 0;
+
+    uint  tlasNodeIdx = (uint)TLASRootIndex;
+    float tlasTNear   = -1.0;
 
     for (;;)
     {
-        if (currentTNear > bestWorldT || currentTNear > worldTMax)
+        if (tlasTNear > bestWorldT || tlasTNear > worldTMax)
         {
-            if (sp == 0) break;
-            sp--; nodeIdx = stack[sp]; currentTNear = stackT[sp];
+            if (tlasSp == 0) break;
+            tlasSp--; tlasNodeIdx = (uint)tlasStack[tlasSp]; tlasTNear = tlasStackT[tlasSp];
             continue;
         }
 
-        BVHNode node = TLASNodes[nodeIdx];
-        bool isLeaf = (node.left == -1) && (node.right == -1);
+        BVHNode tlasNode = TLASNodes[tlasNodeIdx];
+        bool tlasLeaf    = (tlasNode.left == -1) && (tlasNode.right == -1);
 
-        if (isLeaf)
+        if (tlasLeaf)
         {
-            for (uint j = node.firstIndex; j < node.firstIndex + node.count; j++)
+            for (uint j = tlasNode.firstIndex; j < tlasNode.firstIndex + tlasNode.count; j++)
             {
                 uint instanceIndex = TLASRefs[j];
-                HitInfo h = TraverseInstanceBLAS(ray, instanceIndex, min(worldTMax, bestWorldT), findClosestCollisionOnly);
-                if (h.didHit && h.distance < bestWorldT)
+                Mesh mesh          = Instances[instanceIndex];
+
+                float3 localDirUn = mul(mesh.worldToLocalMatrix, float4(ray.direction, 0)).xyz;
+                float  dirScale   = length(localDirUn);
+                if (dirScale < 1e-12) continue;
+
+                float3 localDir    = localDirUn / dirScale;
+                float3 localPos    = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
+                float3 localInvDir = 1.0 / localDir;
+                float  bestLocalT  = min(worldTMax, bestWorldT) * dirScale;
+
+                // ── BLAS traversal ────────────────────────────────────
+                blasSp = 0;
+                uint  blasNodeIdx = mesh.firstBVHNodeIndex;
+                float blasTNear   = -1.0;
+
+                for (;;)
                 {
-                    bestWorldT = h.distance;
-                    closest = h;
-                    if (findClosestCollisionOnly) return closest;
+                    if (blasTNear > bestLocalT)
+                    {
+                        if (blasSp == 0) break;
+                        blasSp--; blasNodeIdx = (uint)blasStack[blasSp]; blasTNear = blasStackT[blasSp];
+                        continue;
+                    }
+
+                    BVHNode blasNode = BVHNodes[blasNodeIdx];
+                    bool blasLeaf    = (blasNode.left == -1) && (blasNode.right == -1);
+
+                    if (blasLeaf)
+                    {
+                        for (uint k = blasNode.firstIndex; k < blasNode.firstIndex + blasNode.count; k++)
+                        {
+                            Triangle tri = Triangles[k];
+                            Ray localRay;
+                            localRay.position  = localPos;
+                            localRay.direction = localDir;
+                            HitInfo h = rayTriangle(localRay, tri);
+                            if (!h.didHit) continue;
+
+                            float localT = h.distance;
+                            if (localT > bestLocalT) continue;
+
+                            float worldT = localT / dirScale;
+                            if (worldT >= bestWorldT) continue;
+
+                            bestLocalT = localT;
+                            bestWorldT = worldT;  // ← shrinks TLAS culling too
+
+                            h.triIndex    = k;
+                            h.distance    = worldT;
+                            h.objectIndex = (int)instanceIndex;
+
+                            uint i0 = TriangleIndices[tri.baseIndex + 0];
+                            uint i1 = TriangleIndices[tri.baseIndex + 1];
+                            uint i2 = TriangleIndices[tri.baseIndex + 2];
+                            float3 localNormal = Normals[i0] * (1 - (h.u + h.v))
+                                               + Normals[i1] * h.u
+                                               + Normals[i2] * h.v;
+                            float3x3 normalMat = transpose((float3x3)mesh.worldToLocalMatrix);
+                            h.worldNormal = safeNormalize(mul(normalMat, localNormal));
+
+                            closest = h;
+                            if (findClosestCollisionOnly) return closest;
+                        }
+
+                        if (blasSp == 0) break;
+                        blasSp--; blasNodeIdx = (uint)blasStack[blasSp]; blasTNear = blasStackT[blasSp];
+                        continue;
+                    }
+
+                    BVHNode ln = BVHNodes[blasNode.left];
+                    BVHNode rn = BVHNodes[blasNode.right];
+
+                    AABBHitInfo lh = RayHitsBox(localPos, localDir, localInvDir,
+                        ln.AABBLeftX, ln.AABBLeftY, ln.AABBLeftZ,
+                        ln.AABBRightX, ln.AABBRightY, ln.AABBRightZ, bestLocalT);
+                    AABBHitInfo rh = RayHitsBox(localPos, localDir, localInvDir,
+                        rn.AABBLeftX, rn.AABBLeftY, rn.AABBLeftZ,
+                        rn.AABBRightX, rn.AABBRightY, rn.AABBRightZ, bestLocalT);
+
+                    if (!lh.didHit && !rh.didHit)
+                    {
+                        if (blasSp == 0) break;
+                        blasSp--; blasNodeIdx = (uint)blasStack[blasSp]; blasTNear = blasStackT[blasSp];
+                        continue;
+                    }
+
+                    bool leftFirst = lh.didHit && (!rh.didHit || lh.distance <= rh.distance);
+                    uint nearIdx   = leftFirst ? (uint)blasNode.left  : (uint)blasNode.right;
+                    float nearT    = leftFirst ? lh.distance : rh.distance;
+                    uint farIdx    = leftFirst ? (uint)blasNode.right : (uint)blasNode.left;
+                    float farT     = leftFirst ? rh.distance : lh.distance;
+                    bool farHit    = leftFirst ? rh.didHit : lh.didHit;
+
+                    if (farHit && blasSp < 32) { blasStack[blasSp] = (int)farIdx; blasStackT[blasSp] = farT; blasSp++; }
+                    blasNodeIdx = nearIdx;
+                    blasTNear   = nearT;
                 }
+                // ── end BLAS ──────────────────────────────────────────
             }
-            if (sp == 0) break;
-            sp--; nodeIdx = stack[sp]; currentTNear = stackT[sp];
+
+            if (tlasSp == 0) break;
+            tlasSp--; tlasNodeIdx = (uint)tlasStack[tlasSp]; tlasTNear = tlasStackT[tlasSp];
             continue;
         }
 
-        BVHNode leftNode  = TLASNodes[node.left];
-        BVHNode rightNode = TLASNodes[node.right];
+        BVHNode tln = TLASNodes[tlasNode.left];
+        BVHNode trn = TLASNodes[tlasNode.right];
 
         AABBHitInfo lh = RayHitsBox(ray.position, ray.direction, inverseDirection,
-            leftNode.AABBLeftX,  leftNode.AABBLeftY,  leftNode.AABBLeftZ,
-            leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ, bestWorldT);
+            tln.AABBLeftX, tln.AABBLeftY, tln.AABBLeftZ,
+            tln.AABBRightX, tln.AABBRightY, tln.AABBRightZ, bestWorldT);
         AABBHitInfo rh = RayHitsBox(ray.position, ray.direction, inverseDirection,
-            rightNode.AABBLeftX,  rightNode.AABBLeftY,  rightNode.AABBLeftZ,
-            rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ, bestWorldT);
+            trn.AABBLeftX, trn.AABBLeftY, trn.AABBLeftZ,
+            trn.AABBRightX, trn.AABBRightY, trn.AABBRightZ, bestWorldT);
 
         if (!lh.didHit && !rh.didHit)
         {
-            if (sp == 0) break;
-            sp--; nodeIdx = stack[sp]; currentTNear = stackT[sp];
+            if (tlasSp == 0) break;
+            tlasSp--; tlasNodeIdx = (uint)tlasStack[tlasSp]; tlasTNear = tlasStackT[tlasSp];
             continue;
         }
 
         bool leftFirst = lh.didHit && (!rh.didHit || lh.distance <= rh.distance);
-        int  nearIdx   = leftFirst ? node.left  : node.right;
+        uint nearIdx   = leftFirst ? (uint)tlasNode.left  : (uint)tlasNode.right;
         float nearT    = leftFirst ? lh.distance : rh.distance;
-        int  farIdx    = leftFirst ? node.right : node.left;
+        uint farIdx    = leftFirst ? (uint)tlasNode.right : (uint)tlasNode.left;
         float farT     = leftFirst ? rh.distance : lh.distance;
         bool farHit    = leftFirst ? rh.didHit : lh.didHit;
 
-        if (farHit && sp < 32) { stack[sp] = farIdx; stackT[sp] = farT; sp++; }
-        nodeIdx = nearIdx;
-        currentTNear = nearT;
+        if (farHit && tlasSp < 8) { tlasStack[tlasSp] = (int)farIdx; tlasStackT[tlasSp] = farT; tlasSp++; }
+        tlasNodeIdx = nearIdx;
+        tlasTNear   = nearT;
     }
+
     return closest;
-
-#else
-    float bestWorldT = 3.402823e+38;
-    for (int i = 0; i < numMeshes; i++)
-    {
-        Mesh mesh = Instances[i];
-        Ray localRay = ray;
-
-        float3 localDirUn = mul(mesh.worldToLocalMatrix, float4(ray.direction, 0));
-        float dirScale = length(localDirUn);
-        if (dirScale < 1e-12) continue;
-
-        localRay.direction = localDirUn / dirScale;
-        float3 inverseDirection = 1.0 / localRay.direction;
-        float bestLocalT = min(worldTMax, bestWorldT) * dirScale;
-
-        int stack[32];
-        float stackT[32];
-        int sp = 0;
-        uint nodeIdx = mesh.firstBVHNodeIndex;
-        float currentTNear = -1.0;
-        localRay.position = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
-
-        for (;;)
-        {
-            if (currentTNear > bestLocalT)
-            {
-                if (sp == 0) break;
-                sp--; nodeIdx = stack[sp]; currentTNear = stackT[sp];
-                continue;
-            }
-
-            BVHNode node = BVHNodes[nodeIdx];
-            bool isLeaf = (node.left == -1) && (node.right == -1);
-
-            if (isLeaf)
-            {
-                for (uint j = node.firstIndex; j < node.firstIndex + node.count; j++)
-                {
-                    Triangle tri = Triangles[j];
-                    HitInfo h = rayTriangle(localRay, tri);
-                    h.triIndex = j;
-                    if (!h.didHit) continue;
-                    float localT = h.distance;
-                    if (localT > bestLocalT) continue;
-                    float worldT = localT / dirScale;
-                    bestWorldT = worldT;
-                    bestLocalT = localT;
-                    closest = h;
-                    closest.hitPoint   = ray.position + ray.direction * worldT;
-                    closest.distance   = bestWorldT;
-                    closest.objectType = 2;
-                    closest.objectIndex = i;
-                }
-                if (sp == 0) break;
-                sp--; nodeIdx = stack[sp]; currentTNear = stackT[sp];
-                continue;
-            }
-
-            BVHNode leftNode  = BVHNodes[node.left];
-            BVHNode rightNode = BVHNodes[node.right];
-
-            AABBHitInfo lh = RayHitsBox(localRay.position, localRay.direction, inverseDirection,
-                leftNode.AABBLeftX,  leftNode.AABBLeftY,  leftNode.AABBLeftZ,
-                leftNode.AABBRightX, leftNode.AABBRightY, leftNode.AABBRightZ, bestLocalT);
-            AABBHitInfo rh = RayHitsBox(localRay.position, localRay.direction, inverseDirection,
-                rightNode.AABBLeftX,  rightNode.AABBLeftY,  rightNode.AABBLeftZ,
-                rightNode.AABBRightX, rightNode.AABBRightY, rightNode.AABBRightZ, bestLocalT);
-
-            if (!lh.didHit && !rh.didHit)
-            {
-                if (sp == 0) break;
-                sp--; nodeIdx = stack[sp]; currentTNear = stackT[sp];
-                continue;
-            }
-
-            bool leftFirst = lh.didHit && (!rh.didHit || lh.distance <= rh.distance);
-            int  nearIdx   = leftFirst ? node.left  : node.right;
-            float nearT    = leftFirst ? lh.distance : rh.distance;
-            int  farIdx    = leftFirst ? node.right : node.left;
-            float farT     = leftFirst ? rh.distance : lh.distance;
-            bool farHit    = leftFirst ? rh.didHit : lh.didHit;
-
-            if (farHit && sp < 32) { stack[sp] = farIdx; stackT[sp] = farT; sp++; }
-            nodeIdx = nearIdx;
-            currentTNear = nearT;
-        }
-    }
-    return closest;
-#endif
 }
 
 HitInfo TraceRay(float3 origin, float3 direction, float tMax)
@@ -354,7 +226,6 @@ HitInfo TraceRay(float3 origin, float3 direction, float tMax)
         result.triIndex    = hit.triIndex;
         result.u           = hit.u;
         result.v           = hit.v;
-        result.hitPoint    = hit.hitPoint;
     }
     return result;
 }
@@ -373,7 +244,11 @@ void Main(uint3 id : SV_DispatchThreadID)
     bool  entersSOI = RayEntersSOI(r.position, r.direction, renderDistance, tSOI, bhIdx);
     float tMax      = entersSOI ? tSOI : renderDistance;
 
-    HitInfo hit = TraceRay(r.position, r.direction, tMax);
+    Ray worldRay;
+    worldRay.position  = r.position;
+    worldRay.direction = r.direction;
+
+    HitInfo hit = checkMeshCollisions(worldRay, tMax, false);
     hit_infos[pixelIndex] = hit;
 
     if (hit.didHit)

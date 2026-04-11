@@ -18,6 +18,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
 {
     const uint FLAG_NEEDS_LINEAR_MARCH = (1u << 0);
     const uint FLAG_NEEDS_REFLECTION   = (1u << 2);
+    const uint FLAG_NEEDS_CLASSIFY = (1u << 5);
     [SerializeField] bool useShaderInSceneView = true;
     [SerializeField] public bool useTlas = true;
     [SerializeField] public bool useNEE = true;
@@ -217,15 +218,13 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
     struct HitInfo
     {
-        private uint didHit;
-        private float distance;
-        private Vector3 hitPoint;
-        private Vector3 worldNormal;  
-        private float u;
-        private float v;
-        private uint triIndex;
-        uint objectType;
-        private int objectIndex;
+        private uint   didHit;
+        private float  distance;
+        private float  u;
+        private float  v;
+        private uint   triIndex;
+        private int    objectIndex;
+        private Vector3 worldNormal;
     }
 
     bool ShouldResetAccumulation(Camera cam)
@@ -402,6 +401,8 @@ public class RayTracingManagerWavefront : MonoBehaviour
             linearMarchCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
         if (reflectionCompute != null)
             reflectionCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
+        if (classifyCompute != null)
+            classifyCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
     }
 
     void BindInitBuffers()
@@ -436,7 +437,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
         linearMarchCompute.SetBuffer(0, "Vertices",        MeshVerticesBuffer);
         linearMarchCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
         linearMarchCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
-        linearMarchRaytraceShader.SetAccelerationStructure("_AccelStructure", accelStructure);
+
         linearMarchRaytraceShader.SetBuffer("controls",        controlBuffer);
         linearMarchRaytraceShader.SetBuffer("main_rays",       mainRayBuffer);
         linearMarchRaytraceShader.SetBuffer("hit_info_buffer", HitInfoBuffer);
@@ -502,7 +503,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
         writeIndirectArgsCompute.Dispatch(0, 1, 1, 1);
         UnityEngine.Profiling.Profiler.EndSample();
 
-        UnityEngine.Profiling.Profiler.BeginSample(label);
+        //UnityEngine.Profiling.Profiler.BeginSample(label);
         cs.SetInt("activeRayCount", totalPixels);
         cs.DispatchIndirect(0, indirectArgsBuffer, 0);
         UnityEngine.Profiling.Profiler.EndSample();
@@ -660,10 +661,10 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
     List<RayTracedMesh> GetValidMeshInstances()
     {
-        RayTracedMesh[] allMeshes = FindObjectsOfType<RayTracedMesh>();
-        List<RayTracedMesh> validMeshes = new(allMeshes.Length);
+        List<RayTracedMesh> allMeshes = RayTracedMesh.All;
+        List<RayTracedMesh> validMeshes = new(allMeshes.Count);
 
-        for (int i = 0; i < allMeshes.Length; i++)
+        for (int i = 0; i < allMeshes.Count; i++)
         {
             RayTracedMesh m = allMeshes[i];
             if (m == null) continue;
@@ -714,11 +715,10 @@ public class RayTracingManagerWavefront : MonoBehaviour
             lastInstanceCount = -1;
             lastForceSoftware = forceSoftwareRaytracing;
         }
-
+        bool anyTransformDirty    = AnyTransformDirty(validInstances);
+        bool anyMeshUpdated       = AnyInstanceNeedsUpdate(validInstances);
         if (useHardwareRT)
         {
-            bool anyTransformDirty    = AnyTransformDirty(validInstances);
-            bool anyMeshUpdated       = AnyInstanceNeedsUpdate(validInstances);
             bool instanceCountChanged = validInstances.Count != lastInstanceCount;
 
             if (tlasDirty || anyMeshUpdated || instanceCountChanged)
@@ -750,6 +750,8 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (forceBufferRecreation) { buffersHaveRealData = false; tlasDirty = true; forceBufferRecreation = false; }
         if (validInstances.Count == 0) { EnsureBuffersCreated(); return; }
         if (validInstances.Count != lastInstanceCount) { tlasDirty = true; lastInstanceCount = validInstances.Count; }
+        
+        if (!tlasDirty && !anyMeshUpdated && !anyTransformDirty && buffersHaveRealData) return;
 
         List<SharedMeshData> uniqueMeshes = GetUniqueSharedMeshes(validInstances);
         Dictionary<SharedMeshData, MeshOffsets> softOffsets = ComputeMeshOffsets(uniqueMeshes);
@@ -1058,7 +1060,59 @@ public class RayTracingManagerWavefront : MonoBehaviour
         cs.SetFloat("bendStrength", bendStrength);
         cs.SetFloat("strongFieldCurvatureRadPetMeterCutoff", strongFieldRadPerMeterCuttoff);
     }
+// Temporary CPU sort validation — add this method
+    void CPUSortActiveRays(int totalPixels)
+    {
+        // read back count
+        uint[] countArr = new uint[1];
+        activeRayCountBuffer.GetData(countArr);
+        uint activeCount = countArr[0];
+        if (activeCount == 0) return;
 
+        // read back indices
+        uint[] indices = new uint[activeCount];
+        activeRayIndicesBuffer.GetData(indices, 0, 0, (int)activeCount);
+
+        // read back ray directions for sorting
+        // MainRay struct is position(float3) + direction(float3) = 24 bytes
+        // We need direction which is at offset 12
+        Vector3[] directions = new Vector3[activeCount];
+        // read full ray buffer — expensive but this is just validation
+        MainRay[] rays = new MainRay[totalPixels];
+        mainRayBuffer.GetData(rays);
+
+        // build sort keys — quantized octahedral direction encoding
+        uint[] keys = new uint[activeCount];
+        for (int i = 0; i < activeCount; i++)
+        {
+            Vector3 d = rays[indices[i]].rayDirection;
+            keys[i] = DirectionToSortKey(d);
+        }
+
+        // sort indices by key
+        System.Array.Sort(keys, indices);
+
+        // upload sorted indices back
+        activeRayIndicesBuffer.SetData(indices, 0, 0, (int)activeCount);
+    }
+
+    uint DirectionToSortKey(Vector3 dir)
+    {
+        dir.Normalize();
+        float l1 = Mathf.Abs(dir.x) + Mathf.Abs(dir.y) + Mathf.Abs(dir.z);
+        float ox = dir.x / l1;
+        float oy = dir.y / l1;
+        if (dir.z < 0)
+        {
+            float sx = ox >= 0 ? 1f : -1f;
+            float sy = oy >= 0 ? 1f : -1f;
+            ox = (1f - Mathf.Abs(oy)) * sx;
+            oy = (1f - Mathf.Abs(ox)) * sy;
+        }
+        uint x = (uint)Mathf.Clamp((ox * 0.5f + 0.5f) * 1023f, 0, 1023);
+        uint y = (uint)Mathf.Clamp((oy * 0.5f + 0.5f) * 1023f, 0, 1023);
+        return (x << 10) | y;
+    }
     void OnRenderImage(RenderTexture source, RenderTexture target)
     {
         if (Camera.current.name == "SceneCamera")
@@ -1068,7 +1122,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
         }
 
         InitFrame();
-
+        linearMarchRaytraceShader.SetAccelerationStructure("_AccelStructure", accelStructure);
         Camera cam = GetComponent<Camera>();
         if (ShouldResetAccumulation(cam))
         {
@@ -1116,14 +1170,16 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
                 for (int bounce = 0; bounce < maxBounces; bounce++)
                 {
-                    DispatchCompute(classifyCompute, pixelCount, "Classify");
-
+                    DispatchWavefront(classifyCompute,    FLAG_NEEDS_CLASSIFY,     pixelCount, $"Classify_b{bounce}");
+                    uint[] count = new uint[1];
+                    //activeRayCountBuffer.GetData(count);
+                    //Debug.Log($"Bounce {bounce} active after classify: {count[0]} / {pixelCount}");
                     if (useHardwareRT)
                         DispatchHardwareLinearMarch(scaledW, scaledH);
                     else
-                        DispatchWavefront(linearMarchCompute, FLAG_NEEDS_LINEAR_MARCH, pixelCount, "Linear March");
+                        DispatchWavefront(linearMarchCompute, FLAG_NEEDS_LINEAR_MARCH, pixelCount, $"LinearMarch_b{bounce}");
 
-                    DispatchWavefront(reflectionCompute, FLAG_NEEDS_REFLECTION, pixelCount, "Reflection");
+                    DispatchWavefront(reflectionCompute, FLAG_NEEDS_REFLECTION,   pixelCount, $"Reflection_b{bounce}");
                 }
             }
 
@@ -1218,8 +1274,8 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
     void InitFrame()
     {
-        RayTracedMesh[] meshObjects = FindObjectsOfType<RayTracedMesh>();
-        if (AnyTransformDirty(meshObjects.ToList())) tlasDirty = true;
+        List<RayTracedMesh> meshObjects = RayTracedMesh.All;
+        if (AnyTransformDirty(meshObjects)) tlasDirty = true;
 
         EnsureMaterialsCreated();
         EnsureBuffersCreated();

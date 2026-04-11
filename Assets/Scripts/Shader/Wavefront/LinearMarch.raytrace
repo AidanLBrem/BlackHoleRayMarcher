@@ -119,7 +119,6 @@ void RayGen()
         hit_info_buffer[pixelIndex].triIndex    = 0xFFFFFFFF; // signals precomputed normal to reflection shader
         hit_info_buffer[pixelIndex].u           = payload.barycentrics.x;
         hit_info_buffer[pixelIndex].v           = payload.barycentrics.y;
-        hit_info_buffer[pixelIndex].hitPoint    = payload.hitPoint;
         hit_info_buffer[pixelIndex].worldNormal = payload.worldNormal;
         r.position = payload.hitPoint;
         main_rays[pixelIndex] = r;
