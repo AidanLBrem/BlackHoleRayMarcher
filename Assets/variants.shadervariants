@@ -1,0 +1,185 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!200 &20000000
+ShaderVariantCollection:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: variants
+  m_Shaders:
+  - first: {fileID: 64, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: SHADOWS_SINGLE_CASCADE SHADOWS_SPLIT_SPHERES
+        passType: 0
+  - first: {fileID: 4800000, guid: d779f3a711c21624381f1f9699fdec69, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+      - keywords: APPLY_MIE APPLY_NEE APPLY_RAYLEIGH APPLY_SCATTERING APPLY_SUNDISK
+          APPLY_SUN_LIGHTING DEBUG_DISPLAY_BLAS_NODE_VISITS DEBUG_DISPLAY_BVH_NODES_VISITED
+          DEBUG_DISPLAY_INSTANCE_BLAS_TRAVERSALS DEBUG_DISPLAY_TLAS_LEAF_REFS DEBUG_DISPLAY_TLAS_NODE_VISITS
+          DEBUG_DISPLAY_TRIANGLE_TESTS ENABLE_LENSING IMPACT_PARAMETER_DEBUG MARCH_CHORD_COLLISION_LIMIT
+          ORBITAL_PLANE_TEST_POSSIBLE TEST_SPHERE TEST_TRIANGLE USE_LUT USE_RAY_MAGNIFICATION
+          USE_REDSHIFTING USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE APPLY_NEE APPLY_RAYLEIGH APPLY_SCATTERING APPLY_SUNDISK
+          APPLY_SUN_LIGHTING ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT TEST_SPHERE
+          TEST_TRIANGLE USE_RAY_MAGNIFICATION USE_REDSHIFTING USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE APPLY_NEE APPLY_RAYLEIGH APPLY_SCATTERING APPLY_SUNDISK
+          APPLY_SUN_LIGHTING ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT TEST_SPHERE
+          TEST_TRIANGLE USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE APPLY_NEE APPLY_RAYLEIGH APPLY_SUNDISK ENABLE_LENSING
+          MARCH_CHORD_COLLISION_LIMIT TEST_SPHERE TEST_TRIANGLE USE_REDSHIFTING
+        passType: 0
+      - keywords: APPLY_MIE APPLY_NEE APPLY_RAYLEIGH ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT
+          TEST_SPHERE TEST_TRIANGLE USE_REDSHIFTING
+        passType: 0
+      - keywords: APPLY_MIE APPLY_RAYLEIGH APPLY_SCATTERING APPLY_SUNDISK APPLY_SUN_LIGHTING
+          ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT TEST_SPHERE TEST_TRIANGLE USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE APPLY_RAYLEIGH APPLY_SCATTERING APPLY_SUNDISK ENABLE_LENSING
+          MARCH_CHORD_COLLISION_LIMIT TEST_SPHERE TEST_TRIANGLE USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE APPLY_RAYLEIGH APPLY_SUNDISK APPLY_SUN_LIGHTING ENABLE_LENSING
+          MARCH_CHORD_COLLISION_LIMIT TEST_SPHERE TEST_TRIANGLE USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE APPLY_RAYLEIGH APPLY_SUNDISK ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT
+          TEST_SPHERE TEST_TRIANGLE USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE APPLY_RAYLEIGH ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT
+          TEST_SPHERE TEST_TRIANGLE USE_REDSHIFTING
+        passType: 0
+      - keywords: APPLY_MIE APPLY_SUNDISK APPLY_SUN_LIGHTING ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT
+          TEST_SPHERE TEST_TRIANGLE USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE APPLY_SUNDISK ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT
+          TEST_SPHERE TEST_TRIANGLE USE_TLAS
+        passType: 0
+      - keywords: APPLY_MIE ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT TEST_SPHERE
+          TEST_TRIANGLE USE_TLAS
+        passType: 0
+      - keywords: APPLY_NEE ENABLE_LENSING TEST_SPHERE TEST_TRIANGLE USE_REDSHIFTING
+          USE_TLAS
+        passType: 0
+      - keywords: APPLY_NEE ENABLE_LENSING TEST_TRIANGLE USE_REDSHIFTING USE_TLAS
+        passType: 0
+      - keywords: ENABLE_LENSING MARCH_CHORD_COLLISION_LIMIT TEST_SPHERE TEST_TRIANGLE
+          USE_TLAS
+        passType: 0
+      - keywords: ENABLE_LENSING TEST_SPHERE TEST_TRIANGLE USE_REDSHIFTING
+        passType: 0
+  - first: {fileID: 4800000, guid: 32812c464f9bb7944bccf2042f6e3436, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 66, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 46, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: DIRECTIONAL LIGHTPROBE_SH
+        passType: 4
+      - keywords: DIRECTIONAL LIGHTPROBE_SH SHADOWS_SCREEN
+        passType: 4
+      - keywords: DIRECTIONAL LIGHTPROBE_SH SHADOWS_SCREEN _EMISSION
+        passType: 4
+      - keywords: DIRECTIONAL LIGHTPROBE_SH _EMISSION
+        passType: 4
+      - keywords: DIRECTIONAL
+        passType: 5
+      - keywords: SHADOWS_DEPTH
+        passType: 8
+  - first: {fileID: 6, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: SHADOWS_DEPTH
+        passType: 8
+  - first: {fileID: 106, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: _SUNDISK_SIMPLE
+        passType: 0
+  - first: {fileID: 9000, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 9001, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 9002, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 9003, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 9004, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 9007, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 9100, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: _UIE_FORCE_GAMMA
+        passType: 0
+  - first: {fileID: 9101, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 19011, guid: 0000000000000000f000000000000000, type: 0}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 4800000, guid: e6e9a19c3678ded42a3bc431ebef7dbd, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 4800000, guid: 36e335017ad71d54fbb10842863188ae, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 4800000, guid: fe393ace9b354375a9cb14cdbbc28be4, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 4800000, guid: 4d884bf0e9124245b4cc402bcbadeeda, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 4800000, guid: bf1d279c767087b4cacb9b41d4104202, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+  - first: {fileID: 4800000, guid: 8dac04a1ac3daac4793e6d83af841607, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0

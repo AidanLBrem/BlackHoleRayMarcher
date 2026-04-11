@@ -259,17 +259,9 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
         return changed;
     }
-
-    void Awake()
+    void Start()
     {
-        EnsureBuffersCreated();
-        EnsureMaterialsCreated();
-        BindBuffersToShaders();
-        UpdateCameraParams(Camera.current != null ? Camera.current : GetComponent<Camera>());
-        ApplyRaytracingMode();
-        ShaderVariantCollection variants = Resources.Load<ShaderVariantCollection>("RayTracerVariants");
-        if (variants == null) Debug.LogError("RayTracerVariants not found in Resources");
-        else variants.WarmUp();
+        Startup();
     }
 
     void OnEnable()
@@ -279,8 +271,12 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (resultTexture != null)
             Graphics.Blit(Texture2D.blackTexture, resultTexture);
     }
-
     void OnValidate()
+    {
+        Startup();
+    }
+
+    void Startup()
     {
         tlasDirty = true;
         buffersHaveRealData = false;
@@ -706,7 +702,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
     {
         bool useHardwareRT = SystemInfo.supportsRayTracing && !forceSoftwareRaytracing;
         List<RayTracedMesh> validInstances = GetValidMeshInstances();
-
+        ///Debug.Log($"Valid instances: {validInstances.Count}, tlasDirty: {tlasDirty}, lastInstanceCount: {lastInstanceCount}");
         // force full rebuild when switching between hardware/software
         if (forceSoftwareRaytracing != lastForceSoftware)
         {
@@ -743,6 +739,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
             }
 
             for (int i = 0; i < validInstances.Count; i++) validInstances[i].transformDirty = false;
+            linearMarchRaytraceShader.SetAccelerationStructure("_AccelStructure", accelStructure);
             return;
         }
 
@@ -1122,7 +1119,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
         }
 
         InitFrame();
-        linearMarchRaytraceShader.SetAccelerationStructure("_AccelStructure", accelStructure);
+
         Camera cam = GetComponent<Camera>();
         if (ShouldResetAccumulation(cam))
         {

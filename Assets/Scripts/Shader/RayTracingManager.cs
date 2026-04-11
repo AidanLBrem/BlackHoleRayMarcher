@@ -244,8 +244,15 @@ public class RayTracingManager : MonoBehaviour
         return changed;
     }
 
-    void Awake()
+    void Startup()
     {
+        tlasDirty = true;
+        rayTracingMaterial = null;
+        accumulatorMaterial = null;
+        ditherMaterial = null;
+        colorQuantizationMaterial = null;
+        atrousMaterial = null;
+        numRenderedFrames = 0;
         ShaderHelper.InitMaterial(rayTracingShader, ref rayTracingMaterial);
         ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
         ShaderHelper.InitMaterial(ditherShader, ref ditherMaterial);
@@ -266,6 +273,12 @@ public class RayTracingManager : MonoBehaviour
             variants.WarmUp();
             Debug.Log("Warmed up: " + variants.isWarmedUp);
         }
+
+    }
+
+    void Awake()
+    {
+        Startup();
     }
 
     void OnEnable()
@@ -278,13 +291,7 @@ public class RayTracingManager : MonoBehaviour
 
     void OnValidate()
     {
-        tlasDirty = true;
-        rayTracingMaterial = null;
-        accumulatorMaterial = null;
-        ditherMaterial = null;
-        colorQuantizationMaterial = null;
-        atrousMaterial = null;
-        numRenderedFrames = 0;
+        Startup();
     }
 
     void OnDestroy()
