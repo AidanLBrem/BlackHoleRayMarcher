@@ -11,6 +11,15 @@ RWStructuredBuffer<control> controls;
 RWStructuredBuffer<ray>     main_rays;
 RWStructuredBuffer<uint> activeRayIndices;
 uint                     activeRayCount;
+RWStructuredBuffer<uint> linearMarchQueue;    // indices of rays needing linear march
+RWStructuredBuffer<uint> geodesicMarchQueue;  // indices needing geodesic march
+RWStructuredBuffer<uint> reflectionQueue;     // indices needing reflection
+RWStructuredBuffer<uint> skyboxQueue;         // indices needing skybox sample
+
+RWStructuredBuffer<uint> linearMarchCount;    // atomic counter, size 1
+RWStructuredBuffer<uint> geodesicMarchCount;
+RWStructuredBuffer<uint> reflectionCount;
+RWStructuredBuffer<uint> skyboxCount;
 float GetBlackHoleMarchShellRadius(int i)
 {
     float rs = blackholes[i].schwarzchild_radius;
@@ -38,8 +47,19 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     float3 position = main_rays[pixelIndex].position;
 
+    // In Classify.compute
     if (IsInsideAnyMarchShell(position))
+    {
+        uint outSlot;
+        InterlockedAdd(geodesicMarchCount[0], 1, outSlot);
+        geodesicMarchQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_GEODESIC_MARCH;
+    }
     else
+    {
+        uint outSlot;
+        InterlockedAdd(linearMarchCount[0], 1, outSlot);
+        linearMarchQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_LINEAR_MARCH;
+    }
 }

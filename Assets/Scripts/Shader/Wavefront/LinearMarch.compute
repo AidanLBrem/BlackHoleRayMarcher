@@ -11,8 +11,15 @@ uint _ScreenHeight;
 RWStructuredBuffer<control> controls;
 RWStructuredBuffer<ray>     main_rays;
 RWStructuredBuffer<HitInfo> hit_infos;
-RWStructuredBuffer<uint> activeRayIndices;
-uint                     activeRayCount;
+RWStructuredBuffer<uint> linearMarchQueue;    // indices of rays needing linear march
+RWStructuredBuffer<uint> geodesicMarchQueue;  // indices needing geodesic march
+RWStructuredBuffer<uint> reflectionQueue;     // indices needing reflection
+RWStructuredBuffer<uint> skyboxQueue;         // indices needing skybox sample
+
+RWStructuredBuffer<uint> linearMarchCount;    // atomic counter, size 1
+RWStructuredBuffer<uint> geodesicMarchCount;
+RWStructuredBuffer<uint> reflectionCount;
+RWStructuredBuffer<uint> skyboxCount;
 float renderDistance;
 int   TLASRootIndex;
 int   numInstances;
@@ -233,9 +240,8 @@ HitInfo TraceRay(float3 origin, float3 direction, float tMax)
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
-    uint slot = id.x;
-    if (slot >= activeRayCount) return;
-    uint pixelIndex = activeRayIndices[slot];
+    if (id.x >= linearMarchCount[0]) return;
+    uint pixelIndex = linearMarchQueue[id.x];
 
     ray r = main_rays[pixelIndex];
 
@@ -255,16 +261,27 @@ void Main(uint3 id : SV_DispatchThreadID)
     {
         r.position = r.position + r.direction * hit.distance;
         main_rays[pixelIndex] = r;
-        controls[pixelIndex].flags = SetFlag(controls[pixelIndex].flags, FLAG_NEEDS_REFLECTION);
+
+        uint outSlot;
+        InterlockedAdd(reflectionCount[0], 1, outSlot);
+        reflectionQueue[outSlot] = pixelIndex;
+        controls[pixelIndex].flags = FLAG_NEEDS_REFLECTION;
     }
     else if (entersSOI)
     {
         r.position = r.position + r.direction * tSOI;
         main_rays[pixelIndex] = r;
+
+        uint outSlot;
+        InterlockedAdd(geodesicMarchCount[0], 1, outSlot);
+        geodesicMarchQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_GEODESIC_MARCH;
     }
     else
     {
+        uint outSlot;
+        InterlockedAdd(skyboxCount[0], 1, outSlot);
+        skyboxQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_SKYBOX;
     }
 }

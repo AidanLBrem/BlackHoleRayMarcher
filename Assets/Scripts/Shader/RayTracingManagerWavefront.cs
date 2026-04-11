@@ -68,6 +68,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
     [NonSerialized] private ComputeBuffer activeRayIndicesBuffer;
     [NonSerialized] private ComputeBuffer activeRayCountBuffer;
     [NonSerialized] private ComputeBuffer indirectArgsBuffer;
+    
     private bool tlasDirty = true;
     private int lastInstanceCount = -1;
     private bool buffersHaveRealData = false;

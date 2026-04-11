@@ -15,6 +15,9 @@ RWStructuredBuffer<color_info> ray_color_info;
 RWStructuredBuffer<float3>     pixelAccum;
 RWStructuredBuffer<uint> activeRayIndices;
 uint                     activeRayCount;
+
+RWStructuredBuffer<uint> reflectionCount;
+RWStructuredBuffer<uint> reflectionQueue;     // indices needing reflection
 bool HandleReflection(uint pixelIndex)
 {
     HitInfo HitInfo = hit_info_buffer[pixelIndex];
@@ -236,7 +239,7 @@ bool HandleReflection(uint pixelIndex)
 
     ray.direction = L;
     color_info.rayColor *= f * NdotL * weight / max(pdf, 1e-8);
-    ray.position = main_rays[pixelIndex].position + (Ng * 1e-4);
+    ray.position = ray.position + Ng * 1e-4;
 
     // =======================
     // NEE TODO: IMPLIMENT NEE
@@ -271,8 +274,8 @@ bool HandleReflection(uint pixelIndex)
 void Main(uint3 id : SV_DispatchThreadID)
 {
     uint slot = id.x;
-    if (slot >= activeRayCount) return;
-    uint pixelIndex = activeRayIndices[slot];
+    if (slot >= reflectionCount[0]) return;
+    uint pixelIndex = reflectionQueue[slot];  // ← correct
 
     bool done = HandleReflection(pixelIndex);
 
