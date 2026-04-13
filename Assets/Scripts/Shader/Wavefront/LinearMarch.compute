@@ -7,19 +7,15 @@
 
 uint _ScreenWidth;
 uint _ScreenHeight;
-
+RWStructuredBuffer<uint> activeRayCount;
 RWStructuredBuffer<control> controls;
 RWStructuredBuffer<ray>     main_rays;
 RWStructuredBuffer<HitInfo> hit_infos;
+
 RWStructuredBuffer<uint> linearMarchQueue;    // indices of rays needing linear march
-RWStructuredBuffer<uint> geodesicMarchQueue;  // indices needing geodesic march
+RWStructuredBuffer<uint> geodiscMarchQueue;  // indices needing geodesic march
 RWStructuredBuffer<uint> reflectionQueue;     // indices needing reflection
 RWStructuredBuffer<uint> skyboxQueue;         // indices needing skybox sample
-
-RWStructuredBuffer<uint> linearMarchCount;    // atomic counter, size 1
-RWStructuredBuffer<uint> geodesicMarchCount;
-RWStructuredBuffer<uint> reflectionCount;
-RWStructuredBuffer<uint> skyboxCount;
 float renderDistance;
 int   TLASRootIndex;
 int   numInstances;
@@ -240,11 +236,13 @@ HitInfo TraceRay(float3 origin, float3 direction, float tMax)
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= linearMarchCount[0]) return;
+    //kill classify queue
+    //activeRayCount[ACTIVE_RAY_QUEUE] = 0;
+    if (id.x >= activeRayCount[LINEAR_RAY_QUEUEA]) return;
     uint pixelIndex = linearMarchQueue[id.x];
 
     ray r = main_rays[pixelIndex];
-
+    //pixelAccum[pixelIndex] = r.direction;
     float tSOI;
     int   bhIdx;
     bool  entersSOI = RayEntersSOI(r.position, r.direction, renderDistance, tSOI, bhIdx);
@@ -263,7 +261,7 @@ void Main(uint3 id : SV_DispatchThreadID)
         main_rays[pixelIndex] = r;
 
         uint outSlot;
-        InterlockedAdd(reflectionCount[0], 1, outSlot);
+        InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
         reflectionQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_REFLECTION;
     }
@@ -273,14 +271,14 @@ void Main(uint3 id : SV_DispatchThreadID)
         main_rays[pixelIndex] = r;
 
         uint outSlot;
-        InterlockedAdd(geodesicMarchCount[0], 1, outSlot);
-        geodesicMarchQueue[outSlot] = pixelIndex;
+        InterlockedAdd(activeRayCount[GEODISC_RAY_QUEUEB], 1, outSlot);
+        geodiscMarchQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_GEODESIC_MARCH;
     }
     else
     {
         uint outSlot;
-        InterlockedAdd(skyboxCount[0], 1, outSlot);
+        InterlockedAdd(activeRayCount[SKYBOX_QUEUE], 1, outSlot);
         skyboxQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_SKYBOX;
     }

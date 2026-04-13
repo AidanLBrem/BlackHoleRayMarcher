@@ -1,4 +1,12 @@
-
+#define ACTIVE_RAY_QUEUE 0
+#define LINEAR_RAY_QUEUEA 1
+#define GEODISC_RAY_QUEUEA 2
+#define LINEAR_RAY_QUEUEB 3
+#define GEODISC_RAY_QUEUEB 4
+#define REFLECTION_QUEUE 5
+#define NEE_QUEUE 6
+#define SCATTER_QUEUE 7
+#define SKYBOX_QUEUE 8
 struct HitInfo 
 {
     bool  didHit;

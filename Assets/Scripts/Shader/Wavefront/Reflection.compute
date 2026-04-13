@@ -14,9 +14,7 @@ RWStructuredBuffer<HitInfo>    hit_info_buffer;
 RWStructuredBuffer<color_info> ray_color_info;
 RWStructuredBuffer<float3>     pixelAccum;
 RWStructuredBuffer<uint> activeRayIndices;
-uint                     activeRayCount;
-
-RWStructuredBuffer<uint> reflectionCount;
+RWStructuredBuffer<uint> activeRayCount;
 RWStructuredBuffer<uint> reflectionQueue;     // indices needing reflection
 bool HandleReflection(uint pixelIndex)
 {
@@ -266,7 +264,7 @@ bool HandleReflection(uint pixelIndex)
     ray_color_info[pixelIndex]      = color_info;
     main_rays[pixelIndex].direction = ray.direction;
     main_rays[pixelIndex].position  = ray.position;
-    controls[pixelIndex].flags      = FLAG_NEEDS_CLASSIFY;
+
     return false;
 }
 
@@ -274,11 +272,19 @@ bool HandleReflection(uint pixelIndex)
 void Main(uint3 id : SV_DispatchThreadID)
 {
     uint slot = id.x;
-    if (slot >= reflectionCount[0]) return;
-    uint pixelIndex = reflectionQueue[slot];  // ← correct
-
+    if (slot >= activeRayCount[REFLECTION_QUEUE]) return;
+    uint pixelIndex = reflectionQueue[slot]; 
+    //pixelAccum[pixelIndex] = float3(0,1,0);
+    //return;
     bool done = HandleReflection(pixelIndex);
 
     if (done)
         pixelAccum[pixelIndex] += ray_color_info[pixelIndex].incomingLight;
+    else
+    {
+        uint outSlot;
+        controls[pixelIndex].flags      = FLAG_NEEDS_CLASSIFY;
+        InterlockedAdd(activeRayCount[ACTIVE_RAY_QUEUE], 1, outSlot); //send back to classify
+        activeRayIndices[outSlot] = pixelIndex;
+    }
 }

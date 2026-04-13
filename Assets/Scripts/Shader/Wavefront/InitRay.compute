@@ -17,13 +17,14 @@ RWStructuredBuffer<control>    controls;
 RWStructuredBuffer<ray>        main_rays;
 RWStructuredBuffer<HitInfo>    hit_info_buffer;
 RWStructuredBuffer<color_info> ray_color_info;
-
+RWStructuredBuffer<uint>    activeRayIndices;   // output: packed list of pixel indices
+RWStructuredBuffer<uint>    activeRayCount;   // output: packed list of pixel indices
+RWStructuredBuffer<float3> pixelAccum;
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
     uint pixelIndex = id.x;
     if (pixelIndex >= _ScreenWidth * _ScreenHeight) return;
-
     // ── RNG seed ─────────────────────────────────────────────────────
     controls[pixelIndex].rngState = pixelIndex
         + numRenderedFrames * 829123u
@@ -58,4 +59,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     ray_color_info[pixelIndex] = c;
 
     hit_info_buffer[pixelIndex] = (HitInfo)0;
+    uint outSlot;
+    InterlockedAdd(activeRayCount[ACTIVE_RAY_QUEUE], 1, outSlot);
+    activeRayIndices[outSlot] = pixelIndex;
 }

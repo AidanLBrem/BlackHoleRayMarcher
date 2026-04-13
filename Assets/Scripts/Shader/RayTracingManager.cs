@@ -306,33 +306,28 @@ public class RayTracingManager : MonoBehaviour
 
     void ReleaseBuffers()
     {
-        sphereBuffer?.Release();
-        blackHoleBuffer?.Release();
-        MeshVerticesBuffer?.Release();
-        MeshNormalsBuffer?.Release();
-        MeshIndicesBuffer?.Release();
-        TriangleBuffer?.Release();
-        BVHBuffer?.Release();
-        TLASBuffer?.Release();
-        TLASRefBuffer?.Release();
-        InstanceBuffer?.Release();
-        LightSourceBuffer?.Release();
-        LightTriangleIndicesBuffer?.Release();
-        LightTrianglesDataBuffer?.Release();
+        sphereBuffer?.Release();                 sphereBuffer = null;
+        blackHoleBuffer?.Release();              blackHoleBuffer = null;
+        MeshVerticesBuffer?.Release();           MeshVerticesBuffer = null;
+        MeshNormalsBuffer?.Release();            MeshNormalsBuffer = null;
+        MeshIndicesBuffer?.Release();            MeshIndicesBuffer = null;
+        TriangleBuffer?.Release();               TriangleBuffer = null;
+        BVHBuffer?.Release();                    BVHBuffer = null;
+        TLASBuffer?.Release();                   TLASBuffer = null;
+        TLASRefBuffer?.Release();                TLASRefBuffer = null;
+        InstanceBuffer?.Release();               InstanceBuffer = null;
+        LightSourceBuffer?.Release();            LightSourceBuffer = null;
+        LightTriangleIndicesBuffer?.Release();   LightTriangleIndicesBuffer = null;
+        LightTrianglesDataBuffer?.Release();     LightTrianglesDataBuffer = null;
 
-        sphereBuffer = null;
-        blackHoleBuffer = null;
-        MeshVerticesBuffer = null;
-        MeshNormalsBuffer = null;
-        MeshIndicesBuffer = null;
-        TriangleBuffer = null;
-        BVHBuffer = null;
-        TLASBuffer = null;
-        TLASRefBuffer = null;
-        InstanceBuffer = null;
-        LightSourceBuffer = null;
-        LightTriangleIndicesBuffer = null;
-        LightTrianglesDataBuffer = null;
+        resultTexture?.Release();                resultTexture = null;
+        cleanAccumBuffer?.Release();             cleanAccumBuffer = null;
+
+        if (rayTracingMaterial     != null) { DestroyImmediate(rayTracingMaterial);        rayTracingMaterial     = null; }
+        if (accumulatorMaterial    != null) { DestroyImmediate(accumulatorMaterial);       accumulatorMaterial    = null; }
+        if (ditherMaterial         != null) { DestroyImmediate(ditherMaterial);            ditherMaterial         = null; }
+        if (colorQuantizationMaterial != null) { DestroyImmediate(colorQuantizationMaterial); colorQuantizationMaterial = null; }
+        if (atrousMaterial         != null) { DestroyImmediate(atrousMaterial);            atrousMaterial         = null; }
 
         buffersHaveRealData = false;
     }

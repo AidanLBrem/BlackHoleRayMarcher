@@ -10,16 +10,13 @@ uint _ScreenHeight;
 RWStructuredBuffer<control> controls;
 RWStructuredBuffer<ray>     main_rays;
 RWStructuredBuffer<uint> activeRayIndices;
-uint                     activeRayCount;
+RWStructuredBuffer<uint> activeRayCount;
 RWStructuredBuffer<uint> linearMarchQueue;    // indices of rays needing linear march
-RWStructuredBuffer<uint> geodesicMarchQueue;  // indices needing geodesic march
+RWStructuredBuffer<uint> geodiscMarchQueue;  // indices needing geodesic march
 RWStructuredBuffer<uint> reflectionQueue;     // indices needing reflection
 RWStructuredBuffer<uint> skyboxQueue;         // indices needing skybox sample
 
-RWStructuredBuffer<uint> linearMarchCount;    // atomic counter, size 1
-RWStructuredBuffer<uint> geodesicMarchCount;
-RWStructuredBuffer<uint> reflectionCount;
-RWStructuredBuffer<uint> skyboxCount;
+
 float GetBlackHoleMarchShellRadius(int i)
 {
     float rs = blackholes[i].schwarzchild_radius;
@@ -41,24 +38,27 @@ bool IsInsideAnyMarchShell(float3 pos)
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
+    //kill reflection queue
+    //activeRayCount[REFLECTION_QUEUE] = 0; 
+    //take from active rays
     uint slot = id.x;
-    if (slot >= activeRayCount) return;
+    if (slot >= activeRayCount[ACTIVE_RAY_QUEUE]) return;
     uint pixelIndex = activeRayIndices[slot];
 
     float3 position = main_rays[pixelIndex].position;
 
-    // In Classify.compute
+    // Put then in the queues to work
     if (IsInsideAnyMarchShell(position))
     {
         uint outSlot;
-        InterlockedAdd(geodesicMarchCount[0], 1, outSlot);
-        geodesicMarchQueue[outSlot] = pixelIndex;
+        InterlockedAdd(activeRayCount[GEODISC_RAY_QUEUEA], 1, outSlot);
+        geodiscMarchQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_GEODESIC_MARCH;
     }
     else
     {
         uint outSlot;
-        InterlockedAdd(linearMarchCount[0], 1, outSlot);
+        InterlockedAdd(activeRayCount[LINEAR_RAY_QUEUEA], 1, outSlot);
         linearMarchQueue[outSlot] = pixelIndex;
         controls[pixelIndex].flags = FLAG_NEEDS_LINEAR_MARCH;
     }

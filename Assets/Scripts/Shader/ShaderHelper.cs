@@ -17,7 +17,8 @@ public static class ShaderHelper
             material = new Material(shader);
         }
     }
-public static RenderTexture CreateRenderTexture(int width, int height, FilterMode filterMode, GraphicsFormat format, string name = "Unnamed", DepthMode depthMode = DepthMode.None, bool useMipMaps = false)
+
+	public static RenderTexture CreateRenderTexture(int width, int height, FilterMode filterMode, GraphicsFormat format, string name = "Unnamed", DepthMode depthMode = DepthMode.None, bool useMipMaps = false)
 	{
 		RenderTexture texture = new RenderTexture(width, height, (int)depthMode);
 		texture.graphicsFormat = format;
@@ -63,9 +64,11 @@ public static RenderTexture CreateRenderTexture(int width, int height, FilterMod
 
 		return false;
 	}
-    public static void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, int count)
+
+	// Create buffer of given count — does NOT upload data
+	public static void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, int count)
 	{
-		count = Mathf.Max(1, count); // cannot create 0 length buffer
+		count = Mathf.Max(1, count);
 		int stride = GetStride<T>();
 		bool createNewBuffer = buffer == null || !buffer.IsValid() || buffer.count != count || buffer.stride != stride;
 		if (createNewBuffer)
@@ -75,75 +78,10 @@ public static RenderTexture CreateRenderTexture(int width, int height, FilterMod
 		}
 	}
 
-	public static ComputeBuffer CreateStructuredBuffer<T>(T[] data)
-	{
-		var buffer = new ComputeBuffer(data.Length, GetStride<T>());
-		buffer.SetData(data);
-		return buffer;
-	}
-
-	public static ComputeBuffer CreateStructuredBuffer<T>(List<T> data) where T : struct
-	{
-		var buffer = new ComputeBuffer(data.Count, GetStride<T>());
-		buffer.SetData<T>(data);
-		return buffer;
-	}
-	public static int GetStride<T>() => System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
-
-	public static ComputeBuffer CreateStructuredBuffer<T>(int count)
-	{
-		return new ComputeBuffer(count, GetStride<T>());
-	}
-
-
-	// Create a compute buffer containing the given data (Note: data must be blittable)
+	// Create buffer from array — always uploads data
 	public static void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, T[] data) where T : struct
 	{
 		int length = Max(1, data.Length);
-		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
-
-		bool needsRecreate = buffer == null || !buffer.IsValid() || 
-		                     buffer.count != length || buffer.stride != stride;
-		if (needsRecreate)
-		{
-			if (buffer != null) buffer.Release();
-			buffer = new ComputeBuffer(length, stride, ComputeBufferType.Structured);
-			buffer.SetData(data);
-		}
-	}
-
-	public static void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, List<T> data) where T : struct
-	{
-		int length = Max(1, data.Count);
-		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
-
-		bool needsRecreate = buffer == null || !buffer.IsValid() || 
-		                     buffer.count != length || buffer.stride != stride;
-		if (needsRecreate)
-		{
-			if (buffer != null) buffer.Release();
-			buffer = new ComputeBuffer(length, stride, ComputeBufferType.Structured);
-			buffer.SetData(data);
-		}
-	}
-	// Only creates and uploads if buffer doesn't exist or size changed
-	public static void CreateStructuredBufferIfNeeded<T>(ref ComputeBuffer buffer, T[] data) where T : struct
-	{
-		int length = Mathf.Max(1, data.Length);
-		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
-
-		if (buffer != null && buffer.IsValid() && buffer.count == length && buffer.stride == stride)
-			return;
-
-		if (buffer != null) buffer.Release();
-		buffer = new ComputeBuffer(length, stride, ComputeBufferType.Structured);
-		buffer.SetData(data);
-	}
-
-// Always uploads — for small dynamic buffers
-	public static void UploadStructuredBuffer<T>(ref ComputeBuffer buffer, T[] data) where T : struct
-	{
-		int length = Mathf.Max(1, data.Length);
 		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
 
 		if (buffer == null || !buffer.IsValid() || buffer.count != length || buffer.stride != stride)
@@ -153,12 +91,39 @@ public static RenderTexture CreateRenderTexture(int width, int height, FilterMod
 		}
 		buffer.SetData(data);
 	}
-    public static void Release(ComputeBuffer buffer)
+
+	// Create buffer from list — always uploads data
+	public static void CreateStructuredBuffer<T>(ref ComputeBuffer buffer, List<T> data) where T : struct
+	{
+		int length = Max(1, data.Count);
+		int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+
+		if (buffer == null || !buffer.IsValid() || buffer.count != length || buffer.stride != stride)
+		{
+			if (buffer != null) buffer.Release();
+			buffer = new ComputeBuffer(length, stride, ComputeBufferType.Structured);
+		}
+		buffer.SetData(data);
+	}
+
+	public static int GetStride<T>() => System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+
+	// Always uploads — alias for CreateStructuredBuffer for clarity at call sites
+	public static void UploadStructuredBuffer<T>(ref ComputeBuffer buffer, T[] data) where T : struct
+	{
+		CreateStructuredBuffer(ref buffer, data);
+	}
+
+	public static void UploadStructuredBuffer<T>(ref ComputeBuffer buffer, List<T> data) where T : struct
+	{
+		CreateStructuredBuffer(ref buffer, data);
+	}
+
+	public static void Release(ComputeBuffer buffer)
 	{
 		if (buffer != null)
 		{
 			buffer.Release();
 		}
 	}
-
 }
