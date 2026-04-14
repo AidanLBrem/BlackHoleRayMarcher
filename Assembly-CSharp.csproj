@@ -109,6 +109,7 @@
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF SSD.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\UnlitSolidColor.shader" />
     <None Include="Assets\Scripts\Shader\BlackHoleMarch2D.hlsl" />
+    <None Include="Assets\Scripts\Shader\Wavefront\RayTracing.hlsl" />
     <None Include="Assets\Scripts\Shader\AtmosphereicScattering.hlsl" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\TransparentOverlay.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\UnlitVertexColor.shader" />
@@ -126,6 +127,7 @@
     <None Include="Assets\TextMesh Pro\Shaders\TMP_Bitmap-Custom-Atlas.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Upgrade\AssetIdRemap-4_0_0.json" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF.shader" />
+    <None Include="Assets\Scripts\Shader\Wavefront\GeodiscMarching.compute" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile SSD.shader" />
     <None Include="Packages\com.unity.probuilder\Content\Shader\FacePicker.shader" />
     <None Include="Assets\TextMesh Pro\Resources\LineBreaking Leading Characters.txt" />

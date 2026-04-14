@@ -276,6 +276,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     uint pixelIndex = reflectionQueue[slot]; 
     //pixelAccum[pixelIndex] = float3(0,1,0);
     //return;
+
     bool done = HandleReflection(pixelIndex);
 
     if (done)

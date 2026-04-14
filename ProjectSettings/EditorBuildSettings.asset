@@ -11,10 +11,10 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/Scenes/SpaceTest.unity
     guid: 6181a9a6c5ee9604cbf80d4f62970322
-  - enabled: 0
+  - enabled: 1
     path: Assets/Scenes/DragonInColoredHallOfRoomsBenchmark 1.unity
     guid: 9db9af40b15628b4283b7536470676a4
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/SunsetTestWavefront.unity
     guid: 43a095af26c09954cb4e7d2c773f788a
   m_configObjects:
