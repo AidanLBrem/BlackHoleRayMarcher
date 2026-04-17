@@ -3,8 +3,8 @@
 
 #include "Math.hlsl"
 #include "PixelFlags.hlsl"
-#include "BasicStructures.hlsl"
-#include "RayTracing.hlsl"
+//#include "BasicStructures.hlsl"
+//#include "RayTracing.hlsl"
 uint _ScreenWidth;
 uint _ScreenHeight;
 RWStructuredBuffer<uint> activeRayCount;

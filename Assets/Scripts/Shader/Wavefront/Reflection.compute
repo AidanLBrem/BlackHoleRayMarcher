@@ -10,62 +10,49 @@ uint _ScreenHeight;
 
 RWStructuredBuffer<control>    controls;
 RWStructuredBuffer<ray>        main_rays;
-RWStructuredBuffer<HitInfo>    hit_info_buffer;
+StructuredBuffer<HitInfo>      hit_info_buffer;
 RWStructuredBuffer<color_info> ray_color_info;
 RWStructuredBuffer<float3>     pixelAccum;
-RWStructuredBuffer<uint> activeRayIndices;
-RWStructuredBuffer<uint> activeRayCount;
-RWStructuredBuffer<uint> reflectionQueue;     // indices needing reflection
-bool HandleReflection(uint pixelIndex)
-{
-    HitInfo HitInfo = hit_info_buffer[pixelIndex];
-    if (!HitInfo.didHit)
-    {
-        controls[pixelIndex].flags = FLAG_NEEDS_SKYBOX;
-        return true;
-    }
-    ray ray = main_rays[pixelIndex];
-    color_info color_info = ray_color_info[pixelIndex];
-    float3 preBounceColor = color_info.rayColor;
-    RayTracingMaterial material = Instances[HitInfo.objectIndex].material;
+RWStructuredBuffer<uint>       activeRayIndices;
+RWStructuredBuffer<uint>       activeRayCount;
+StructuredBuffer<uint>         reflectionQueue;
+StructuredBuffer<uint>         pixelForSlot;
 
-    // =======================
+bool HandleReflection(uint slot, inout float rngState)
+{
+    HitInfo hitInfo      = hit_info_buffer[slot];
+    if (!hitInfo.didHit)
+        return true;
+
+    ray        ray        = main_rays[slot];
+    color_info color_info = ray_color_info[slot];
+    float3 preBounceColor = color_info.rayColor;
+    RayTracingMaterial material = Instances[hitInfo.objectIndex].material;
+
     // EMISSION
-    // =======================
     if (material.emissionStrength > 0.0)
     {
-        //float g = 1 / ray.energy;
-        #ifndef USE_REDSHIFTING
-        //g = 1;
-        #endif
-        //float3 c = ApplyFakeRelativisticToneShift(material.emissiveColor.rgb, g, 1.0);
-        //float3 emittedLight = c * material.emissionStrength * (g * g * g);
-        float3 emittedLight = material.emissiveColor.rgb * material.emissionStrength/* * (g * g * g)*/;
+        float3 emittedLight = material.emissiveColor.rgb * material.emissionStrength;
         color_info.incomingLight += emittedLight * preBounceColor;
-        ray_color_info[pixelIndex] = color_info;
-        controls[pixelIndex].flags = FLAG_DONE;
+        ray_color_info[slot] = color_info;
         return true;
     }
 
-    // =======================
     // NORMAL SETUP
-    // =======================
-    Mesh mesh = Instances[HitInfo.objectIndex];
+    Mesh mesh = Instances[hitInfo.objectIndex];
     float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
     float3 N;
     float3 Ng;
 
-    if (HitInfo.triIndex == 0xFFFFFFFF)
+    if (hitInfo.triIndex == 0xFFFFFFFF)
     {
-        // hardware RT path — normal already computed in world space by ClosestHit
-        N  = HitInfo.worldNormal;
+        N  = hitInfo.worldNormal;
         Ng = N;
     }
     else
     {
-        // software BVH path — compute from triangle data
-        uint triIndex = HitInfo.triIndex;
-        Triangle tri = Triangles[triIndex];
+        uint triIndex = hitInfo.triIndex;
+        Triangle tri  = Triangles[triIndex];
 
         uint index1 = TriangleIndices[tri.baseIndex];
         uint index2 = TriangleIndices[tri.baseIndex + 1];
@@ -76,11 +63,10 @@ bool HandleReflection(uint pixelIndex)
         float3 n3 = Normals[index3];
 
         N = normalize(
-            n1 * (1 - (HitInfo.u + HitInfo.v)) +
-            n2 * HitInfo.u +
-            n3 * HitInfo.v
+            n1 * (1 - (hitInfo.u + hitInfo.v)) +
+            n2 * hitInfo.u +
+            n3 * hitInfo.v
         );
-
         N  = safeNormalize(mul(nMat, N));
 
         float3 geomNormalLocal = normalize(cross(tri.edgeAB, tri.edgeAC));
@@ -88,64 +74,27 @@ bool HandleReflection(uint pixelIndex)
     }
 
     if (dot(Ng, ray.direction) > 0) Ng = -Ng;
-    if (dot(N, Ng) < 0) N = -N;
+    if (dot(N,  Ng)            < 0) N  = -N;
 
-    /*if (bad3(ray.direction) || bad3(ray.rayColor) || bad3(N) || bad3(Ng))
-    {
-        ray.incomingLight = float3(0, 0, 0);
-        ray.rayEarlyKill = true;
-        return ray;
-    }*/
-
-    // =======================
     // MATERIAL
-    // =======================
     float3 baseColor = material.color;
-    float metallic   = saturate(material.metallicity);
-    float roughness  = saturate(material.roughness);
+    float  metallic  = saturate(material.metallicity);
+    float  roughness = saturate(material.roughness);
 
     float3 dielectricF0 = float3(0.04, 0.04, 0.04);
-    float3 F0 = lerp(dielectricF0, baseColor, metallic);
-
-    float3 V    = -ray.direction;
-    float NdotV = max(dot(N, V), 1e-4);
-
-    float3 kd          = (1.0 - metallic);
+    float3 F0    = lerp(dielectricF0, baseColor, metallic);
+    float3 V     = -ray.direction;
+    float  NdotV = max(dot(N, V), 1e-4);
+    float3 kd    = (1.0 - metallic);
     float3 diffuseBRDF = kd * baseColor / PI;
 
-    // =======================
-    // DIRECT LIGHTING
-    // =======================
-    /*#ifdef APPLY_SUN_LIGHTING TODO: Impliment evaluateDirectSunAtHit
-    ray.incomingLight += evaluateDirectSunAtHit(
-        hitInfo.hitPoint, N, Ng, V,
-        material.color, material.metallicity, material.roughness, F0
-    );
-    #endif
-
-    #ifdef APPLY_SCATTERING
-    if (ray.numBounces == 1) TODO: Impliment Scattering
-    {
-        ray.incomingLight += calculateLight(
-            ray.ray.position,
-            ray.ray.direction,
-            hitInfo.distance,
-            rngState,
-            1
-        );
-    }
-    #endif*/
-
-    // =======================
     // MIS SAMPLING
-    // =======================
     float specWeight = luminance(F0);
     float diffWeight = luminance(baseColor) * (1.0 - metallic);
     float sum        = specWeight + diffWeight;
-    float specProb   = (sum > 0.0) ? specWeight / sum : 0.5;
-    specProb         = clamp(specProb, 0.01, 0.99);
+    float specProb   = clamp((sum > 0.0) ? specWeight / sum : 0.5, 0.01, 0.99);
 
-    float choose         = randomValue(controls[pixelIndex].rngState);
+    float choose         = randomValue(rngState);
     bool  sampleSpecular = (choose < specProb);
 
     float3 L        = float3(0,0,0);
@@ -160,29 +109,24 @@ bool HandleReflection(uint pixelIndex)
         float3 H  = float3(0,0,0);
         float NdotH, VdotH;
         int attempts = 0;
-        const int maxAttempts = 10;
         do
         {
-            xi    = float2(randomValue(controls[pixelIndex].rngState), randomValue(controls[pixelIndex].rngState));
+            xi    = float2(randomValue(rngState), randomValue(rngState));
             H     = sampleGGX_VNDF(xi, roughness, N, V);
             L     = reflect(-V, H);
             NdotL = dot(N, L);
             attempts++;
-        } while (NdotL <= 0 && attempts < maxAttempts);
+        } while (NdotL <= 0 && attempts < 10);
 
-        if (NdotL <= 0)
-        {
-            controls[pixelIndex].flags = FLAG_DONE;
-            return true;
-        }
+        if (NdotL <= 0) return true;
 
         NdotH = saturate(dot(N, H));
         VdotH = max(dot(V, H), 1e-4);
 
-        float3 F  = FresnelSchlick(VdotH, F0);
-        float  D  = D_GGX(NdotH, roughness);
-        float  G  = G_SmithGGX(NdotV, NdotL, roughness);
-        specBRDF  = (F * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
+        float3 F = FresnelSchlick(VdotH, F0);
+        float  D = D_GGX(NdotH, roughness);
+        float  G = G_SmithGGX(NdotV, NdotL, roughness);
+        specBRDF = (F * D * G) / max(4.0 * NdotV * NdotL, 1e-8);
 
         float G1V   = G1_SmithGGX(NdotV, roughness);
         float pdf_H = D * G1V * VdotH / max(NdotV, 1e-8);
@@ -192,21 +136,16 @@ bool HandleReflection(uint pixelIndex)
     else
     {
         float2 xi = float2(0,0);
-        int attempts    = 0;
-        int maxAttempts = 10;
+        int attempts = 0;
         do
         {
-            xi    = float2(randomValue(controls[pixelIndex].rngState), randomValue((controls[pixelIndex].rngState)));
+            xi    = float2(randomValue(rngState), randomValue(rngState));
             L     = toWorld(sampleCosineHemisphere(xi), N);
             NdotL = dot(N, L);
             attempts++;
-        } while (NdotL <= 0 && attempts < maxAttempts);
+        } while (NdotL <= 0 && attempts < 10);
 
-        if (NdotL <= 0)
-        {
-            controls[pixelIndex].flags = FLAG_DONE;
-            return true;
-        }
+        if (NdotL <= 0) return true;
 
         pdf_diff = NdotL / PI;
 
@@ -220,9 +159,7 @@ bool HandleReflection(uint pixelIndex)
         pdf_spec    = pdf_H / max(4.0 * VdotH, 1e-8);
     }
 
-    // =======================
     // MIS WEIGHTS
-    // =======================
     float pdf_spec_w = pdf_spec * specProb;
     float pdf_diff_w = pdf_diff * (1 - specProb);
 
@@ -239,31 +176,18 @@ bool HandleReflection(uint pixelIndex)
     color_info.rayColor *= f * NdotL * weight / max(pdf, 1e-8);
     ray.position = ray.position + Ng * 1e-4;
 
-    // =======================
-    // NEE TODO: IMPLIMENT NEE
-    // =======================
-    /*#ifdef APPLY_NEE
-    if (ray.numBounces == 1)
-    {
-        ray.incomingLight += NEE(ray.ray.position, N, rngState) * diffuseBRDF * preBounceColor;
-    }
-    #endif*/
-
-    // =======================
     // RUSSIAN ROULETTE
-    // =======================
     float p = max(dot(color_info.rayColor, float3(0.2126, 0.7152, 0.0722)), 1e-4);
-    if (randomValue(controls[pixelIndex].rngState) > p)
+    if (randomValue(rngState) > p)
     {
-        controls[pixelIndex].flags = FLAG_DONE;
-        ray_color_info[pixelIndex] = color_info;
+        ray_color_info[slot] = color_info;
         return true;
     }
 
-    color_info.rayColor /= p;
-    ray_color_info[pixelIndex]      = color_info;
-    main_rays[pixelIndex].direction = ray.direction;
-    main_rays[pixelIndex].position  = ray.position;
+    color_info.rayColor      /= p;
+    ray_color_info[slot]      = color_info;
+    main_rays[slot].direction = ray.direction;
+    main_rays[slot].position  = ray.position;
 
     return false;
 }
@@ -273,19 +197,20 @@ void Main(uint3 id : SV_DispatchThreadID)
 {
     uint slot = id.x;
     if (slot >= activeRayCount[REFLECTION_QUEUE]) return;
-    uint pixelIndex = reflectionQueue[slot]; 
-    //pixelAccum[pixelIndex] = float3(0,1,0);
-    //return;
 
-    bool done = HandleReflection(pixelIndex);
+    uint raySlot    = reflectionQueue[slot];          // slot in main_rays/hit_infos
+    uint pixelIndex = pixelForSlot[raySlot];       // original pixel for pixelAccum only
+
+    float rngState = controls[raySlot].rngState;
+    bool done = HandleReflection(raySlot, rngState);
+    controls[raySlot].rngState = rngState;
 
     if (done)
-        pixelAccum[pixelIndex] += ray_color_info[pixelIndex].incomingLight;
+        pixelAccum[pixelIndex] += ray_color_info[raySlot].incomingLight;
     else
     {
         uint outSlot;
-        controls[pixelIndex].flags      = FLAG_NEEDS_CLASSIFY;
-        InterlockedAdd(activeRayCount[ACTIVE_RAY_QUEUE], 1, outSlot); //send back to classify
-        activeRayIndices[outSlot] = pixelIndex;
+        InterlockedAdd(activeRayCount[ACTIVE_RAY_QUEUE], 1, outSlot);
+        activeRayIndices[outSlot] = raySlot;          // push slot back to classify
     }
 }

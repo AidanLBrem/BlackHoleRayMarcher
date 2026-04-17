@@ -2,35 +2,103 @@ int   TLASRootIndex;
 int   numInstances;
 int   numTLASNodes;
 int   numMeshes;
+
+AABBHitInfo RayAABB(float3 rayOrigin, float3 rayDirection, float3 inverseDirection, float3 boxMin, float3 boxMax, float distanceToBeat)
+{
+    float3 invDir = inverseDirection;
+    float3 tMin = (boxMin - rayOrigin) * invDir;
+    float3 tMax = (boxMax - rayOrigin) * invDir;
+    float3 t1 = min(tMin, tMax);
+    float3 t2 = max(tMin, tMax);
+    float tNear = max(max(t1.x, t1.y), t1.z);
+    float tFar = min(min(t2.x, t2.y), t2.z);
+
+    AABBHitInfo hitInfo = (AABBHitInfo)0;
+    hitInfo.didHit = (tNear <= tFar) && (tFar >= 0.0) && (tNear <= distanceToBeat);
+    hitInfo.distance = max(tNear, 0.0);
+    return hitInfo;
+}
+AABBHitInfo RayHitsBox(
+                float3 rayOrigin,
+                float3 rayDirection,
+                float3 inverseDirection,
+                float AABBLeftX,
+                float AABBLeftY,
+                float AABBLeftZ,
+                float AABBRightX,
+                float AABBRightY,
+                float AABBRightZ,
+                float distanceToBeat)
+{
+    float3 boxMin = float3(AABBLeftX,  AABBLeftY,  AABBLeftZ);
+    float3 boxMax = float3(AABBRightX, AABBRightY, AABBRightZ);
+    return RayAABB(rayOrigin, rayDirection, inverseDirection, boxMin, boxMax, distanceToBeat);
+}
+
+HitInfo rayTriangle(ray ray, Triangle tri)
+{
+    float3 edgeAB = tri.edgeAB;
+    float3 edgeAC = tri.edgeAC;
+    float3 geometricNormal = cross(tri.edgeAB, tri.edgeAC);
+
+    float determinant = -dot(ray.direction, geometricNormal);
+    if (determinant <=  0)
+        return (HitInfo)0;
+
+    float invDet = 1 / determinant;
+    uint vertex1 = TriangleIndices[tri.baseIndex];
+    float3 ao = ray.position - Vertices[vertex1];
+    float dst = dot(ao, geometricNormal) * invDet;
+    if (dst <  0)
+        return (HitInfo)0;
+
+    float3 dao = cross(ao, ray.direction);
+    float u = dot(edgeAC, dao) * invDet;
+    if (u <  0)
+        return (HitInfo)0;
+
+    float v = -dot(edgeAB, dao) * invDet;
+    if (v < 0)
+        return (HitInfo)0;
+
+    if (u + v > 1.0)
+        return (HitInfo)0;
+
+    HitInfo hitInfo = (HitInfo)0;
+    hitInfo.didHit = true;
+    hitInfo.distance = dst;
+    hitInfo.u = u;
+    hitInfo.v = v;
+    return hitInfo;
+}
+
 float GetSOIRadius(int i)
 {
     float rs = blackholes[i].schwarzchild_radius;
     return max(rs * blackholes[i].black_hole_soi_multiplier, 4.0 * rs);
 }
 
-bool RayEntersSOI(float3 origin, float3 dir, float tMax, out float tEntry, out int bhIndex)
+bool RayEntersSOI(float3 origin, float3 dir, float tMax, out float tEntry)
 {
     tEntry  = tMax;
-    bhIndex = -1;
     for (int i = 0; i < num_black_holes; i++)
     {
         float t = RaySphereEntryDistance(origin, dir, blackholes[i].position, GetSOIRadius(i));
         if (t >= 0 && t < tEntry)
         {
             tEntry  = t;
-            bhIndex = i;
         }
     }
-    return bhIndex >= 0;
+    return false;
 }
-HitInfo checkMeshCollisions(Ray ray, float worldTMax, bool findClosestCollisionOnly)
+HitInfo checkMeshCollisions(ray r, float worldTMax, bool findClosestCollisionOnly)
 {
     HitInfo closest = (HitInfo)0;
     if (numMeshes <= 0 || numInstances <= 0 || numTLASNodes <= 0 || TLASRootIndex < 0)
         return closest;
 
     float bestWorldT = 3.402823e+38;
-    float3 inverseDirection = 1.0 / ray.direction;
+    float3 inverseDirection = 1.0 / r.direction;
 
     // separate stacks — TLAS is shallow, BLAS needs full depth
     int   tlasStack[8];   float tlasStackT[8];   int tlasSp = 0;
@@ -58,12 +126,12 @@ HitInfo checkMeshCollisions(Ray ray, float worldTMax, bool findClosestCollisionO
                 uint instanceIndex = TLASRefs[j];
                 Mesh mesh          = Instances[instanceIndex];
 
-                float3 localDirUn = mul(mesh.worldToLocalMatrix, float4(ray.direction, 0)).xyz;
+                float3 localDirUn = mul(mesh.worldToLocalMatrix, float4(r.direction, 0)).xyz;
                 float  dirScale   = length(localDirUn);
                 if (dirScale < 1e-12) continue;
 
                 float3 localDir    = localDirUn / dirScale;
-                float3 localPos    = mul(mesh.worldToLocalMatrix, float4(ray.position, 1)).xyz;
+                float3 localPos    = mul(mesh.worldToLocalMatrix, float4(r.position, 1)).xyz;
                 float3 localInvDir = 1.0 / localDir;
                 float  bestLocalT  = min(worldTMax, bestWorldT) * dirScale;
 
@@ -89,7 +157,7 @@ HitInfo checkMeshCollisions(Ray ray, float worldTMax, bool findClosestCollisionO
                         for (uint k = blasNode.firstIndex; k < blasNode.firstIndex + blasNode.count; k++)
                         {
                             Triangle tri = Triangles[k];
-                            Ray localRay;
+                            ray localRay;
                             localRay.position  = localPos;
                             localRay.direction = localDir;
                             HitInfo h = rayTriangle(localRay, tri);
@@ -165,10 +233,10 @@ HitInfo checkMeshCollisions(Ray ray, float worldTMax, bool findClosestCollisionO
         BVHNode tln = TLASNodes[tlasNode.left];
         BVHNode trn = TLASNodes[tlasNode.right];
 
-        AABBHitInfo lh = RayHitsBox(ray.position, ray.direction, inverseDirection,
+        AABBHitInfo lh = RayHitsBox(r.position, r.direction, inverseDirection,
             tln.AABBLeftX, tln.AABBLeftY, tln.AABBLeftZ,
             tln.AABBRightX, tln.AABBRightY, tln.AABBRightZ, bestWorldT);
-        AABBHitInfo rh = RayHitsBox(ray.position, ray.direction, inverseDirection,
+        AABBHitInfo rh = RayHitsBox(r.position, r.direction, inverseDirection,
             trn.AABBLeftX, trn.AABBLeftY, trn.AABBLeftZ,
             trn.AABBRightX, trn.AABBRightY, trn.AABBRightZ, bestWorldT);
 
@@ -197,7 +265,7 @@ HitInfo checkMeshCollisions(Ray ray, float worldTMax, bool findClosestCollisionO
 HitInfo TraceRay(float3 origin, float3 direction, float tMax)
 {
     HitInfo result = (HitInfo)0;
-    Ray r;
+    ray r;
     r.position  = origin;
     r.direction = direction;
     HitInfo hit = checkMeshCollisions(r, tMax, false);

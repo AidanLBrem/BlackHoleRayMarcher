@@ -1,0 +1,139 @@
+#pragma kernel ClearBuckets
+#pragma kernel CountBuckets
+#pragma kernel PrefixSum
+#pragma kernel ScatterRays
+#pragma kernel FixupQueue
+
+#include "BasicStructures.hlsl"
+
+uint _BucketsPerAxis;
+uint _NumBuckets;
+
+StructuredBuffer<uint> activeRayIndices;     // queue entries are SLOTS
+StructuredBuffer<uint> activeRayCount;
+
+StructuredBuffer<ray>        main_rays;
+RWStructuredBuffer<ray>        sortedRays;
+
+StructuredBuffer<uint>       pixelForSlot;
+RWStructuredBuffer<uint>       sortedPixelForSlot;
+
+StructuredBuffer<control>    controls;
+RWStructuredBuffer<control>    sortedControls;
+
+StructuredBuffer<color_info> ray_color_info;
+RWStructuredBuffer<color_info> sortedRayColorInfo;
+
+// old slot -> new slot
+RWStructuredBuffer<uint> newSlotForOldSlot;
+
+RWStructuredBuffer<uint> bucketCounts;
+RWStructuredBuffer<uint> bucketOffsets;
+
+// dense active queue after sort
+RWStructuredBuffer<uint> sortedRayIndices;
+
+// Queue fixup target
+RWStructuredBuffer<uint> queueToFixup;
+StructuredBuffer<uint> queueCount;
+uint                     queueIndex;
+
+uint DirectionToBucket(float3 dir)
+{
+    float3 absDir = abs(dir);
+    uint   face;
+    float2 uv;
+
+    if (absDir.x >= absDir.y && absDir.x >= absDir.z)
+    {
+        face = dir.x > 0.0 ? 0 : 1;
+        uv   = float2(dir.z, dir.y) / max(absDir.x, 1e-8);
+    }
+    else if (absDir.y >= absDir.x && absDir.y >= absDir.z)
+    {
+        face = dir.y > 0.0 ? 2 : 3;
+        uv   = float2(dir.x, dir.z) / max(absDir.y, 1e-8);
+    }
+    else
+    {
+        face = dir.z > 0.0 ? 4 : 5;
+        uv   = float2(dir.x, dir.y) / max(absDir.z, 1e-8);
+    }
+
+    uint2 cell = (uint2)clamp(
+        (uv * 0.5 + 0.5) * _BucketsPerAxis,
+        0.0,
+        (float)(_BucketsPerAxis - 1)
+    );
+
+    return face * _BucketsPerAxis * _BucketsPerAxis
+         + cell.y * _BucketsPerAxis
+         + cell.x;
+}
+
+[numthreads(64, 1, 1)]
+void ClearBuckets(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _NumBuckets)
+        bucketCounts[id.x] = 0;
+}
+
+[numthreads(64, 1, 1)]
+void CountBuckets(uint3 id : SV_DispatchThreadID)
+{
+    uint dispatchSlot = id.x;
+    if (dispatchSlot >= activeRayCount[ACTIVE_RAY_QUEUE])
+        return;
+
+    uint slot   = activeRayIndices[dispatchSlot];
+    uint bucket = DirectionToBucket((main_rays[slot].direction));
+
+    InterlockedAdd(bucketCounts[bucket], 1);
+}
+
+[numthreads(1, 1, 1)]
+void PrefixSum(uint3 id : SV_DispatchThreadID)
+{
+    uint offset = 0;
+    for (uint i = 0; i < _NumBuckets; i++)
+    {
+        uint count        = bucketCounts[i];
+        bucketOffsets[i]  = offset;
+        bucketCounts[i]   = 0;
+        offset           += count;
+    }
+}
+
+[numthreads(64, 1, 1)]
+void ScatterRays(uint3 id : SV_DispatchThreadID)
+{
+    uint dispatchSlot = id.x;
+    if (dispatchSlot >= activeRayCount[ACTIVE_RAY_QUEUE])
+        return;
+
+    uint oldSlot = activeRayIndices[dispatchSlot];
+    uint bucket  = DirectionToBucket((main_rays[oldSlot].direction));
+
+    uint localInBucket;
+    InterlockedAdd(bucketCounts[bucket], 1, localInBucket);
+
+    uint newSlot = bucketOffsets[bucket] + localInBucket;
+
+    sortedRays[newSlot]           = main_rays[oldSlot];
+    sortedPixelForSlot[newSlot]   = pixelForSlot[oldSlot];
+    sortedControls[newSlot]       = controls[oldSlot];
+    sortedRayColorInfo[newSlot]   = ray_color_info[oldSlot];
+    newSlotForOldSlot[oldSlot]    = newSlot;
+    sortedRayIndices[newSlot]     = newSlot;
+}
+
+[numthreads(64, 1, 1)]
+void FixupQueue(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= queueCount[queueIndex])
+        return;
+
+    uint oldSlot    = queueToFixup[i];
+    queueToFixup[i] = newSlotForOldSlot[oldSlot];
+}

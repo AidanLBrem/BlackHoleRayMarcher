@@ -27,6 +27,13 @@ public class RayTracingManagerWavefront : MonoBehaviour
     private const int SCATTER_QUEUE = 7;
     private const int SKYBOX_QUEUE = 8;
 
+    // Kernel indices into bucketSortCompute
+    private const int KERNEL_CLEAR_BUCKETS = 0;
+    private const int KERNEL_COUNT_BUCKETS = 1;
+    private const int KERNEL_PREFIX_SUM    = 2;
+    private const int KERNEL_SCATTER_RAYS  = 3;
+    private const int KERNEL_FIXUP_QUEUE   = 4;
+
     const uint FLAG_NEEDS_LINEAR_MARCH = (1u << 0);
     const uint FLAG_NEEDS_REFLECTION   = (1u << 2);
     const uint FLAG_NEEDS_CLASSIFY     = (1u << 5);
@@ -44,13 +51,16 @@ public class RayTracingManagerWavefront : MonoBehaviour
     [Header("Compute Kernels")]
     public ComputeShader initCompute;
     public ComputeShader classifyCompute;
-    public ComputeShader linearMarchCompute;
-    public ComputeShader geodiscMarchCompute;
     public ComputeShader reflectionCompute;
     public ComputeShader accumulateCompute;
     public ComputeShader compactCompute;
     public ComputeShader writeIndirectArgsCompute;
     public ComputeShader resetCountCompute;
+
+    [Header("Ray Sorting")]
+    public ComputeShader bucketSortCompute;
+    [Range(1, 8)]
+    public int sortBucketsPerAxis = 4;
 
     [Header("Wavefront Ping Pong")]
     [Range(1, 8)]
@@ -93,10 +103,22 @@ public class RayTracingManagerWavefront : MonoBehaviour
     [NonSerialized] private ComputeBuffer reflectionQueueBuffer;
     [NonSerialized] private ComputeBuffer skyboxQueueBuffer;
 
+    // Bucket sort buffers
+    [NonSerialized] private ComputeBuffer bucketCountsBuffer;
+    [NonSerialized] private ComputeBuffer bucketOffsetsBuffer;
+    [NonSerialized] private ComputeBuffer sortedRaysBuffer;          // ping-pong twin for mainRayBuffer
+    [NonSerialized] private ComputeBuffer sortedRayIndicesBuffer;    // ping-pong twin for activeRayIndicesBuffer
+// Mapping buffers — survive the sort so queues can be fixed up
+    [NonSerialized] private ComputeBuffer pixelForSlotBuffer;        // slot -> original pixel
+    [NonSerialized] private ComputeBuffer sortedPixelForSlotBuffer;  // scratch during sort
+    [NonSerialized] private ComputeBuffer newSlotForOldSlotBuffer;   // old slot -> new slot
+    [NonSerialized] private ComputeBuffer sortedControlsBuffer;
+    [NonSerialized] private ComputeBuffer sortedRayColorInfoBuffer;
     private bool tlasDirty = true;
     private int lastInstanceCount = -1;
     private bool buffersHaveRealData = false;
     private bool lastForceSoftware = false;
+    private int lastSortBucketsPerAxis = -1;
 
     [Header("Debug")]
     public bool forceBufferRecreation = false;
@@ -260,7 +282,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
         Done                 = 1 << 7,
     }
 
-    struct Control      { private uint flags; private uint rngState; }
+    struct Control      {  private uint rngState; }
     struct MainRay      { public Vector3 rayOrigin; public Vector3 rayDirection; }
     struct RayColorInfo { private float3 rayColor; private float3 incomingLight; }
     struct Energy       { private float energy; }
@@ -344,6 +366,13 @@ public class RayTracingManagerWavefront : MonoBehaviour
         tlasDirty = true;
         blackHolesDirty = true;
         numRenderedFrames = 0;
+
+        if (sortBucketsPerAxis != lastSortBucketsPerAxis)
+        {
+            buffersHaveRealData = false;
+            bucketCountsBuffer?.Release();  bucketCountsBuffer  = null;
+            bucketOffsetsBuffer?.Release(); bucketOffsetsBuffer = null;
+        }
     }
 
     void Startup()
@@ -398,7 +427,15 @@ public class RayTracingManagerWavefront : MonoBehaviour
         geodiscMarchQueueBufferB?.Release();   geodiscMarchQueueBufferB   = null;
         reflectionQueueBuffer?.Release();      reflectionQueueBuffer      = null;
         skyboxQueueBuffer?.Release();          skyboxQueueBuffer          = null;
-
+        bucketCountsBuffer?.Release();         bucketCountsBuffer         = null;
+        bucketOffsetsBuffer?.Release();        bucketOffsetsBuffer        = null;
+        sortedRaysBuffer?.Release();           sortedRaysBuffer           = null;
+        sortedRayIndicesBuffer?.Release();     sortedRayIndicesBuffer     = null;
+        pixelForSlotBuffer?.Release();         pixelForSlotBuffer         = null;
+        sortedPixelForSlotBuffer?.Release();   sortedPixelForSlotBuffer   = null;
+        newSlotForOldSlotBuffer?.Release();    newSlotForOldSlotBuffer    = null;
+        sortedControlsBuffer?.Release();       sortedControlsBuffer = null;
+        sortedRayColorInfoBuffer?.Release();   sortedRayColorInfoBuffer = null;
         if (accelStructure != null) { accelStructure.Release(); accelStructure = null; }
         resultTexture?.Release();    resultTexture = null;
         cleanAccumBuffer?.Release(); cleanAccumBuffer = null;
@@ -410,6 +447,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (atrousMaterial            != null) { DestroyImmediate(atrousMaterial);            atrousMaterial            = null; }
 
         buffersHaveRealData = false;
+        
     }
 
     void EnsureBuffersCreated(bool forceRecreate = false)
@@ -431,22 +469,36 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (sphereBuffer               == null) ShaderHelper.CreateStructuredBuffer<Sphere>(ref sphereBuffer, 1);
         if (blackHoleBuffer            == null) ShaderHelper.CreateStructuredBuffer<BlackHole>(ref blackHoleBuffer, 1);
 
-        ShaderHelper.CreateStructuredBuffer<Control>(ref controlQueue, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<MainRay>(ref mainRayBuffer, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<HitInfo>(ref HitInfoBuffer, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<Control>(ref controlQueue,           pixelCount);
+        ShaderHelper.CreateStructuredBuffer<MainRay>(ref mainRayBuffer,          pixelCount);
+        ShaderHelper.CreateStructuredBuffer<MainRay>(ref sortedRaysBuffer,       pixelCount); // ping-pong twin
+        ShaderHelper.CreateStructuredBuffer<HitInfo>(ref HitInfoBuffer,          pixelCount);
         ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref rayColorInfoBuffer, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<Vector3>(ref pixelAccumBuffer, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<Vector3>(ref pixelAccumBuffer,       pixelCount);
 
-        ShaderHelper.CreateStructuredBuffer<uint>(ref linearMarchQueueBufferA, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref linearMarchQueueBufferB, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref linearMarchQueueBufferA,  pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref linearMarchQueueBufferB,  pixelCount);
         ShaderHelper.CreateStructuredBuffer<uint>(ref geodiscMarchQueueBufferA, pixelCount);
         ShaderHelper.CreateStructuredBuffer<uint>(ref geodiscMarchQueueBufferB, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref reflectionQueueBuffer, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref skyboxQueueBuffer, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref reflectionQueueBuffer,    pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref skyboxQueueBuffer,        pixelCount);
 
-        ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayIndicesBuffer, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayCountBuffer, NUM_QUEUES);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayIndicesBuffer,   pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref sortedRayIndicesBuffer,   pixelCount); // ping-pong twin
+        ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayCountBuffer,     NUM_QUEUES);
 
+        // Bucket sort buckets
+        int numBuckets = 6 * sortBucketsPerAxis * sortBucketsPerAxis;
+        lastSortBucketsPerAxis = sortBucketsPerAxis;
+        ShaderHelper.CreateStructuredBuffer<uint>(ref bucketCountsBuffer,  numBuckets);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref bucketOffsetsBuffer, numBuckets);
+
+        // Mapping buffers
+        ShaderHelper.CreateStructuredBuffer<uint>(ref pixelForSlotBuffer,       pixelCount); // slot -> pixel
+        ShaderHelper.CreateStructuredBuffer<uint>(ref sortedPixelForSlotBuffer, pixelCount); // scratch
+        ShaderHelper.CreateStructuredBuffer<uint>(ref newSlotForOldSlotBuffer,  pixelCount); // old slot -> new slot
+        ShaderHelper.CreateStructuredBuffer<Control>(ref sortedControlsBuffer, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref sortedRayColorInfoBuffer, pixelCount);
         if (indirectArgsBuffer == null || !indirectArgsBuffer.IsValid())
         {
             indirectArgsBuffer?.Release();
@@ -476,8 +528,6 @@ public class RayTracingManagerWavefront : MonoBehaviour
     {
         BindInitBuffers();
         BindClassifyBuffers();
-        BindLinearMarchBuffers();
-        BindGeodiscMarchBuffers();
         BindReflectionBuffers();
         BindAccumulateBuffers();
         BindFlagVisualizerBuffers();
@@ -489,117 +539,72 @@ public class RayTracingManagerWavefront : MonoBehaviour
     {
         if (compactCompute != null)
         {
-            compactCompute.SetBuffer(0, "controls", controlQueue);
+            compactCompute.SetBuffer(0, "controls",         controlQueue);
             compactCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-            compactCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
+            compactCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
         }
 
         if (writeIndirectArgsCompute != null)
         {
             writeIndirectArgsCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-            writeIndirectArgsCompute.SetBuffer(0, "indirectArgs", indirectArgsBuffer);
+            writeIndirectArgsCompute.SetBuffer(0, "indirectArgs",   indirectArgsBuffer);
         }
 
         if (resetCountCompute != null)
             resetCountCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-
-        if (linearMarchCompute != null)
-            linearMarchCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-
-        if (geodiscMarchCompute != null)
-            geodiscMarchCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-
+        
         if (reflectionCompute != null)
+        {
             reflectionCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
+            reflectionCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
+        }
 
         if (classifyCompute != null)
+        {
             classifyCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
+            classifyCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
+        }
     }
 
     void BindInitBuffers()
     {
         if (initCompute == null) return;
 
-        initCompute.SetBuffer(0, "controls", controlQueue);
-        initCompute.SetBuffer(0, "main_rays", mainRayBuffer);
-        initCompute.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
-        initCompute.SetBuffer(0, "hit_info_buffer", HitInfoBuffer);
+        initCompute.SetBuffer(0, "controls",         controlQueue);
+        initCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
+        initCompute.SetBuffer(0, "ray_color_info",   rayColorInfoBuffer);
+        initCompute.SetBuffer(0, "hit_info_buffer",  HitInfoBuffer);
         initCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-        initCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-        initCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
+        initCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
+        initCompute.SetBuffer(0, "pixelAccum",       pixelAccumBuffer);
+        initCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
     }
 
     void BindClassifyBuffers()
     {
         if (classifyCompute == null) return;
 
-        classifyCompute.SetBuffer(0, "controls", controlQueue);
-        classifyCompute.SetBuffer(0, "main_rays", mainRayBuffer);
-        classifyCompute.SetBuffer(0, "blackholes", blackHoleBuffer);
-        classifyCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
+        classifyCompute.SetBuffer(0, "controls",         controlQueue);
+        classifyCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
+        classifyCompute.SetBuffer(0, "hit_infos",        HitInfoBuffer);
         classifyCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-        classifyCompute.SetBuffer(0, "linearMarchQueue", linearMarchQueueBufferA);
-        classifyCompute.SetBuffer(0, "geodiscMarchQueue", geodiscMarchQueueBufferA);
-    }
-
-    void BindLinearMarchBuffers()
-    {
-        if (linearMarchCompute == null) return;
-
-        linearMarchCompute.SetBuffer(0, "controls", controlQueue);
-        linearMarchCompute.SetBuffer(0, "hit_infos", HitInfoBuffer);
-        linearMarchCompute.SetBuffer(0, "main_rays", mainRayBuffer);
-        linearMarchCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-        linearMarchCompute.SetBuffer(0, "linearMarchQueue", linearMarchQueueBufferA);
-        linearMarchCompute.SetBuffer(0, "geodiscMarchQueue", geodiscMarchQueueBufferB);
-        linearMarchCompute.SetBuffer(0, "reflectionQueue", reflectionQueueBuffer);
-        linearMarchCompute.SetBuffer(0, "skyboxQueue", skyboxQueueBuffer);
-        linearMarchCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
-        linearMarchCompute.SetBuffer(0, "Instances", InstanceBuffer);
-        linearMarchCompute.SetBuffer(0, "Normals", MeshNormalsBuffer);
-        linearMarchCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
-        linearMarchCompute.SetBuffer(0, "blackholes", blackHoleBuffer);
-        linearMarchCompute.SetBuffer(0, "Triangles", TriangleBuffer);
-        linearMarchCompute.SetBuffer(0, "BVHNodes", BVHBuffer);
-        linearMarchCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
-        linearMarchCompute.SetBuffer(0, "TLASRefs", TLASRefBuffer);
-        linearMarchCompute.SetBuffer(0, "Vertices", MeshVerticesBuffer);
-
-        if (linearMarchRaytraceShader != null)
-        {
-            linearMarchRaytraceShader.SetBuffer("controls", controlQueue);
-            linearMarchRaytraceShader.SetBuffer("main_rays", mainRayBuffer);
-            linearMarchRaytraceShader.SetBuffer("hit_info_buffer", HitInfoBuffer);
-            linearMarchRaytraceShader.SetBuffer("Instances", InstanceBuffer);
-            linearMarchRaytraceShader.SetBuffer("Normals", MeshNormalsBuffer);
-            linearMarchRaytraceShader.SetBuffer("TriangleIndices", MeshIndicesBuffer);
-        }
-    }
-
-    void BindGeodiscMarchBuffers()
-    {
-        if (geodiscMarchCompute == null) return;
-
-        geodiscMarchCompute.SetBuffer(0, "controls", controlQueue);
-        geodiscMarchCompute.SetBuffer(0, "main_rays", mainRayBuffer);
-        geodiscMarchCompute.SetBuffer(0, "hit_infos", HitInfoBuffer);
-        geodiscMarchCompute.SetBuffer(0, "Instances", InstanceBuffer);
-        geodiscMarchCompute.SetBuffer(0, "Normals", MeshNormalsBuffer);
-        geodiscMarchCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
-        geodiscMarchCompute.SetBuffer(0, "blackholes", blackHoleBuffer);
-        geodiscMarchCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
-        geodiscMarchCompute.SetBuffer(0, "Triangles", TriangleBuffer);
-        geodiscMarchCompute.SetBuffer(0, "BVHNodes", BVHBuffer);
-        geodiscMarchCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
-        geodiscMarchCompute.SetBuffer(0, "TLASRefs", TLASRefBuffer);
-        geodiscMarchCompute.SetBuffer(0, "Vertices", MeshVerticesBuffer);
-        geodiscMarchCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-        geodiscMarchCompute.SetBuffer(0, "geodiscMarchQueue", geodiscMarchQueueBufferA);
-        geodiscMarchCompute.SetBuffer(0, "linearMarchQueue", linearMarchQueueBufferB);
-        geodiscMarchCompute.SetBuffer(0, "reflectionQueue", reflectionQueueBuffer);
-        geodiscMarchCompute.SetBuffer(0, "skyboxQueue", skyboxQueueBuffer);
-        geodiscMarchCompute.SetInt("emergencyBreakMaxSteps", emergencyBreakMaxSteps);
-        geodiscMarchCompute.SetFloat("stepSize", blackHoleSOIStepSize);
+        classifyCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
+        classifyCompute.SetBuffer(0, "reflectionQueue",  reflectionQueueBuffer);
+        classifyCompute.SetBuffer(0, "skyboxQueue",      skyboxQueueBuffer);
+        classifyCompute.SetBuffer(0, "Instances",        InstanceBuffer);
+        classifyCompute.SetBuffer(0, "Normals",          MeshNormalsBuffer);
+        classifyCompute.SetBuffer(0, "TriangleIndices",  MeshIndicesBuffer);
+        classifyCompute.SetBuffer(0, "blackholes",       blackHoleBuffer);
+        classifyCompute.SetBuffer(0, "Triangles",        TriangleBuffer);
+        classifyCompute.SetBuffer(0, "BVHNodes",         BVHBuffer);
+        classifyCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
+        classifyCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
+        classifyCompute.SetBuffer(0, "Vertices",         MeshVerticesBuffer);
+        classifyCompute.SetFloat("renderDistance",        renderDistance);
+        classifyCompute.SetFloat("stepSize",              blackHoleSOIStepSize);
+        classifyCompute.SetInt("emergencyBreakMaxSteps",  emergencyBreakMaxSteps);
+        classifyCompute.SetBuffer(0, "pixelAccum",        pixelAccumBuffer);
+        classifyCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
 
     }
 
@@ -607,21 +612,22 @@ public class RayTracingManagerWavefront : MonoBehaviour
     {
         if (reflectionCompute == null) return;
 
-        reflectionCompute.SetBuffer(0, "controls", controlQueue);
-        reflectionCompute.SetBuffer(0, "main_rays", mainRayBuffer);
-        reflectionCompute.SetBuffer(0, "hit_info_buffer", HitInfoBuffer);
-        reflectionCompute.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
-        reflectionCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
-        reflectionCompute.SetBuffer(0, "reflectionQueue", reflectionQueueBuffer);
+        reflectionCompute.SetBuffer(0, "controls",         controlQueue);
+        reflectionCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
+        reflectionCompute.SetBuffer(0, "hit_info_buffer",  HitInfoBuffer);
+        reflectionCompute.SetBuffer(0, "ray_color_info",   rayColorInfoBuffer);
+        reflectionCompute.SetBuffer(0, "pixelAccum",       pixelAccumBuffer);
+        reflectionCompute.SetBuffer(0, "reflectionQueue",  reflectionQueueBuffer);
         reflectionCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-        reflectionCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-        reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
-        reflectionCompute.SetBuffer(0, "Triangles", TriangleBuffer);
-        reflectionCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
-        reflectionCompute.SetBuffer(0, "Normals", MeshNormalsBuffer);
-        reflectionCompute.SetBuffer(0, "BVHNodes", BVHBuffer);
-        reflectionCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
-        reflectionCompute.SetBuffer(0, "TLASRefs", TLASRefBuffer);
+        reflectionCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
+        reflectionCompute.SetBuffer(0, "Instances",        InstanceBuffer);
+        reflectionCompute.SetBuffer(0, "Triangles",        TriangleBuffer);
+        reflectionCompute.SetBuffer(0, "TriangleIndices",  MeshIndicesBuffer);
+        reflectionCompute.SetBuffer(0, "Normals",          MeshNormalsBuffer);
+        reflectionCompute.SetBuffer(0, "BVHNodes",         BVHBuffer);
+        reflectionCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
+        reflectionCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
+        reflectionCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
     }
 
     void BindAccumulateBuffers()
@@ -629,21 +635,38 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (accumulateCompute == null) return;
         accumulateCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
     }
+    void RebindPixelForSlotBuffer()
+    {
+        initCompute?.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
+        classifyCompute?.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
+        reflectionCompute?.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
+    }
 
     void BindFlagVisualizerBuffers()
     {
         if (flagVisualizerMaterial == null) return;
-        flagVisualizerMaterial.SetBuffer("controls", controlQueue);
+        flagVisualizerMaterial.SetBuffer("controls",        controlQueue);
         flagVisualizerMaterial.SetBuffer("hit_info_buffer", HitInfoBuffer);
-        flagVisualizerMaterial.SetBuffer("Instances", InstanceBuffer);
+        flagVisualizerMaterial.SetBuffer("Instances",       InstanceBuffer);
     }
 
     void BindIndirectArgs()
     {
         if (writeIndirectArgsCompute == null) return;
-        writeIndirectArgsCompute.SetInt("NUM_QUEUES", NUM_QUEUES);
+        writeIndirectArgsCompute.SetInt("NUM_QUEUES",           NUM_QUEUES);
         writeIndirectArgsCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-        writeIndirectArgsCompute.SetBuffer(0, "indirectArgs", indirectArgsBuffer);
+        writeIndirectArgsCompute.SetBuffer(0, "indirectArgs",   indirectArgsBuffer);
+    }
+
+    // Rebinds main_rays and activeRayIndices to all shaders after a buffer swap.
+    void RebindRayBuffers()
+    {
+        classifyCompute?.SetBuffer(0,    "activeRayIndices", activeRayIndicesBuffer);
+        classifyCompute?.SetBuffer(0,    "main_rays",        mainRayBuffer);
+        reflectionCompute?.SetBuffer(0,  "activeRayIndices", activeRayIndicesBuffer);
+        reflectionCompute?.SetBuffer(0,  "main_rays",        mainRayBuffer);
+        compactCompute?.SetBuffer(0,     "activeRayIndices", activeRayIndicesBuffer);
+        initCompute?.SetBuffer(0,        "main_rays",        mainRayBuffer);
     }
 
     void DispatchCompute(ComputeShader cs, int pixelCount, string label = "")
@@ -663,41 +686,100 @@ public class RayTracingManagerWavefront : MonoBehaviour
         cs.DispatchIndirect(0, indirectArgsBuffer, byteOffset);
         Profiler.EndSample();
     }
-
-    void SetLinearMarchQueueBindings(
-        ComputeBuffer linearInput,
-        ComputeBuffer geodiscOutput,
-        int linearInputQueueIndex,
-        int geodiscOutputQueueIndex)
+    void RebindControlBuffer()
     {
-        if (linearMarchCompute == null) return;
-
-        linearMarchCompute.SetBuffer(0, "linearMarchQueue", linearInput);
-        linearMarchCompute.SetBuffer(0, "geodiscMarchQueue", geodiscOutput);
-
-        // REQUIRED shader-side ints in LinearMarch.compute:
-        // int linearInputQueueIndex;
-        // int linearToGeodiscOutputQueueIndex;
-        linearMarchCompute.SetInt("linearInputQueue", linearInputQueueIndex);
-        linearMarchCompute.SetInt("linearToGeodiscQueue", geodiscOutputQueueIndex);
+        initCompute?.SetBuffer(0, "controls", controlQueue);
+        classifyCompute?.SetBuffer(0, "controls", controlQueue);
+        reflectionCompute?.SetBuffer(0, "controls", controlQueue);
+        flagVisualizerMaterial?.SetBuffer("controls", controlQueue);
     }
 
-    void SetGeodiscMarchQueueBindings(
-        ComputeBuffer geodiscInput,
-        ComputeBuffer linearOutput,
-        int geodiscInputQueueIndex,
-        int linearOutputQueueIndex)
+    void RebindRayColorInfoBuffer()
     {
-        if (geodiscMarchCompute == null) return;
+        initCompute?.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
+        reflectionCompute?.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
+    }
+    // Sorts main_rays physically by direction bucket into sortedRaysBuffer,
+    // scatters activeRayIndices into sortedRayIndicesBuffer,
+    // builds oldPixelForSlot (slot->pixel) and newSlotForPixel (pixel->slot),
+    // swaps both pairs of ping-pong buffers,
+    // then fixups reflectionQueue and skyboxQueue to use new slot indices.
+    void DispatchBucketSort()
+    {
+        if (bucketSortCompute == null) return;
 
-        geodiscMarchCompute.SetBuffer(0, "geodiscMarchQueue", geodiscInput);
-        geodiscMarchCompute.SetBuffer(0, "linearMarchQueue", linearOutput);
+        Profiler.BeginSample("BucketSort");
 
-        // REQUIRED shader-side ints in GeodiscMarch.compute:
-        // int geodiscInputQueueIndex;
-        // int geodiscToLinearOutputQueueIndex;
-        geodiscMarchCompute.SetInt("geodiscInputQueueIndex", geodiscInputQueueIndex);
-        geodiscMarchCompute.SetInt("geodiscToLinearOutputQueueIndex", linearOutputQueueIndex);
+        int numBuckets = 6 * sortBucketsPerAxis * sortBucketsPerAxis;
+        bucketSortCompute.SetInt("_BucketsPerAxis", sortBucketsPerAxis);
+        bucketSortCompute.SetInt("_NumBuckets", numBuckets);
+
+        // Pass 0 — clear bucket counts
+        bucketSortCompute.SetBuffer(KERNEL_CLEAR_BUCKETS, "bucketCounts", bucketCountsBuffer);
+        bucketSortCompute.Dispatch(KERNEL_CLEAR_BUCKETS, Mathf.CeilToInt(numBuckets / 64f), 1, 1);
+
+        int groups = Mathf.CeilToInt(NUM_QUEUES / 8f);
+        writeIndirectArgsCompute.Dispatch(0, groups, 1, 1);
+
+        uint activeByteOffset = (uint)ACTIVE_RAY_QUEUE * 3 * sizeof(uint);
+
+        // Pass 1 — count rays per bucket
+        bucketSortCompute.SetBuffer(KERNEL_COUNT_BUCKETS, "activeRayIndices", activeRayIndicesBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_COUNT_BUCKETS, "activeRayCount", activeRayCountBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_COUNT_BUCKETS, "main_rays", mainRayBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_COUNT_BUCKETS, "bucketCounts", bucketCountsBuffer);
+        bucketSortCompute.DispatchIndirect(KERNEL_COUNT_BUCKETS, indirectArgsBuffer, activeByteOffset);
+
+        // Pass 2 — prefix sum
+        bucketSortCompute.SetBuffer(KERNEL_PREFIX_SUM, "bucketCounts", bucketCountsBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_PREFIX_SUM, "bucketOffsets", bucketOffsetsBuffer);
+        bucketSortCompute.Dispatch(KERNEL_PREFIX_SUM, 1, 1, 1);
+
+        // Pass 3 — scatter rays into sorted buffers, preserve slot->pixel mapping
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "activeRayIndices", activeRayIndicesBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "activeRayCount", activeRayCountBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "main_rays", mainRayBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "sortedRays", sortedRaysBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "pixelForSlot", pixelForSlotBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "sortedPixelForSlot", sortedPixelForSlotBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "newSlotForOldSlot", newSlotForOldSlotBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "sortedRayIndices", sortedRayIndicesBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "bucketCounts", bucketCountsBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "bucketOffsets", bucketOffsetsBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "controls", controlQueue);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "sortedControls", sortedControlsBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "ray_color_info", rayColorInfoBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_SCATTER_RAYS, "sortedRayColorInfo", sortedRayColorInfoBuffer);
+        bucketSortCompute.DispatchIndirect(KERNEL_SCATTER_RAYS, indirectArgsBuffer, activeByteOffset);
+
+        // Swap in sorted storage
+        (mainRayBuffer, sortedRaysBuffer) = (sortedRaysBuffer, mainRayBuffer);
+        (pixelForSlotBuffer, sortedPixelForSlotBuffer) = (sortedPixelForSlotBuffer, pixelForSlotBuffer);
+        (activeRayIndicesBuffer, sortedRayIndicesBuffer) = (sortedRayIndicesBuffer, activeRayIndicesBuffer);
+        (controlQueue, sortedControlsBuffer) = (sortedControlsBuffer, controlQueue);
+        (rayColorInfoBuffer, sortedRayColorInfoBuffer) = (sortedRayColorInfoBuffer, rayColorInfoBuffer);
+        RebindRayBuffers();
+        RebindPixelForSlotBuffer();
+        RebindControlBuffer();
+        RebindRayColorInfoBuffer();
+        // Pass 4 — fix reflection queue (queue stores old slots)
+        bucketSortCompute.SetBuffer(KERNEL_FIXUP_QUEUE, "queueToFixup", reflectionQueueBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_FIXUP_QUEUE, "queueCount", activeRayCountBuffer);
+        bucketSortCompute.SetBuffer(KERNEL_FIXUP_QUEUE, "newSlotForOldSlot", newSlotForOldSlotBuffer);
+        bucketSortCompute.SetInt("queueIndex", REFLECTION_QUEUE);
+
+        uint reflByteOffset = (uint)REFLECTION_QUEUE * 3 * sizeof(uint);
+        writeIndirectArgsCompute.Dispatch(0, groups, 1, 1);
+        bucketSortCompute.DispatchIndirect(KERNEL_FIXUP_QUEUE, indirectArgsBuffer, reflByteOffset);
+
+        // Pass 5 — fix skybox queue
+        bucketSortCompute.SetBuffer(KERNEL_FIXUP_QUEUE, "queueToFixup", skyboxQueueBuffer);
+        bucketSortCompute.SetInt("queueIndex", SKYBOX_QUEUE);
+
+        uint skyByteOffset = (uint)SKYBOX_QUEUE * 3 * sizeof(uint);
+        bucketSortCompute.DispatchIndirect(KERNEL_FIXUP_QUEUE, indirectArgsBuffer, skyByteOffset);
+
+        Profiler.EndSample();
     }
 
     void BuildHardwareGeometryBuffers(List<RayTracedMesh> meshes, MeshStruct[] gpuInstances)
@@ -831,13 +913,6 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (reflectionCompute != null) reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
 
         accelStructure.Build();
-    }
-
-    void DispatchHardwareLinearMarch(int width, int height)
-    {
-        if (linearMarchRaytraceShader == null) { Debug.LogError("linearMarchRaytraceShader not assigned!"); return; }
-        if (accelStructure == null) { Debug.LogError("accelStructure is null!"); return; }
-        linearMarchRaytraceShader.Dispatch("RayGen", width, height, 1);
     }
 
     void UpdateAtmosphereParams() { }
@@ -1068,23 +1143,22 @@ public class RayTracingManagerWavefront : MonoBehaviour
         ShaderHelper.CreateStructuredBuffer(ref BVHBuffer,          blasBVHNodes);
         ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer,  blasTriangleIndices);
 
-        if (linearMarchCompute != null)
+        if (classifyCompute != null)
         {
-            linearMarchCompute.SetBuffer(0, "Triangles", TriangleBuffer);
-            linearMarchCompute.SetBuffer(0, "BVHNodes", BVHBuffer);
-            linearMarchCompute.SetBuffer(0, "Vertices", MeshVerticesBuffer);
-            linearMarchCompute.SetBuffer(0, "Normals", MeshNormalsBuffer);
-            linearMarchCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
-            linearMarchCompute.SetInt("numBLASNodes", totalBVHNodes);
+            classifyCompute.SetBuffer(0, "Triangles",       TriangleBuffer);
+            classifyCompute.SetBuffer(0, "BVHNodes",        BVHBuffer);
+            classifyCompute.SetBuffer(0, "Vertices",        MeshVerticesBuffer);
+            classifyCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
+            classifyCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
+            classifyCompute.SetInt("numBLASNodes",          totalBVHNodes);
         }
-        
 
         if (reflectionCompute != null)
         {
-            reflectionCompute.SetBuffer(0, "Triangles", TriangleBuffer);
+            reflectionCompute.SetBuffer(0, "Triangles",       TriangleBuffer);
             reflectionCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
-            reflectionCompute.SetBuffer(0, "Normals", MeshNormalsBuffer);
-            reflectionCompute.SetBuffer(0, "BVHNodes", BVHBuffer);
+            reflectionCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
+            reflectionCompute.SetBuffer(0, "BVHNodes",        BVHBuffer);
         }
 
         for (int i = 0; i < validInstances.Count; i++) validInstances[i].update = false;
@@ -1227,55 +1301,39 @@ public class RayTracingManagerWavefront : MonoBehaviour
         ShaderHelper.CreateStructuredBuffer<GPULightSource>(ref LightSourceBuffer, Mathf.Max(1, numLightSources));
         if (numLightSources > 0) LightSourceBuffer.SetData(tlasLightSources, 0, 0, numLightSources);
 
-        ShaderHelper.UploadStructuredBuffer(ref TLASBuffer, tlasNodesCache);
-        ShaderHelper.UploadStructuredBuffer(ref TLASRefBuffer, tlasRefsCache);
+        ShaderHelper.UploadStructuredBuffer(ref TLASBuffer,     tlasNodesCache);
+        ShaderHelper.UploadStructuredBuffer(ref TLASRefBuffer,  tlasRefsCache);
         ShaderHelper.UploadStructuredBuffer(ref InstanceBuffer, tlasGpuInstances);
         ShaderHelper.UploadStructuredBuffer(ref LightTriangleIndicesBuffer, lightTriIndicesCache);
-        ShaderHelper.UploadStructuredBuffer(ref LightTrianglesDataBuffer, lightTriDataCache);
+        ShaderHelper.UploadStructuredBuffer(ref LightTrianglesDataBuffer,   lightTriDataCache);
 
-        if (linearMarchCompute != null)
+        if (classifyCompute != null)
         {
-            linearMarchCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
-            linearMarchCompute.SetBuffer(0, "TLASRefs", TLASRefBuffer);
-            linearMarchCompute.SetBuffer(0, "Instances", InstanceBuffer);
-            linearMarchCompute.SetBuffer(0, "LightSources", LightSourceBuffer);
-            linearMarchCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
-            linearMarchCompute.SetBuffer(0, "LightTrianglesData", LightTrianglesDataBuffer);
-            linearMarchCompute.SetInt("numMeshes", tlasGpuInstances.Length);
-            linearMarchCompute.SetInt("numTLASNodes", tlasNodesCache.Length);
-            linearMarchCompute.SetInt("numInstances", tlasGpuInstances.Length);
-            linearMarchCompute.SetInt("TLASRootIndex", tlasBuilder.RootIndex);
-            linearMarchCompute.SetInt("numLightSources", numLightSources);
-            linearMarchCompute.SetInt("BVHTestsSaturation", BVHNodeTestSaturationValue);
-            linearMarchCompute.SetInt("triTestsSaturation", triTestFullSaturationValue);
-            linearMarchCompute.SetInt("TLASNodeVisitsSaturation", TLASNodeVisitsSaturationValue);
-            linearMarchCompute.SetInt("BLASNodeVisitsSaturation", BLASNodeVisitsSaturationValue);
-            linearMarchCompute.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
-            linearMarchCompute.SetInt("TLASLeafRefsVisitedSaturation", TLASLeafRefsSaturationValue);
-            linearMarchCompute.SetInt("u_StepsPerCollisionTest", StepsPerCollisionTest);
-        }
-        if (geodiscMarchCompute != null)
-        {
-            geodiscMarchCompute.SetBuffer(0, "Instances", InstanceBuffer);
-            geodiscMarchCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
-            geodiscMarchCompute.SetBuffer(0, "TLASRefs", TLASRefBuffer);
-            geodiscMarchCompute.SetBuffer(0, "BVHNodes", BVHBuffer);
-            geodiscMarchCompute.SetBuffer(0, "Triangles", TriangleBuffer);
-            geodiscMarchCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
-            geodiscMarchCompute.SetBuffer(0, "Vertices", MeshVerticesBuffer);
-            geodiscMarchCompute.SetBuffer(0, "Normals", MeshNormalsBuffer);
-
-            geodiscMarchCompute.SetInt("numMeshes", tlasGpuInstances.Length);
-            geodiscMarchCompute.SetInt("numTLASNodes", tlasNodesCache.Length);
-            geodiscMarchCompute.SetInt("numInstances", tlasGpuInstances.Length);
-            geodiscMarchCompute.SetInt("TLASRootIndex", tlasBuilder.RootIndex);
+            classifyCompute.SetBuffer(0, "TLASNodes",            TLASBuffer);
+            classifyCompute.SetBuffer(0, "TLASRefs",             TLASRefBuffer);
+            classifyCompute.SetBuffer(0, "Instances",            InstanceBuffer);
+            classifyCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+            classifyCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
+            classifyCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
+            classifyCompute.SetInt("numMeshes",                   tlasGpuInstances.Length);
+            classifyCompute.SetInt("numTLASNodes",                tlasNodesCache.Length);
+            classifyCompute.SetInt("numInstances",                tlasGpuInstances.Length);
+            classifyCompute.SetInt("TLASRootIndex",               tlasBuilder.RootIndex);
+            classifyCompute.SetInt("numLightSources",             numLightSources);
+            classifyCompute.SetInt("BVHTestsSaturation",               BVHNodeTestSaturationValue);
+            classifyCompute.SetInt("triTestsSaturation",               triTestFullSaturationValue);
+            classifyCompute.SetInt("TLASNodeVisitsSaturation",         TLASNodeVisitsSaturationValue);
+            classifyCompute.SetInt("BLASNodeVisitsSaturation",         BLASNodeVisitsSaturationValue);
+            classifyCompute.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
+            classifyCompute.SetInt("TLASLeafRefsVisitedSaturation",    TLASLeafRefsSaturationValue);
+            classifyCompute.SetInt("u_StepsPerCollisionTest",          StepsPerCollisionTest);
         }
 
         if (reflectionCompute != null)
         {
             reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
             reflectionCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
-            reflectionCompute.SetBuffer(0, "TLASRefs", TLASRefBuffer);
+            reflectionCompute.SetBuffer(0, "TLASRefs",  TLASRefBuffer);
         }
 
         if (flagVisualizerMaterial != null)
@@ -1288,44 +1346,6 @@ public class RayTracingManagerWavefront : MonoBehaviour
     {
         cs.SetFloat("bendStrength", bendStrength);
         cs.SetFloat("strongFieldCurvatureRadPetMeterCutoff", strongFieldRadPerMeterCuttoff);
-    }
-
-    void CPUSortActiveRays(int totalPixels)
-    {
-        uint[] countArr = new uint[1];
-        activeRayCountBuffer.GetData(countArr);
-        uint activeCount = countArr[0];
-        if (activeCount == 0) return;
-
-        uint[] indices = new uint[activeCount];
-        MainRay[] rays = new MainRay[totalPixels];
-        activeRayIndicesBuffer.GetData(indices, 0, 0, (int)activeCount);
-        mainRayBuffer.GetData(rays);
-
-        uint[] keys = new uint[activeCount];
-        for (int i = 0; i < activeCount; i++)
-            keys[i] = DirectionToSortKey(rays[indices[i]].rayDirection);
-
-        Array.Sort(keys, indices);
-        activeRayIndicesBuffer.SetData(indices, 0, 0, (int)activeCount);
-    }
-
-    uint DirectionToSortKey(Vector3 dir)
-    {
-        dir.Normalize();
-        float l1 = Mathf.Abs(dir.x) + Mathf.Abs(dir.y) + Mathf.Abs(dir.z);
-        float ox = dir.x / l1;
-        float oy = dir.y / l1;
-        if (dir.z < 0)
-        {
-            float sx = ox >= 0 ? 1f : -1f;
-            float sy = oy >= 0 ? 1f : -1f;
-            ox = (1f - Mathf.Abs(oy)) * sx;
-            oy = (1f - Mathf.Abs(ox)) * sy;
-        }
-        uint x = (uint)Mathf.Clamp((ox * 0.5f + 0.5f) * 1023f, 0, 1023);
-        uint y = (uint)Mathf.Clamp((oy * 0.5f + 0.5f) * 1023f, 0, 1023);
-        return (x << 10) | y;
     }
 
     void OnRenderImage(RenderTexture source, RenderTexture target)
@@ -1362,29 +1382,14 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
         try
         {
-            initCompute.SetInt("_ScreenWidth", scaledW);
+            initCompute.SetInt("_ScreenWidth",  scaledW);
             initCompute.SetInt("_ScreenHeight", scaledH);
             initCompute.SetInt("numRenderedFrames", numRenderedFrames);
 
-            classifyCompute.SetInt("_ScreenWidth", scaledW);
+            classifyCompute.SetInt("_ScreenWidth",  scaledW);
             classifyCompute.SetInt("_ScreenHeight", scaledH);
 
-            linearMarchCompute.SetInt("_ScreenWidth", scaledW);
-            linearMarchCompute.SetInt("_ScreenHeight", scaledH);
-            linearMarchCompute.SetFloat("renderDistance", renderDistance);
-
-            if (geodiscMarchCompute != null)
-            {
-                geodiscMarchCompute.SetInt("_ScreenWidth", scaledW);
-                geodiscMarchCompute.SetInt("_ScreenHeight", scaledH);
-                geodiscMarchCompute.SetInt("emergencyBreakMaxSteps", emergencyBreakMaxSteps);
-                geodiscMarchCompute.SetFloat("stepSize", blackHoleSOIStepSize);
-            }
-
-            if (linearMarchRaytraceShader != null)
-                linearMarchRaytraceShader.SetFloat("renderDistance", renderDistance);
-
-            reflectionCompute.SetInt("_ScreenWidth", scaledW);
+            reflectionCompute.SetInt("_ScreenWidth",  scaledW);
             reflectionCompute.SetInt("_ScreenHeight", scaledH);
 
             for (int ray = 0; ray < raysPerPixel; ray++)
@@ -1394,65 +1399,27 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
                 for (int bounce = 0; bounce < maxBounces; bounce++)
                 {
-                    // Reset per-bounce producer queues.
-                    activeRayCountBuffer.SetData(zeroOne, 0, LINEAR_RAY_QUEUEA, 1);
-                    activeRayCountBuffer.SetData(zeroOne, 0, GEODISC_RAY_QUEUEA, 1);
-                    activeRayCountBuffer.SetData(zeroOne, 0, LINEAR_RAY_QUEUEB, 1);
-                    activeRayCountBuffer.SetData(zeroOne, 0, GEODISC_RAY_QUEUEB, 1);
                     activeRayCountBuffer.SetData(zeroOne, 0, REFLECTION_QUEUE, 1);
                     activeRayCountBuffer.SetData(zeroOne, 0, SKYBOX_QUEUE, 1);
 
-                    // Seed A queues from the current active rays.
-                    DispatchWavefront(classifyCompute, ACTIVE_RAY_QUEUE, "Classify");
-                    activeRayCountBuffer.SetData(zeroOne, 0, ACTIVE_RAY_QUEUE, 1);
+                    DispatchBucketSort();
 
-                    bool useAAsInput = true;
+                    DispatchWavefront(classifyCompute, ACTIVE_RAY_QUEUE, "Propagate");
 
-                    for (int iter = 0; iter < maxLinearGeodiscPingPongIterations; iter++)
-                    {
-                        ComputeBuffer linearInput   = useAAsInput ? linearMarchQueueBufferA   : linearMarchQueueBufferB;
-                        ComputeBuffer linearOutput  = useAAsInput ? linearMarchQueueBufferB   : linearMarchQueueBufferA;
-                        ComputeBuffer geodiscInput  = useAAsInput ? geodiscMarchQueueBufferA  : geodiscMarchQueueBufferB;
-                        ComputeBuffer geodiscOutput = useAAsInput ? geodiscMarchQueueBufferB  : geodiscMarchQueueBufferA;
-
-                        int linearInputQueueIndex   = useAAsInput ? LINEAR_RAY_QUEUEA   : LINEAR_RAY_QUEUEB;
-                        int linearOutputQueueIndex  = useAAsInput ? LINEAR_RAY_QUEUEB   : LINEAR_RAY_QUEUEA;
-                        int geodiscInputQueueIndex  = useAAsInput ? GEODISC_RAY_QUEUEA  : GEODISC_RAY_QUEUEB;
-                        int geodiscOutputQueueIndex = useAAsInput ? GEODISC_RAY_QUEUEB  : GEODISC_RAY_QUEUEA;
-
-                        // Clear the output side of this iteration only.
-                        activeRayCountBuffer.SetData(zeroOne, 0, linearOutputQueueIndex, 1);
-                        activeRayCountBuffer.SetData(zeroOne, 0, geodiscOutputQueueIndex, 1);
-
-                        SetLinearMarchQueueBindings(
-                            linearInput,
-                            geodiscOutput,
-                            linearInputQueueIndex,
-                            geodiscOutputQueueIndex);
-
-                        SetGeodiscMarchQueueBindings(
-                            geodiscInput,
-                            linearOutput,
-                            geodiscInputQueueIndex,
-                            linearOutputQueueIndex);
-
-                        DispatchWavefront(linearMarchCompute,  linearInputQueueIndex,  $"LinearMarch_{iter}");
-                        DispatchWavefront(geodiscMarchCompute, geodiscInputQueueIndex, $"GeodiscMarch_{iter}");
-
-                        useAAsInput = !useAAsInput;
-                    }
+                    DispatchCompute(resetCountCompute, 1, "reset");
 
                     DispatchWavefront(reflectionCompute, REFLECTION_QUEUE, "Reflection");
                 }
+                DispatchCompute(resetCountCompute, 1, "reset");
             }
 
             activeRayCountBuffer.SetData(zerosNUM_QUEUES);
 
-            accumulateCompute.SetInt("_ScreenWidth", scaledW);
+            accumulateCompute.SetInt("_ScreenWidth",  scaledW);
             accumulateCompute.SetInt("_ScreenHeight", scaledH);
-            accumulateCompute.SetInt("raysPerPixel", raysPerPixel);
-            accumulateCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
-            accumulateCompute.SetTexture(0, "_Output", resultTexture);
+            accumulateCompute.SetInt("raysPerPixel",  raysPerPixel);
+            accumulateCompute.SetBuffer(0, "pixelAccum",      pixelAccumBuffer);
+            accumulateCompute.SetTexture(0, "_Output",        resultTexture);
             DispatchCompute(accumulateCompute, pixelCount);
 
             if (accumulatorMaterial != null)
@@ -1579,14 +1546,14 @@ public class RayTracingManagerWavefront : MonoBehaviour
     void UpdateCameraParams(Camera camera)
     {
         float planeHeight = camera.nearClipPlane * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad) * 2f;
-        float planeWidth = planeHeight * camera.aspect;
+        float planeWidth  = planeHeight * camera.aspect;
 
         if (initCompute != null)
         {
-            initCompute.SetVector("ViewParams", new Vector3(planeWidth, planeHeight, camera.nearClipPlane));
+            initCompute.SetVector("ViewParams",               new Vector3(planeWidth, planeHeight, camera.nearClipPlane));
             initCompute.SetMatrix("CameraLocalToWorldMatrix", camera.transform.localToWorldMatrix);
-            initCompute.SetVector("CameraWorldPos", camera.transform.position);
-            initCompute.SetInt("numRenderedFrames", numRenderedFrames);
+            initCompute.SetVector("CameraWorldPos",           camera.transform.position);
+            initCompute.SetInt("numRenderedFrames",           numRenderedFrames);
         }
 
         if (blackHoleSOIStepSize == 0) blackHoleSOIStepSize = 1.0f;
@@ -1594,16 +1561,10 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
     void UpdateRayTracingParams()
     {
-        if (linearMarchCompute != null)
+        if (classifyCompute != null)
         {
-            if (useTlas) linearMarchCompute.EnableKeyword("USE_TLAS");
-            else linearMarchCompute.DisableKeyword("USE_TLAS");
-        }
-
-        if (geodiscMarchCompute != null)
-        {
-            if (useTlas) geodiscMarchCompute.EnableKeyword("USE_TLAS");
-            else geodiscMarchCompute.DisableKeyword("USE_TLAS");
+            if (useTlas) classifyCompute.EnableKeyword("USE_TLAS");
+            else         classifyCompute.DisableKeyword("USE_TLAS");
         }
     }
 
@@ -1620,8 +1581,8 @@ public class RayTracingManagerWavefront : MonoBehaviour
             {
                 cachedBlackHoles[i] = new BlackHole
                 {
-                    position = cachedBlackHoleObjects[i].transform.position,
-                    radius = cachedBlackHoleObjects[i].transform.localScale.x * 0.5f,
+                    position               = cachedBlackHoleObjects[i].transform.position,
+                    radius                 = cachedBlackHoleObjects[i].transform.localScale.x * 0.5f,
                     blackHoleSOIMultiplier = cachedBlackHoleObjects[i].blackHoleSOIMultiplier,
                 };
 
@@ -1639,7 +1600,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
             for (int i = 0; i < cachedBlackHoleObjects.Length; i++)
             {
                 cachedBlackHoles[i].position = cachedBlackHoleObjects[i].transform.position;
-                cachedBlackHoles[i].radius = cachedBlackHoleObjects[i].transform.localScale.x * 0.5f;
+                cachedBlackHoles[i].radius   = cachedBlackHoleObjects[i].transform.localScale.x * 0.5f;
             }
         }
 
@@ -1650,25 +1611,13 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
         if (classifyCompute != null)
         {
-            classifyCompute.SetBuffer(0, "blackholes", blackHoleBuffer);
-            classifyCompute.SetInt("num_black_holes", cachedBlackHoleObjects.Length);
-        }
-
-        if (linearMarchCompute != null)
-        {
-            linearMarchCompute.SetBuffer(0, "blackholes", blackHoleBuffer);
-            linearMarchCompute.SetInt("num_black_holes", cachedBlackHoleObjects.Length);
-        }
-
-        if (geodiscMarchCompute != null)
-        {
-            geodiscMarchCompute.SetBuffer(0, "blackholes", blackHoleBuffer);
-            geodiscMarchCompute.SetInt("num_black_holes", cachedBlackHoleObjects.Length);
+            classifyCompute.SetBuffer(0, "blackholes",  blackHoleBuffer);
+            classifyCompute.SetInt("num_black_holes",   cachedBlackHoleObjects.Length);
         }
 
         if (SystemInfo.supportsRayTracing && !forceSoftwareRaytracing && linearMarchRaytraceShader != null)
         {
-            linearMarchRaytraceShader.SetBuffer("blackholes", blackHoleBuffer);
+            linearMarchRaytraceShader.SetBuffer("blackholes",   blackHoleBuffer);
             linearMarchRaytraceShader.SetInt("num_black_holes", cachedBlackHoleObjects.Length);
         }
     }

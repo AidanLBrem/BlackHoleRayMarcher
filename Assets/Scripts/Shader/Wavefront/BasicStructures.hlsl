@@ -1,3 +1,4 @@
+
 #define ACTIVE_RAY_QUEUE 0
 #define LINEAR_RAY_QUEUEA 1
 #define GEODISC_RAY_QUEUEA 2
@@ -7,6 +8,7 @@
 #define NEE_QUEUE 6
 #define SCATTER_QUEUE 7
 #define SKYBOX_QUEUE 8
+struct ray       { float3 position; float3 direction; };
 struct HitInfo 
 {
     bool  didHit;
@@ -23,11 +25,6 @@ struct AABBHitInfo {
     float distance;
 };
 
-struct Ray
-{
-    float3 position;
-    float3 direction; 
-};
 struct Triangle
 {
     uint baseIndex;
@@ -88,8 +85,8 @@ struct color_info
     float3 rayColor;
     float3 incomingLight;
 };
-struct control   { uint flags; uint rngState; };
-struct ray       { float3 position; float3 direction; };
+struct control   { uint rngState;};
+
 struct blackhole
 {
     float3 position;
@@ -107,71 +104,3 @@ StructuredBuffer<uint>     TLASRefs;
 StructuredBuffer<blackhole>      blackholes;
 uint num_black_holes;
 
-AABBHitInfo RayAABB(float3 rayOrigin, float3 rayDirection, float3 inverseDirection, float3 boxMin, float3 boxMax, float distanceToBeat)
-{
-    float3 invDir = inverseDirection;
-    float3 tMin = (boxMin - rayOrigin) * invDir;
-    float3 tMax = (boxMax - rayOrigin) * invDir;
-    float3 t1 = min(tMin, tMax);
-    float3 t2 = max(tMin, tMax);
-    float tNear = max(max(t1.x, t1.y), t1.z);
-    float tFar = min(min(t2.x, t2.y), t2.z);
-
-    AABBHitInfo hitInfo = (AABBHitInfo)0;
-    hitInfo.didHit = (tNear <= tFar) && (tFar >= 0.0) && (tNear <= distanceToBeat);
-    hitInfo.distance = max(tNear, 0.0);
-    return hitInfo;
-}
-AABBHitInfo RayHitsBox(
-                float3 rayOrigin,
-                float3 rayDirection,
-                float3 inverseDirection,
-                float AABBLeftX,
-                float AABBLeftY,
-                float AABBLeftZ,
-                float AABBRightX,
-                float AABBRightY,
-                float AABBRightZ,
-                float distanceToBeat)
-{
-    float3 boxMin = float3(AABBLeftX,  AABBLeftY,  AABBLeftZ);
-    float3 boxMax = float3(AABBRightX, AABBRightY, AABBRightZ);
-    return RayAABB(rayOrigin, rayDirection, inverseDirection, boxMin, boxMax, distanceToBeat);
-}
-
-HitInfo rayTriangle(Ray ray, Triangle tri)
-{
-    float3 edgeAB = tri.edgeAB;
-    float3 edgeAC = tri.edgeAC;
-    float3 geometricNormal = cross(tri.edgeAB, tri.edgeAC);
-
-    float determinant = -dot(ray.direction, geometricNormal);
-    if (determinant <=  0)
-        return (HitInfo)0;
-
-    float invDet = 1 / determinant;
-    uint vertex1 = TriangleIndices[tri.baseIndex];
-    float3 ao = ray.position - Vertices[vertex1];
-    float dst = dot(ao, geometricNormal) * invDet;
-    if (dst <  0)
-        return (HitInfo)0;
-
-    float3 dao = cross(ao, ray.direction);
-    float u = dot(edgeAC, dao) * invDet;
-    if (u <  0)
-        return (HitInfo)0;
-
-    float v = -dot(edgeAB, dao) * invDet;
-    if (v < 0)
-        return (HitInfo)0;
-
-    if (u + v > 1.0)
-        return (HitInfo)0;
-
-    HitInfo hitInfo = (HitInfo)0;
-    hitInfo.didHit = true;
-    hitInfo.distance = dst;
-    hitInfo.u = u;
-    hitInfo.v = v;
-    return hitInfo;
-}

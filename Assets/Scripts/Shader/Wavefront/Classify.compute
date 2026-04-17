@@ -1,65 +1,299 @@
 #pragma kernel Main
+#pragma multi_compile _ USE_TLAS
 
 #include "Math.hlsl"
 #include "PixelFlags.hlsl"
 #include "BasicStructures.hlsl"
+#include "RayTracing.hlsl"
 
-uint _ScreenWidth;
-uint _ScreenHeight;
+#define MAX_CYCLES 2
 
-RWStructuredBuffer<control> controls;
+#define BH_INSIDE_HORIZON    (1u << 0)
+#define BH_INSIDE_SHELL      (1u << 1)
+#define BH_WILL_ENTER_SHELL  (1u << 2)
+#define BH_SAFE_TO_EXIT      (1u << 3)
+
+StructuredBuffer<uint>      activeRayIndices;
+RWStructuredBuffer<uint>    activeRayCount;
 RWStructuredBuffer<ray>     main_rays;
-RWStructuredBuffer<uint> activeRayIndices;
-RWStructuredBuffer<uint> activeRayCount;
-RWStructuredBuffer<uint> linearMarchQueue;    // indices of rays needing linear march
-RWStructuredBuffer<uint> geodiscMarchQueue;  // indices needing geodesic march
-RWStructuredBuffer<uint> reflectionQueue;     // indices needing reflection
-RWStructuredBuffer<uint> skyboxQueue;         // indices needing skybox sample
+RWStructuredBuffer<HitInfo> hit_infos;
 
+RWStructuredBuffer<uint>    reflectionQueue;
+RWStructuredBuffer<uint>    skyboxQueue;
 
-float GetBlackHoleMarchShellRadius(int i)
+float renderDistance;
+float stepSize;
+int   emergencyBreakMaxSteps;
+
+uint QueryBlackHoles(float3 pos, float3 dir, out float minDistFromHorizon)
 {
-    float rs = blackholes[i].schwarzchild_radius;
-    return max(rs * blackholes[i].black_hole_soi_multiplier, 4.0 * rs);
-}
+    uint flags = BH_SAFE_TO_EXIT;
+    minDistFromHorizon = 3.402823e+38;
 
-// True if the point is inside any BH march shell.
-bool IsInsideAnyMarchShell(float3 pos)
-{
+    [loop]
     for (int i = 0; i < num_black_holes; i++)
     {
-        float shell = GetBlackHoleMarchShellRadius(i);
-        if (PointInsideSphere(pos, blackholes[i].position, shell))
+        float3 bhPos = blackholes[i].position;
+        float  rs    = blackholes[i].schwarzchild_radius;
+        float  shell = max(rs * blackholes[i].black_hole_soi_multiplier, 4.0 * rs);
+
+        float3 rel = pos - bhPos;
+        float  r   = length(rel);
+
+        float distFromHorizon = max(r - rs, 0.0);
+        minDistFromHorizon = min(minDistFromHorizon, distFromHorizon);
+
+        uint insideHorizon = (r <= rs)    ? 1u : 0u;
+        uint insideShell   = (r <= shell) ? 1u : 0u;
+
+        flags |= insideHorizon * BH_INSIDE_HORIZON;
+        flags |= insideShell   * BH_INSIDE_SHELL;
+
+        float tEntry = RaySphereEntryDistance(pos, dir, bhPos, shell);
+        uint willEnterShell = (tEntry >= 0.0) ? 1u : 0u;
+
+        flags |= willEnterShell * BH_WILL_ENTER_SHELL;
+
+        if (insideShell | willEnterShell)
+            flags &= ~BH_SAFE_TO_EXIT;
+    }
+
+    return flags;
+}
+
+bool SegmentHitsAnyHorizon(float3 p0, float3 p1)
+{
+    [loop]
+    for (int i = 0; i < num_black_holes; i++)
+    {
+        float3 bhPos = blackholes[i].position;
+        float  rs    = blackholes[i].schwarzchild_radius;
+
+        if (PointInsideSphere(p0, bhPos, rs) || PointInsideSphere(p1, bhPos, rs))
+            return true;
+
+        float3 seg    = p1 - p0;
+        float  segLen = length(seg);
+        if (segLen <= 1e-6)
+            continue;
+
+        float3 segDir = seg / segLen;
+        float  t      = RaySphereEntryDistance(p0, segDir, bhPos, rs);
+        if (t >= 0.0 && t <= segLen)
             return true;
     }
+
     return false;
 }
 
-[numthreads(64,1,1)]
+float3 ComputeTotalAccel(float3 pos, float3 dir)
+{
+    float3 total = float3(0, 0, 0);
+
+    [loop]
+    for (int i = 0; i < num_black_holes; i++)
+    {
+        float3 rel = pos - blackholes[i].position;
+        float  rs  = blackholes[i].schwarzchild_radius;
+
+        float r2   = max(dot(rel, rel), rs * rs * 1.0001);
+        float invR = rsqrt(r2);
+        float r    = r2 * invR;
+
+        float f = 1.0 - rs * invR;
+        if (f <= 0.0)
+            continue;
+
+        float bend =
+            invR +
+            (1.5 * rs - r) * (invR * invR) * rsqrt(f);
+
+        total += (-bend * invR) * (rel - dot(rel, dir) * dir);
+    }
+
+    return total;
+}
+
+void IntegrateLeapfrog(float3 pos, float3 dir, float stepLen, out float3 newPos, out float3 newDir)
+{
+    float3 halfDir = dir + 0.5 * stepLen * ComputeTotalAccel(pos, dir);
+    newPos = pos + stepLen * halfDir;
+    newDir = normalize(halfDir + 0.5 * stepLen * ComputeTotalAccel(newPos, halfDir));
+}
+
+#define GEODISC_ESCAPED        0u
+#define GEODISC_HIT_BLACK_HOLE 1u
+#define GEODISC_HIT_REFLECTION 2u
+
+uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
+{
+    rayOut = rayIn;
+    hitOut = (HitInfo)0;
+
+    if (num_black_holes == 0)
+        return GEODISC_ESCAPED;
+
+    float3 pos = rayIn.position;
+    float3 dir = rayIn.direction;
+
+    float minDist;
+    uint flags = QueryBlackHoles(pos, dir, minDist);
+
+    if (flags & BH_INSIDE_HORIZON)
+        return GEODISC_HIT_BLACK_HOLE;
+
+    if (!(flags & BH_INSIDE_SHELL) && !(flags & BH_WILL_ENTER_SHELL))
+        return GEODISC_ESCAPED;
+
+    int emergencyBreak = 0;
+
+    [loop]
+    while (emergencyBreak < emergencyBreakMaxSteps)
+    {
+        float adaptiveStep = minDist * stepSize;
+        float minStep      = stepSize / 100.0;
+        float stepLen      = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
+
+        float3 newPos, newDir;
+        IntegrateLeapfrog(pos, dir, stepLen, newPos, newDir);
+
+        if (SegmentHitsAnyHorizon(pos, newPos))
+            return GEODISC_HIT_BLACK_HOLE;
+
+        float actualStepDist = length(newPos - pos);
+        if (actualStepDist > 1e-8)
+        {
+            ray testRay;
+            testRay.position  = pos;
+            testRay.direction = (newPos - pos) / actualStepDist;
+
+            HitInfo h = checkMeshCollisions(testRay, actualStepDist, false);
+            if (h.didHit)
+            {
+                float3 segDir = testRay.direction;
+                rayOut.position  = pos + segDir * h.distance;
+                rayOut.direction = segDir;
+                hitOut = h;
+                return GEODISC_HIT_REFLECTION;
+            }
+        }
+
+        pos = newPos;
+        dir = newDir;
+
+        flags = QueryBlackHoles(pos, dir, minDist);
+
+        if (flags & BH_INSIDE_HORIZON)
+            return GEODISC_HIT_BLACK_HOLE;
+
+        if (flags & BH_SAFE_TO_EXIT)
+        {
+            rayOut.position  = pos;
+            rayOut.direction = dir;
+            return GEODISC_ESCAPED;
+        }
+
+        emergencyBreak++;
+    }
+
+    return GEODISC_HIT_BLACK_HOLE;
+}
+
+#define LINEAR_MISS_NO_SOI  0u
+#define LINEAR_HIT_GEOMETRY 1u
+#define LINEAR_ENTERED_SOI  2u
+
+uint LinearMarchOnce(inout ray r, out HitInfo hitOut)
+{
+    hitOut = (HitInfo)0;
+
+    int   bhIdx;
+    float tSOI;
+    bool entersSOI = RayEntersSOI(r.position, r.direction, renderDistance, tSOI);
+    float tMax = entersSOI ? tSOI : renderDistance;
+
+    HitInfo hit = checkMeshCollisions(r, tMax, false);
+
+    if (hit.didHit)
+    {
+        r.position = r.position + r.direction * hit.distance;
+        hitOut = hit;
+        return LINEAR_HIT_GEOMETRY;
+    }
+
+    if (entersSOI)
+    {
+        r.position = r.position + r.direction * tSOI;
+        return LINEAR_ENTERED_SOI;
+    }
+
+    return LINEAR_MISS_NO_SOI;
+}
+
+[numthreads(64, 1, 1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
-    //kill reflection queue
-    //activeRayCount[REFLECTION_QUEUE] = 0; 
-    //take from active rays
-    uint slot = id.x;
-    if (slot >= activeRayCount[ACTIVE_RAY_QUEUE]) return;
-    uint pixelIndex = activeRayIndices[slot];
+    uint dispatchSlot = id.x;
+    if (dispatchSlot >= activeRayCount[ACTIVE_RAY_QUEUE])
+        return;
 
-    float3 position = main_rays[pixelIndex].position;
+    uint slot = activeRayIndices[dispatchSlot];
+    ray r = main_rays[slot];
 
-    // Put then in the queues to work
-    if (IsInsideAnyMarchShell(position))
+    [loop]
+    for (int i = 0; i < MAX_CYCLES; i++)
     {
-        uint outSlot;
-        InterlockedAdd(activeRayCount[GEODISC_RAY_QUEUEA], 1, outSlot);
-        geodiscMarchQueue[outSlot] = pixelIndex;
-        controls[pixelIndex].flags = FLAG_NEEDS_GEODESIC_MARCH;
+        float minDist;
+        uint flags = QueryBlackHoles(r.position, r.direction, minDist);
+
+        if (flags & BH_INSIDE_SHELL)
+        {
+            ray marchedRay;
+            HitInfo marchedHit;
+            uint result = marchAllBlackHoles(r, marchedRay, marchedHit);
+
+            if (result == GEODISC_HIT_REFLECTION)
+            {
+                main_rays[slot] = marchedRay;
+                hit_infos[slot] = marchedHit;
+
+                uint outSlot;
+                InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
+                reflectionQueue[outSlot] = slot;
+                return;
+            }
+
+            if (result == GEODISC_HIT_BLACK_HOLE)
+            {
+                main_rays[slot] = marchedRay;
+                return;
+            }
+
+            r = marchedRay;
+            continue;
+        }
+
+        HitInfo hit;
+        uint linearResult = LinearMarchOnce(r, hit);
+
+        if (linearResult == LINEAR_HIT_GEOMETRY)
+        {
+            main_rays[slot] = r;
+            hit_infos[slot] = hit;
+
+            uint outSlot;
+            InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
+            reflectionQueue[outSlot] = slot;
+            return;
+        }
+
+        if (linearResult == LINEAR_MISS_NO_SOI)
+            break;
     }
-    else
-    {
-        uint outSlot;
-        InterlockedAdd(activeRayCount[LINEAR_RAY_QUEUEA], 1, outSlot);
-        linearMarchQueue[outSlot] = pixelIndex;
-        controls[pixelIndex].flags = FLAG_NEEDS_LINEAR_MARCH;
-    }
+
+    main_rays[slot] = r;
+
+    uint outSky;
+    InterlockedAdd(activeRayCount[SKYBOX_QUEUE], 1, outSky);
+    skyboxQueue[outSky] = slot;
 }
