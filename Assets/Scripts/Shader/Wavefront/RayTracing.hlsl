@@ -35,24 +35,24 @@ AABBHitInfo RayHitsBox(
     return RayAABB(rayOrigin, rayDirection, inverseDirection, boxMin, boxMax, distanceToBeat);
 }
 
-HitInfo rayTriangle(ray ray, Triangle tri)
+HitInfo rayTriangle(float3 position, float3 direction, Triangle tri)
 {
     float3 edgeAB = tri.edgeAB;
     float3 edgeAC = tri.edgeAC;
     float3 geometricNormal = cross(tri.edgeAB, tri.edgeAC);
 
-    float determinant = -dot(ray.direction, geometricNormal);
+    float determinant = -dot(direction, geometricNormal);
     if (determinant <=  0)
         return (HitInfo)0;
 
     float invDet = 1 / determinant;
     uint vertex1 = TriangleIndices[tri.baseIndex];
-    float3 ao = ray.position - Vertices[vertex1];
+    float3 ao = position - Vertices[vertex1];
     float dst = dot(ao, geometricNormal) * invDet;
     if (dst <  0)
         return (HitInfo)0;
 
-    float3 dao = cross(ao, ray.direction);
+    float3 dao = cross(ao, direction);
     float u = dot(edgeAC, dao) * invDet;
     if (u <  0)
         return (HitInfo)0;
@@ -97,70 +97,49 @@ HitInfo checkMeshCollisions(ray r, float worldTMax, bool findClosestCollisionOnl
     if (numMeshes <= 0 || numInstances <= 0 || numTLASNodes <= 0 || TLASRootIndex < 0)
         return closest;
 
-    float bestWorldT = 3.402823e+38;
+    float bestWorldT = worldTMax;
     float3 inverseDirection = 1.0 / r.direction;
 
-    // separate stacks — TLAS is shallow, BLAS needs full depth
-    int   tlasStack[8];   float tlasStackT[8];   int tlasSp = 0;
-    int   blasStack[32];  float blasStackT[32];  int blasSp = 0;
+    int tlasStack[8]; int tlasSp = 0;
+    int blasStack[32]; int blasSp = 0;
 
-    uint  tlasNodeIdx = (uint)TLASRootIndex;
-    float tlasTNear   = -1.0;
+    uint tlasNodeIdx = (uint)TLASRootIndex;
 
     for (;;)
     {
-        if (tlasTNear > bestWorldT || tlasTNear > worldTMax)
-        {
-            if (tlasSp == 0) break;
-            tlasSp--; tlasNodeIdx = (uint)tlasStack[tlasSp]; tlasTNear = tlasStackT[tlasSp];
-            continue;
-        }
-
         BVHNode tlasNode = TLASNodes[tlasNodeIdx];
-        bool tlasLeaf    = (tlasNode.left == -1) && (tlasNode.right == -1);
+        bool tlasLeaf = (tlasNode.left == -1) && (tlasNode.right == -1);
 
         if (tlasLeaf)
         {
             for (uint j = tlasNode.firstIndex; j < tlasNode.firstIndex + tlasNode.count; j++)
             {
                 uint instanceIndex = TLASRefs[j];
-                Mesh mesh          = Instances[instanceIndex];
+                Mesh mesh = Instances[instanceIndex];
 
                 float3 localDirUn = mul(mesh.worldToLocalMatrix, float4(r.direction, 0)).xyz;
-                float  dirScale   = length(localDirUn);
+                float dirScale = length(localDirUn);
                 if (dirScale < 1e-12) continue;
 
-                float3 localDir    = localDirUn / dirScale;
-                float3 localPos    = mul(mesh.worldToLocalMatrix, float4(r.position, 1)).xyz;
+                float3 localDir   = localDirUn / dirScale;
+                float3 localPos   = mul(mesh.worldToLocalMatrix, float4(r.position, 1)).xyz;
                 float3 localInvDir = 1.0 / localDir;
-                float  bestLocalT  = min(worldTMax, bestWorldT) * dirScale;
+                float bestLocalT  = bestWorldT * dirScale;
 
-                // ── BLAS traversal ────────────────────────────────────
                 blasSp = 0;
-                uint  blasNodeIdx = mesh.firstBVHNodeIndex;
-                float blasTNear   = -1.0;
+                uint blasNodeIdx = mesh.firstBVHNodeIndex;
 
                 for (;;)
                 {
-                    if (blasTNear > bestLocalT)
-                    {
-                        if (blasSp == 0) break;
-                        blasSp--; blasNodeIdx = (uint)blasStack[blasSp]; blasTNear = blasStackT[blasSp];
-                        continue;
-                    }
-
                     BVHNode blasNode = BVHNodes[blasNodeIdx];
-                    bool blasLeaf    = (blasNode.left == -1) && (blasNode.right == -1);
+                    bool blasLeaf = (blasNode.left == -1) && (blasNode.right == -1);
 
                     if (blasLeaf)
                     {
                         for (uint k = blasNode.firstIndex; k < blasNode.firstIndex + blasNode.count; k++)
                         {
                             Triangle tri = Triangles[k];
-                            ray localRay;
-                            localRay.position  = localPos;
-                            localRay.direction = localDir;
-                            HitInfo h = rayTriangle(localRay, tri);
+                            HitInfo h = rayTriangle(localPos, localDir, tri);
                             if (!h.didHit) continue;
 
                             float localT = h.distance;
@@ -170,7 +149,7 @@ HitInfo checkMeshCollisions(ray r, float worldTMax, bool findClosestCollisionOnl
                             if (worldT >= bestWorldT) continue;
 
                             bestLocalT = localT;
-                            bestWorldT = worldT;  // ← shrinks TLAS culling too
+                            bestWorldT = worldT;
 
                             h.triIndex    = k;
                             h.distance    = worldT;
@@ -190,7 +169,7 @@ HitInfo checkMeshCollisions(ray r, float worldTMax, bool findClosestCollisionOnl
                         }
 
                         if (blasSp == 0) break;
-                        blasSp--; blasNodeIdx = (uint)blasStack[blasSp]; blasTNear = blasStackT[blasSp];
+                        blasNodeIdx = (uint)blasStack[--blasSp];
                         continue;
                     }
 
@@ -207,26 +186,22 @@ HitInfo checkMeshCollisions(ray r, float worldTMax, bool findClosestCollisionOnl
                     if (!lh.didHit && !rh.didHit)
                     {
                         if (blasSp == 0) break;
-                        blasSp--; blasNodeIdx = (uint)blasStack[blasSp]; blasTNear = blasStackT[blasSp];
+                        blasNodeIdx = (uint)blasStack[--blasSp];
                         continue;
                     }
 
                     bool leftFirst = lh.didHit && (!rh.didHit || lh.distance <= rh.distance);
                     uint nearIdx   = leftFirst ? (uint)blasNode.left  : (uint)blasNode.right;
-                    float nearT    = leftFirst ? lh.distance : rh.distance;
                     uint farIdx    = leftFirst ? (uint)blasNode.right : (uint)blasNode.left;
-                    float farT     = leftFirst ? rh.distance : lh.distance;
                     bool farHit    = leftFirst ? rh.didHit : lh.didHit;
 
-                    if (farHit && blasSp < 32) { blasStack[blasSp] = (int)farIdx; blasStackT[blasSp] = farT; blasSp++; }
+                    if (farHit && blasSp < 32) blasStack[blasSp++] = (int)farIdx;
                     blasNodeIdx = nearIdx;
-                    blasTNear   = nearT;
                 }
-                // ── end BLAS ──────────────────────────────────────────
             }
 
             if (tlasSp == 0) break;
-            tlasSp--; tlasNodeIdx = (uint)tlasStack[tlasSp]; tlasTNear = tlasStackT[tlasSp];
+            tlasNodeIdx = (uint)tlasStack[--tlasSp];
             continue;
         }
 
@@ -243,25 +218,21 @@ HitInfo checkMeshCollisions(ray r, float worldTMax, bool findClosestCollisionOnl
         if (!lh.didHit && !rh.didHit)
         {
             if (tlasSp == 0) break;
-            tlasSp--; tlasNodeIdx = (uint)tlasStack[tlasSp]; tlasTNear = tlasStackT[tlasSp];
+            tlasNodeIdx = (uint)tlasStack[--tlasSp];
             continue;
         }
 
         bool leftFirst = lh.didHit && (!rh.didHit || lh.distance <= rh.distance);
         uint nearIdx   = leftFirst ? (uint)tlasNode.left  : (uint)tlasNode.right;
-        float nearT    = leftFirst ? lh.distance : rh.distance;
         uint farIdx    = leftFirst ? (uint)tlasNode.right : (uint)tlasNode.left;
-        float farT     = leftFirst ? rh.distance : lh.distance;
         bool farHit    = leftFirst ? rh.didHit : lh.didHit;
 
-        if (farHit && tlasSp < 8) { tlasStack[tlasSp] = (int)farIdx; tlasStackT[tlasSp] = farT; tlasSp++; }
+        if (farHit && tlasSp < 8) tlasStack[tlasSp++] = (int)farIdx;
         tlasNodeIdx = nearIdx;
-        tlasTNear   = nearT;
     }
 
     return closest;
 }
-
 HitInfo TraceRay(float3 origin, float3 direction, float tMax)
 {
     HitInfo result = (HitInfo)0;

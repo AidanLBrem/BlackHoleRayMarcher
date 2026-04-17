@@ -15,8 +15,6 @@ StructuredBuffer<uint> activeRayCount;
 StructuredBuffer<ray>        main_rays;
 RWStructuredBuffer<ray>        sortedRays;
 
-StructuredBuffer<uint>       pixelForSlot;
-RWStructuredBuffer<uint>       sortedPixelForSlot;
 
 StructuredBuffer<control>    controls;
 RWStructuredBuffer<control>    sortedControls;
@@ -120,7 +118,6 @@ void ScatterRays(uint3 id : SV_DispatchThreadID)
     uint newSlot = bucketOffsets[bucket] + localInBucket;
 
     sortedRays[newSlot]           = main_rays[oldSlot];
-    sortedPixelForSlot[newSlot]   = pixelForSlot[oldSlot];
     sortedControls[newSlot]       = controls[oldSlot];
     sortedRayColorInfo[newSlot]   = ray_color_info[oldSlot];
     newSlotForOldSlot[oldSlot]    = newSlot;

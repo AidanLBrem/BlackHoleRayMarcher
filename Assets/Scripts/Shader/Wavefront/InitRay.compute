@@ -7,7 +7,6 @@ uint raysPerPixel;
 uint _ScreenWidth;
 uint _ScreenHeight;
 uint numRenderedFrames;
-uint currentRayNum;
 
 float3 ViewParams;
 float4x4 CameraLocalToWorldMatrix;
@@ -19,8 +18,6 @@ RWStructuredBuffer<HitInfo>    hit_info_buffer;
 RWStructuredBuffer<color_info> ray_color_info;
 RWStructuredBuffer<uint>       activeRayIndices;
 RWStructuredBuffer<uint>       activeRayCount;
-RWStructuredBuffer<float3>     pixelAccum;
-RWStructuredBuffer<uint>       pixelForSlot;
 
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
@@ -28,39 +25,44 @@ void Main(uint3 id : SV_DispatchThreadID)
     uint pixelIndex = id.x;
     if (pixelIndex >= _ScreenWidth * _ScreenHeight) return;
     
-    pixelForSlot[pixelIndex] = pixelIndex;
-
-    controls[pixelIndex].rngState = pixelIndex
+    for (int i = 0; i < raysPerPixel; i++)
+    {
+        uint slot = pixelIndex * raysPerPixel + i;
+        controls[slot].rngState = pixelIndex
         + numRenderedFrames * 829123u
-        + currentRayNum     * 1234567u;
+        + i     * 1234567u;
+        controls[slot].pixelIndex = pixelIndex;
 
-    uint sampleIndex = numRenderedFrames * currentRayNum + 1u;  
-    float2 h = halton2(sampleIndex);
+        uint sampleIndex = numRenderedFrames * raysPerPixel + i + 1u;
+        float2 h = halton2(sampleIndex);
 
-    uint hash = pixelIndex * 1664525u + 1013904223u;
-    float2 rot = float2(
-        (hash & 0xFFFFu)  / 65536.0,
-        (hash >> 16u)     / 65536.0
-    );
-    h = frac(h + rot);
+        uint hash = pixelIndex * 1664525u + 1013904223u;
+        float2 rot = float2(
+            (hash & 0xFFFFu)  / 65536.0,
+            (hash >> 16u)     / 65536.0
+        );
+        h = frac(h + rot);
 
-    float2 uv       = float2(pixelIndex % _ScreenWidth, pixelIndex / _ScreenWidth)
-                      / float2(_ScreenWidth, _ScreenHeight);
-    float2 jitterUV = (h - 0.5) / float2(_ScreenWidth, _ScreenHeight);
-    float3 vpLocal  = float3((uv + jitterUV) - 0.5, 1.0) * ViewParams;
-    float3 vp       = mul(CameraLocalToWorldMatrix, float4(vpLocal, 1.0)).xyz;
+        float2 uv       = float2(pixelIndex % _ScreenWidth, pixelIndex / _ScreenWidth)
+                          / float2(_ScreenWidth, _ScreenHeight);
+        float2 jitterUV = (h - 0.5) / float2(_ScreenWidth, _ScreenHeight);
+        float3 vpLocal  = float3((uv + jitterUV) - 0.5, 1.0) * ViewParams;
+        float3 vp       = mul(CameraLocalToWorldMatrix, float4(vpLocal, 1.0)).xyz;
 
-    main_rays[pixelIndex].position  = vp;
-    main_rays[pixelIndex].direction = normalize(vp - CameraWorldPos);
+        main_rays[slot].position  = vp;
+        main_rays[slot].direction = normalize(vp - CameraWorldPos);
 
 
-    color_info c = (color_info)0;
-    c.rayColor = float3(1, 1, 1);
-    ray_color_info[pixelIndex] = c;
+        color_info c = (color_info)0;
+        c.rayColor = float3(1, 1, 1);
+        ray_color_info[slot] = c;
 
-    hit_info_buffer[pixelIndex] = (HitInfo)0;
+        hit_info_buffer[slot] = (HitInfo)0;
 
-    uint outSlot;
-    InterlockedAdd(activeRayCount[ACTIVE_RAY_QUEUE], 1, outSlot);
-    activeRayIndices[outSlot] = pixelIndex;
+        uint outSlot;
+        InterlockedAdd(activeRayCount[ACTIVE_RAY_QUEUE], 1, outSlot);
+        activeRayIndices[outSlot] = slot;
+    }
+
+    
 }

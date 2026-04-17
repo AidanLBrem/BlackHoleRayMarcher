@@ -85,7 +85,7 @@ struct color_info
     float3 rayColor;
     float3 incomingLight;
 };
-struct control   { uint rngState;};
+struct control   { uint rngState; uint pixelIndex;};
 
 struct blackhole
 {

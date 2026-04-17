@@ -281,8 +281,15 @@ public class RayTracingManagerWavefront : MonoBehaviour
         NeedsSkybox          = 1 << 6,
         Done                 = 1 << 7,
     }
-
-    struct Control      {  private uint rngState; }
+    struct PixelAccum
+    {
+        public uint r;
+        public uint g;
+        public uint b;
+    }
+    struct Control      {  private uint rngState;
+        private uint pixelIndex;
+    }
     struct MainRay      { public Vector3 rayOrigin; public Vector3 rayDirection; }
     struct RayColorInfo { private float3 rayColor; private float3 incomingLight; }
     struct Energy       { private float energy; }
@@ -452,7 +459,10 @@ public class RayTracingManagerWavefront : MonoBehaviour
 
     void EnsureBuffersCreated(bool forceRecreate = false)
     {
-        int pixelCount = Screen.width * Screen.height;
+        int bufferWidth  = Mathf.Max(1, Mathf.RoundToInt(Screen.width * renderScale));
+        int bufferHeight = Mathf.Max(1, Mathf.RoundToInt(Screen.height * renderScale));
+        int pixelCount   = bufferWidth * bufferHeight;
+
         if (forceRecreate) ReleaseBuffers();
 
         if (TriangleBuffer             == null) ShaderHelper.CreateStructuredBuffer<Triangle>(ref TriangleBuffer, 1);
@@ -469,22 +479,17 @@ public class RayTracingManagerWavefront : MonoBehaviour
         if (sphereBuffer               == null) ShaderHelper.CreateStructuredBuffer<Sphere>(ref sphereBuffer, 1);
         if (blackHoleBuffer            == null) ShaderHelper.CreateStructuredBuffer<BlackHole>(ref blackHoleBuffer, 1);
 
-        ShaderHelper.CreateStructuredBuffer<Control>(ref controlQueue,           pixelCount);
-        ShaderHelper.CreateStructuredBuffer<MainRay>(ref mainRayBuffer,          pixelCount);
-        ShaderHelper.CreateStructuredBuffer<MainRay>(ref sortedRaysBuffer,       pixelCount); // ping-pong twin
-        ShaderHelper.CreateStructuredBuffer<HitInfo>(ref HitInfoBuffer,          pixelCount);
-        ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref rayColorInfoBuffer, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<Vector3>(ref pixelAccumBuffer,       pixelCount);
+        ShaderHelper.CreateStructuredBuffer<Control>(ref controlQueue,           pixelCount*raysPerPixel);
+        ShaderHelper.CreateStructuredBuffer<MainRay>(ref mainRayBuffer,          pixelCount*raysPerPixel);
+        ShaderHelper.CreateStructuredBuffer<MainRay>(ref sortedRaysBuffer,       pixelCount*raysPerPixel); // ping-pong twin
+        ShaderHelper.CreateStructuredBuffer<HitInfo>(ref HitInfoBuffer,          pixelCount*raysPerPixel);
+        ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref rayColorInfoBuffer, pixelCount*raysPerPixel);
+        ShaderHelper.CreateStructuredBuffer<PixelAccum>(ref pixelAccumBuffer, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref reflectionQueueBuffer,    pixelCount*raysPerPixel);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref skyboxQueueBuffer,        pixelCount*raysPerPixel);
 
-        ShaderHelper.CreateStructuredBuffer<uint>(ref linearMarchQueueBufferA,  pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref linearMarchQueueBufferB,  pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref geodiscMarchQueueBufferA, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref geodiscMarchQueueBufferB, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref reflectionQueueBuffer,    pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref skyboxQueueBuffer,        pixelCount);
-
-        ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayIndicesBuffer,   pixelCount);
-        ShaderHelper.CreateStructuredBuffer<uint>(ref sortedRayIndicesBuffer,   pixelCount); // ping-pong twin
+        ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayIndicesBuffer,   pixelCount*raysPerPixel);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref sortedRayIndicesBuffer,   pixelCount*raysPerPixel); // ping-pong twin
         ShaderHelper.CreateStructuredBuffer<uint>(ref activeRayCountBuffer,     NUM_QUEUES);
 
         // Bucket sort buckets
@@ -494,11 +499,11 @@ public class RayTracingManagerWavefront : MonoBehaviour
         ShaderHelper.CreateStructuredBuffer<uint>(ref bucketOffsetsBuffer, numBuckets);
 
         // Mapping buffers
-        ShaderHelper.CreateStructuredBuffer<uint>(ref pixelForSlotBuffer,       pixelCount); // slot -> pixel
-        ShaderHelper.CreateStructuredBuffer<uint>(ref sortedPixelForSlotBuffer, pixelCount); // scratch
-        ShaderHelper.CreateStructuredBuffer<uint>(ref newSlotForOldSlotBuffer,  pixelCount); // old slot -> new slot
-        ShaderHelper.CreateStructuredBuffer<Control>(ref sortedControlsBuffer, pixelCount);
-        ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref sortedRayColorInfoBuffer, pixelCount);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref pixelForSlotBuffer,       pixelCount*raysPerPixel); // slot -> pixel
+        ShaderHelper.CreateStructuredBuffer<uint>(ref sortedPixelForSlotBuffer, pixelCount*raysPerPixel); // scratch
+        ShaderHelper.CreateStructuredBuffer<uint>(ref newSlotForOldSlotBuffer,  pixelCount*raysPerPixel); // old slot -> new slot
+        ShaderHelper.CreateStructuredBuffer<Control>(ref sortedControlsBuffer, pixelCount*raysPerPixel);
+        ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref sortedRayColorInfoBuffer, pixelCount*raysPerPixel);
         if (indirectArgsBuffer == null || !indirectArgsBuffer.IsValid())
         {
             indirectArgsBuffer?.Release();
@@ -1392,9 +1397,9 @@ public class RayTracingManagerWavefront : MonoBehaviour
             reflectionCompute.SetInt("_ScreenWidth",  scaledW);
             reflectionCompute.SetInt("_ScreenHeight", scaledH);
 
-            for (int ray = 0; ray < raysPerPixel; ray++)
-            {
-                initCompute.SetInt("currentRayNum", ray);
+            //for (int ray = 0; ray < raysPerPixel; ray++)
+            //{
+                initCompute.SetInt("raysPerPixel", raysPerPixel);
                 DispatchCompute(initCompute, pixelCount, "Init");
 
                 for (int bounce = 0; bounce < maxBounces; bounce++)
@@ -1411,7 +1416,7 @@ public class RayTracingManagerWavefront : MonoBehaviour
                     DispatchWavefront(reflectionCompute, REFLECTION_QUEUE, "Reflection");
                 }
                 DispatchCompute(resetCountCompute, 1, "reset");
-            }
+            //}
 
             activeRayCountBuffer.SetData(zerosNUM_QUEUES);
 

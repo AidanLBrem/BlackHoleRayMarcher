@@ -61,6 +61,39 @@ uint QueryBlackHoles(float3 pos, float3 dir, out float minDistFromHorizon)
     return flags;
 }
 
+uint QueryBlackHoles(float3 pos, float3 dir)
+{
+    uint flags = BH_SAFE_TO_EXIT;
+
+    [loop]
+    for (int i = 0; i < num_black_holes; i++)
+    {
+        float3 bhPos = blackholes[i].position;
+        float  rs    = blackholes[i].schwarzchild_radius;
+        float  shell = max(rs * blackholes[i].black_hole_soi_multiplier, 4.0 * rs);
+
+        float3 rel = pos - bhPos;
+        float  r   = length(rel);
+        
+
+        uint insideHorizon = (r <= rs)    ? 1u : 0u;
+        uint insideShell   = (r <= shell) ? 1u : 0u;
+
+        flags |= insideHorizon * BH_INSIDE_HORIZON;
+        flags |= insideShell   * BH_INSIDE_SHELL;
+
+        float tEntry = RaySphereEntryDistance(pos, dir, bhPos, shell);
+        uint willEnterShell = (tEntry >= 0.0) ? 1u : 0u;
+
+        flags |= willEnterShell * BH_WILL_ENTER_SHELL;
+
+        if (insideShell | willEnterShell)
+            flags &= ~BH_SAFE_TO_EXIT;
+    }
+
+    return flags;
+}
+
 bool SegmentHitsAnyHorizon(float3 p0, float3 p1)
 {
     [loop]
@@ -96,19 +129,16 @@ float3 ComputeTotalAccel(float3 pos, float3 dir)
         float3 rel = pos - blackholes[i].position;
         float  rs  = blackholes[i].schwarzchild_radius;
 
-        float r2   = max(dot(rel, rel), rs * rs * 1.0001);
+        float r2 = max(dot(rel, rel), rs * rs * 1.0001);
         float invR = rsqrt(r2);
-        float r    = r2 * invR;
-
         float f = 1.0 - rs * invR;
-        if (f <= 0.0)
-            continue;
+        if (f <= 0.0) continue;
 
-        float bend =
-            invR +
-            (1.5 * rs - r) * (invR * invR) * rsqrt(f);
+        float bend = invR + (1.5 * rs - r2 * invR) * (invR * invR) * rsqrt(f);
 
-        total += (-bend * invR) * (rel - dot(rel, dir) * dir);
+        float proj = dot(rel, dir);
+        float3 perp = rel - proj * dir;
+        total += (-bend * invR) * perp;
     }
 
     return total;
@@ -119,6 +149,14 @@ void IntegrateLeapfrog(float3 pos, float3 dir, float stepLen, out float3 newPos,
     float3 halfDir = dir + 0.5 * stepLen * ComputeTotalAccel(pos, dir);
     newPos = pos + stepLen * halfDir;
     newDir = normalize(halfDir + 0.5 * stepLen * ComputeTotalAccel(newPos, halfDir));
+}
+void IntegrateLeapfrog(float3 pos, float3 dir, float stepLen, float3 accel,
+                       out float3 newPos, out float3 newDir, out float3 newAccel)
+{
+    float3 halfDir = dir + 0.5 * stepLen * accel;
+    newPos   = pos + stepLen * halfDir;
+    newAccel = ComputeTotalAccel(newPos, halfDir);
+    newDir   = normalize(halfDir + 0.5 * stepLen * newAccel);
 }
 
 #define GEODISC_ESCAPED        0u
@@ -145,8 +183,10 @@ uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
     if (!(flags & BH_INSIDE_SHELL) && !(flags & BH_WILL_ENTER_SHELL))
         return GEODISC_ESCAPED;
 
-    int emergencyBreak = 0;
+    // Seed the first acceleration — paid once, reused every iteration
+    float3 accel = ComputeTotalAccel(pos, dir);
 
+    int emergencyBreak = 0;
     [loop]
     while (emergencyBreak < emergencyBreakMaxSteps)
     {
@@ -154,32 +194,37 @@ uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
         float minStep      = stepSize / 100.0;
         float stepLen      = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
 
-        float3 newPos, newDir;
-        IntegrateLeapfrog(pos, dir, stepLen, newPos, newDir);
+        float3 oldPos = pos;
+        float3 newAccel;
+        IntegrateLeapfrog(pos, dir, stepLen, accel, pos, dir, newAccel);
 
-        if (SegmentHitsAnyHorizon(pos, newPos))
+        if (SegmentHitsAnyHorizon(oldPos, pos))
             return GEODISC_HIT_BLACK_HOLE;
 
-        float actualStepDist = length(newPos - pos);
+        float3 seg = pos - oldPos;
+        float actualStepDist = length(seg);
+
         if (actualStepDist > 1e-8)
         {
             ray testRay;
-            testRay.position  = pos;
-            testRay.direction = (newPos - pos) / actualStepDist;
+            testRay.position  = oldPos;
+            testRay.direction = seg / actualStepDist;
 
             HitInfo h = checkMeshCollisions(testRay, actualStepDist, false);
             if (h.didHit)
             {
-                float3 segDir = testRay.direction;
-                rayOut.position  = pos + segDir * h.distance;
+                float3 segDir    = testRay.direction;
+                rayOut.position  = oldPos + segDir * h.distance;
                 rayOut.direction = segDir;
                 hitOut = h;
                 return GEODISC_HIT_REFLECTION;
             }
         }
 
-        pos = newPos;
-        dir = newDir;
+        // Reuse newAccel as next iteration's start accel —
+        // QueryBlackHoles updates minDist and flags but we already
+        // have the accel at the new position from IntegrateLeapfrog
+        accel = newAccel;
 
         flags = QueryBlackHoles(pos, dir, minDist);
 
@@ -206,8 +251,7 @@ uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
 uint LinearMarchOnce(inout ray r, out HitInfo hitOut)
 {
     hitOut = (HitInfo)0;
-
-    int   bhIdx;
+    
     float tSOI;
     bool entersSOI = RayEntersSOI(r.position, r.direction, renderDistance, tSOI);
     float tMax = entersSOI ? tSOI : renderDistance;
@@ -229,6 +273,62 @@ uint LinearMarchOnce(inout ray r, out HitInfo hitOut)
 
     return LINEAR_MISS_NO_SOI;
 }
+bool HandleGeodesic(uint slot, inout ray r)
+{
+    float minDist;
+    bool insideShell;
+
+    // query
+
+    if (!insideShell)
+        return false;
+
+    ray marchedRay;
+    HitInfo marchedHit;
+
+    uint result = marchAllBlackHoles(r, marchedRay, marchedHit);
+
+    if (result == GEODISC_HIT_REFLECTION)
+    {
+        main_rays[slot] = marchedRay;
+        hit_infos[slot] = marchedHit;
+
+        uint outSlot;
+        InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
+        reflectionQueue[outSlot] = slot;
+        return true;
+    }
+
+    if (result == GEODISC_HIT_BLACK_HOLE)
+    {
+        main_rays[slot] = marchedRay;
+        return true;
+    }
+
+    r = marchedRay;
+    return false;
+}
+bool HandleLinear(uint slot, inout ray r)
+{
+    HitInfo hit;
+    uint result = LinearMarchOnce(r, hit);
+
+    if (result == LINEAR_HIT_GEOMETRY)
+    {
+        main_rays[slot] = r;
+        hit_infos[slot] = hit;
+
+        uint outSlot;
+        InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
+        reflectionQueue[outSlot] = slot;
+        return true;
+    }
+
+    if (result == LINEAR_MISS_NO_SOI)
+        return true;
+
+    return false;
+}
 
 [numthreads(64, 1, 1)]
 void Main(uint3 id : SV_DispatchThreadID)
@@ -243,15 +343,13 @@ void Main(uint3 id : SV_DispatchThreadID)
     [loop]
     for (int i = 0; i < MAX_CYCLES; i++)
     {
-        float minDist;
-        uint flags = QueryBlackHoles(r.position, r.direction, minDist);
+        uint flags = QueryBlackHoles(r.position, r.direction);
 
         if (flags & BH_INSIDE_SHELL)
         {
             ray marchedRay;
             HitInfo marchedHit;
             uint result = marchAllBlackHoles(r, marchedRay, marchedHit);
-
             if (result == GEODISC_HIT_REFLECTION)
             {
                 main_rays[slot] = marchedRay;
@@ -272,23 +370,25 @@ void Main(uint3 id : SV_DispatchThreadID)
             r = marchedRay;
             continue;
         }
-
-        HitInfo hit;
-        uint linearResult = LinearMarchOnce(r, hit);
-
-        if (linearResult == LINEAR_HIT_GEOMETRY)
         {
-            main_rays[slot] = r;
-            hit_infos[slot] = hit;
+            HitInfo hit;
+            uint linearResult = LinearMarchOnce(r, hit);
 
-            uint outSlot;
-            InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
-            reflectionQueue[outSlot] = slot;
-            return;
+            if (linearResult == LINEAR_HIT_GEOMETRY)
+            {
+                main_rays[slot] = r;
+                hit_infos[slot] = hit;
+
+                uint outSlot;
+                InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
+                reflectionQueue[outSlot] = slot;
+                return;
+            }
+
+            if (linearResult == LINEAR_MISS_NO_SOI)
+                break;
         }
 
-        if (linearResult == LINEAR_MISS_NO_SOI)
-            break;
     }
 
     main_rays[slot] = r;

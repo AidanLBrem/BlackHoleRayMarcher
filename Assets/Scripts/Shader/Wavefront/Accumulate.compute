@@ -1,19 +1,38 @@
 #pragma kernel Main
 
-RWStructuredBuffer<float3> pixelAccum;
-RWTexture2D<float4>        _Output;
+struct PixelAccum
+{
+    uint r;
+    uint g;
+    uint b;
+};
+
+RWStructuredBuffer<PixelAccum> pixelAccum;
+RWTexture2D<float4>            _Output;
+
 uint _ScreenWidth;
 uint _ScreenHeight;
 int  raysPerPixel;
+
+static const float SCALE = 65536.0;
 
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
     uint pixelIndex = id.x;
-    if (pixelIndex >= _ScreenWidth * _ScreenHeight) return;
+    uint pixelCount = _ScreenWidth * _ScreenHeight;
+    if (pixelIndex >= pixelCount) return;
 
     uint2 uv = uint2(pixelIndex % _ScreenWidth, pixelIndex / _ScreenWidth);
-    float3 color = pixelAccum[pixelIndex] / max(raysPerPixel, 1);
-    pixelAccum[pixelIndex] = float3(0, 0, 0); // clear for next frame
-    _Output[uv] = float4(color, 1);
+
+    PixelAccum acc = pixelAccum[pixelIndex];
+
+    float invRays  = 1.0 / max((float)raysPerPixel, 1.0);
+    float3 color = float3(acc.r, acc.g, acc.b) * (invRays / SCALE);
+
+    pixelAccum[pixelIndex].r = 0;
+    pixelAccum[pixelIndex].g = 0;
+    pixelAccum[pixelIndex].b = 0;
+
+    _Output[uv] = float4(color, 1.0);
 }

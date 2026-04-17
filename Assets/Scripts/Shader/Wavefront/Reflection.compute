@@ -7,16 +7,25 @@
 
 uint _ScreenWidth;
 uint _ScreenHeight;
-
+static const float SCALE = 65536.0;
 RWStructuredBuffer<control>    controls;
 RWStructuredBuffer<ray>        main_rays;
 StructuredBuffer<HitInfo>      hit_info_buffer;
 RWStructuredBuffer<color_info> ray_color_info;
-RWStructuredBuffer<float3>     pixelAccum;
 RWStructuredBuffer<uint>       activeRayIndices;
 RWStructuredBuffer<uint>       activeRayCount;
 StructuredBuffer<uint>         reflectionQueue;
 StructuredBuffer<uint>         pixelForSlot;
+
+struct PixelAccum
+{
+    uint r;
+    uint g;
+    uint b;
+};
+
+RWStructuredBuffer<PixelAccum> pixelAccum;
+
 
 bool HandleReflection(uint slot, inout float rngState)
 {
@@ -198,19 +207,27 @@ void Main(uint3 id : SV_DispatchThreadID)
     uint slot = id.x;
     if (slot >= activeRayCount[REFLECTION_QUEUE]) return;
 
-    uint raySlot    = reflectionQueue[slot];          // slot in main_rays/hit_infos
-    uint pixelIndex = pixelForSlot[raySlot];       // original pixel for pixelAccum only
+    uint raySlot = reflectionQueue[slot];
 
     float rngState = controls[raySlot].rngState;
     bool done = HandleReflection(raySlot, rngState);
     controls[raySlot].rngState = rngState;
 
     if (done)
-        pixelAccum[pixelIndex] += ray_color_info[raySlot].incomingLight;
+    {
+        uint pixelIndex = controls[raySlot].pixelIndex;
+
+        float3 light = max(ray_color_info[raySlot].incomingLight, 0.0);
+        uint3 packed = (uint3)(light * SCALE);
+
+        InterlockedAdd(pixelAccum[pixelIndex].r, packed.r);
+        InterlockedAdd(pixelAccum[pixelIndex].g, packed.g);
+        InterlockedAdd(pixelAccum[pixelIndex].b, packed.b);
+    }
     else
     {
         uint outSlot;
         InterlockedAdd(activeRayCount[ACTIVE_RAY_QUEUE], 1, outSlot);
-        activeRayIndices[outSlot] = raySlot;          // push slot back to classify
+        activeRayIndices[outSlot] = raySlot;
     }
 }
