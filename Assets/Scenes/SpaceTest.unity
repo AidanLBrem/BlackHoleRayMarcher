@@ -368,20 +368,31 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RayTracingManagerWavefront
   useShaderInSceneView: 1
-  useTlas: 1
-  useNEE: 1
-  useRedshifting: 1
-  tlasMaxLeafSize: 2
+  useTlas: 0
+  useNEE: 0
+  useRedshifting: 0
+  tlasMaxLeafSize: 1
   tlasMaxDepth: 32
   tlasNumBins: 8
+  initCompute: {fileID: 7200000, guid: 1f4d0e06ef6c25c46b25f3d8681a6399, type: 3}
+  classifyCompute: {fileID: 7200000, guid: aaff9939b346b7046ad4a68e18f57cfa, type: 3}
+  reflectionCompute: {fileID: 7200000, guid: 2d240a08eca8f97438307e24144d7445, type: 3}
+  accumulateCompute: {fileID: 7200000, guid: 00814aeab2b54024697e3f742b7bccd3, type: 3}
+  compactCompute: {fileID: 7200000, guid: 06172958c2cac894abfe82ff2bfb661a, type: 3}
+  writeIndirectArgsCompute: {fileID: 7200000, guid: 20a66d6462f4f5b48963f297aee39f8c, type: 3}
+  resetCountCompute: {fileID: 7200000, guid: 2d240a08eca8f97438307e24144d7445, type: 3}
+  bucketSortCompute: {fileID: 7200000, guid: 04c9bef8a503084469af1a4483178a5b, type: 3}
+  sortBucketsPerAxis: 4
+  maxLinearGeodiscPingPongIterations: 4
   marchStepsCount: 0
   renderDistance: 1000
-  raysPerPixel: 0
-  maxBounces: 0
+  raysPerPixel: 1
+  maxBounces: 1
   accumlateInSceneView: 1
   accumulateInGameView: 1
   blackHoleSOIStepSize: 0.01
   forceBufferRecreation: 0
+  flagVisualizerShader: {fileID: 4800000, guid: 8dac04a1ac3daac4793e6d83af841607, type: 3}
   applyScattering: 1
   applyRayleigh: 1
   applyMie: 1
@@ -401,25 +412,22 @@ MonoBehaviour:
   sunLightColor: {r: 1, g: 1, b: 1, a: 1}
   sunLightIntensity: 1
   sun: {fileID: 0}
-  InitShader: {fileID: 4800000, guid: 801d0cb1152c449fbe00bbb9fffb3dab, type: 3}
-  ClassifyShader: {fileID: 4800000, guid: 524d29939f90e084590071715da7a5b9, type: 3}
   forceSoftwareRaytracing: 1
-  linearMarchShader: {fileID: 4800000, guid: 5cb485971ae74743865aed5def443df0, type: 3}
   linearMarchRaytraceShader: {fileID: 4807578003741378534, guid: a28612953b9a927458db9ed21155f03d, type: 3}
   accumulatorShader: {fileID: 0}
   accumWeight: 1
-  ColorQuantizationShader: {fileID: 0}
-  colorQuantization: 0
-  numColors: 256
-  ditherShader: {fileID: 0}
-  ditherPostProcess: 0
+  ColorQuantizationShader: {fileID: 4800000, guid: bf1d279c767087b4cacb9b41d4104202, type: 3}
+  colorQuantization: 1
+  numColors: 32
+  ditherShader: {fileID: 4800000, guid: 4d884bf0e9124245b4cc402bcbadeeda, type: 3}
+  ditherPostProcess: 1
   ditherBeforeUpscale: 0
   ditherMatrixSize: 4
   atrousFilter: 0
   atrousShader: {fileID: 0}
   atrousColorSigma: 0.6
-  renderScale: 0.5
   atrousBeforeUpscale: 0
+  renderScale: 0.25
   emergencyBreakMaxSteps: 1000
   numFrames: 10000
   renderSphere: 1
@@ -764,7 +772,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &823290680
 MonoBehaviour:
   m_ObjectHideFlags: 0
