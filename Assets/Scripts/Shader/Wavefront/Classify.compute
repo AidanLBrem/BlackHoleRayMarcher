@@ -1,5 +1,7 @@
 #pragma kernel Main
 #pragma multi_compile _ USE_TLAS
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING
+#pragma multi_compile _ FORCE_SOFTWARE_RT
 
 #include "Math.hlsl"
 #include "PixelFlags.hlsl"
@@ -24,7 +26,6 @@ RWStructuredBuffer<uint>    skyboxQueue;
 float renderDistance;
 float stepSize;
 int   emergencyBreakMaxSteps;
-
 uint QueryBlackHoles(float3 pos, float3 dir, out float minDistFromHorizon)
 {
     uint flags = BH_SAFE_TO_EXIT;
@@ -60,7 +61,6 @@ uint QueryBlackHoles(float3 pos, float3 dir, out float minDistFromHorizon)
 
     return flags;
 }
-
 uint QueryBlackHoles(float3 pos, float3 dir)
 {
     uint flags = BH_SAFE_TO_EXIT;
@@ -93,7 +93,6 @@ uint QueryBlackHoles(float3 pos, float3 dir)
 
     return flags;
 }
-
 bool SegmentHitsAnyHorizon(float3 p0, float3 p1)
 {
     [loop]
@@ -144,25 +143,21 @@ float3 ComputeTotalAccel(float3 pos, float3 dir)
     return total;
 }
 
-void IntegrateLeapfrog(float3 pos, float3 dir, float stepLen, out float3 newPos, out float3 newDir)
+void IntegrateLeapfrog(inout float3 pos,inout float3 dir,float stepLen,inout float3 accel)
 {
-    float3 halfDir = dir + 0.5 * stepLen * ComputeTotalAccel(pos, dir);
-    newPos = pos + stepLen * halfDir;
-    newDir = normalize(halfDir + 0.5 * stepLen * ComputeTotalAccel(newPos, halfDir));
+    float halfStep = 0.5 * stepLen;
+    float3 halfDir = dir + halfStep * accel;
+    pos += stepLen * halfDir;
+    accel = ComputeTotalAccel(pos, halfDir);
+    dir = normalize(halfDir + halfStep * accel);
 }
-void IntegrateLeapfrog(float3 pos, float3 dir, float stepLen, float3 accel,
-                       out float3 newPos, out float3 newDir, out float3 newAccel)
-{
-    float3 halfDir = dir + 0.5 * stepLen * accel;
-    newPos   = pos + stepLen * halfDir;
-    newAccel = ComputeTotalAccel(newPos, halfDir);
-    newDir   = normalize(halfDir + 0.5 * stepLen * newAccel);
-}
-
 #define GEODISC_ESCAPED        0u
 #define GEODISC_HIT_BLACK_HOLE 1u
 #define GEODISC_HIT_REFLECTION 2u
-
+#if UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING & !FORCE_SOFTWARE_RT
+#pragma require inlineraytracing
+RaytracingAccelerationStructure _RTAS;
+#endif
 uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
 {
     rayOut = rayIn;
@@ -195,8 +190,7 @@ uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
         float stepLen      = sqrt(adaptiveStep * adaptiveStep + minStep * minStep);
 
         float3 oldPos = pos;
-        float3 newAccel;
-        IntegrateLeapfrog(pos, dir, stepLen, accel, pos, dir, newAccel);
+        IntegrateLeapfrog(pos, dir, stepLen, accel);
 
         if (SegmentHitsAnyHorizon(oldPos, pos))
             return GEODISC_HIT_BLACK_HOLE;
@@ -206,12 +200,38 @@ uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
 
         if (actualStepDist > 1e-8)
         {
+            #if UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING && !FORCE_SOFTWARE_RT
+            RayDesc raydesc;
+            raydesc.Origin = oldPos;
+            raydesc.Direction = seg/actualStepDist;
+            raydesc.TMin = 0.0001;
+            raydesc.TMax = actualStepDist;
+            RayQuery<RAY_FLAG_CULL_NON_OPAQUE> rq;
+            rq.TraceRayInline(_RTAS, RAY_FLAG_CULL_NON_OPAQUE, 0xFF, raydesc);
+            rq.Proceed();
+            if (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+            {
+                HitInfo info = (HitInfo)0;
+                info.distance = rq.CommittedRayT();
+                float2 bary = rq.CommittedTriangleBarycentrics();
+                info.u = bary.x;
+                info.v = bary.y;
+                uint instanceIndex = rq.CommittedInstanceIndex();
+                uint primIndex = rq.CommittedPrimitiveIndex();
+                info.triIndex = Instances[instanceIndex].triangleOffset + primIndex;
+                info.objectIndex = instanceIndex;
+                rayOut.position = oldPos + raydesc.Direction * info.distance;
+                rayOut.direction = raydesc.Direction;
+                hitOut = info;
+                return GEODISC_HIT_REFLECTION;
+            }
+            #else
             ray testRay;
             testRay.position  = oldPos;
             testRay.direction = seg / actualStepDist;
 
             HitInfo h = checkMeshCollisions(testRay, actualStepDist, false);
-            if (h.didHit)
+            if (h.distance > 0)
             {
                 float3 segDir    = testRay.direction;
                 rayOut.position  = oldPos + segDir * h.distance;
@@ -219,13 +239,8 @@ uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
                 hitOut = h;
                 return GEODISC_HIT_REFLECTION;
             }
+            #endif
         }
-
-        // Reuse newAccel as next iteration's start accel —
-        // QueryBlackHoles updates minDist and flags but we already
-        // have the accel at the new position from IntegrateLeapfrog
-        accel = newAccel;
-
         flags = QueryBlackHoles(pos, dir, minDist);
 
         if (flags & BH_INSIDE_HORIZON)
@@ -243,6 +258,120 @@ uint marchAllBlackHoles(ray rayIn, out ray rayOut, out HitInfo hitOut)
 
     return GEODISC_HIT_BLACK_HOLE;
 }
+#if UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING && !FORCE_SOFTWARE_RT
+
+
+//RWStructuredBuffer<float> output;
+
+[numthreads(64, 1, 1)]
+void Main(uint3 id : SV_DispatchThreadID)
+{
+    uint dispatchSlot = id.x;
+    if (dispatchSlot >= activeRayCount[ACTIVE_RAY_QUEUE])
+        return;
+    uint slot = activeRayIndices[dispatchSlot];
+    ray r = main_rays[slot];
+
+    for (int i = 0; i < MAX_CYCLES; i++)
+    {
+        float3 origin    = r.position;
+        float3 direction = r.direction;
+        uint   bhFlags   = QueryBlackHoles(origin, direction);
+
+        if (bhFlags & BH_INSIDE_SHELL)
+        {
+            ray     marchedRay;
+            HitInfo marchedHit;
+            uint result = marchAllBlackHoles(r, marchedRay, marchedHit);
+
+            if (result == GEODISC_HIT_REFLECTION)
+            {
+                main_rays[slot] = marchedRay;
+                hit_infos[slot] = marchedHit;
+                uint outSlot;
+                InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
+                reflectionQueue[outSlot] = slot;
+                return;
+            }
+
+            if (result == GEODISC_HIT_BLACK_HOLE)
+            {
+                main_rays[slot] = marchedRay;
+                return;
+            }
+
+            r = marchedRay;
+            continue;
+        }
+
+        {
+            RayDesc raydesc;
+            raydesc.Origin    = origin;
+            raydesc.Direction = direction;
+            float tSOI;
+            bool  entersSOI = RayEntersSOI(origin, direction, renderDistance, tSOI);
+            float tMax      = entersSOI ? tSOI : renderDistance;
+            raydesc.TMin = 0.0001;
+            raydesc.TMax = tMax;
+
+            RayQuery<RAY_FLAG_CULL_NON_OPAQUE> rq;
+            rq.TraceRayInline(_RTAS, RAY_FLAG_CULL_NON_OPAQUE, 0xFF, raydesc);
+            rq.Proceed();
+
+            if (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+            {
+                HitInfo info     = (HitInfo)0;
+                info.distance    = rq.CommittedRayT();
+                float2 bary      = rq.CommittedTriangleBarycentrics();
+                info.u           = bary.x;
+                info.v           = bary.y;
+                uint instanceIndex = rq.CommittedInstanceIndex();
+                uint primIndex     = rq.CommittedPrimitiveIndex();
+                info.triIndex    = Instances[instanceIndex].triangleOffset + primIndex;
+                info.objectIndex = instanceIndex;
+
+                ray toSend;
+                toSend.position  = origin + direction * info.distance;
+                toSend.direction = direction;
+                main_rays[slot]  = toSend;
+                hit_infos[slot]  = info;
+
+                uint outSlot;
+                InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
+                reflectionQueue[outSlot] = slot;
+                return;
+            }
+
+            if (entersSOI)
+            {
+                // advance to SOI boundary and let geodesic path pick it up
+                r.position  = origin + direction * tSOI;
+                r.direction = direction;
+                continue;
+            }
+
+            // complete miss — send to skybox
+            ray toSend;
+            toSend.position  = origin;
+            toSend.direction = direction;
+            main_rays[slot]  = toSend;
+
+            uint outSky;
+            InterlockedAdd(activeRayCount[SKYBOX_QUEUE], 1, outSky);
+            skyboxQueue[outSky] = slot;
+            return;
+        }
+    }
+
+    // exhausted MAX_CYCLES without resolution — skybox
+    main_rays[slot] = r;
+    uint outSky;
+    InterlockedAdd(activeRayCount[SKYBOX_QUEUE], 1, outSky);
+    skyboxQueue[outSky] = slot;
+}
+#else
+
+
 
 #define LINEAR_MISS_NO_SOI  0u
 #define LINEAR_HIT_GEOMETRY 1u
@@ -258,7 +387,7 @@ uint LinearMarchOnce(inout ray r, out HitInfo hitOut)
 
     HitInfo hit = checkMeshCollisions(r, tMax, false);
 
-    if (hit.didHit)
+    if (hit.distance > 0)
     {
         r.position = r.position + r.direction * hit.distance;
         hitOut = hit;
@@ -273,63 +402,6 @@ uint LinearMarchOnce(inout ray r, out HitInfo hitOut)
 
     return LINEAR_MISS_NO_SOI;
 }
-bool HandleGeodesic(uint slot, inout ray r)
-{
-    float minDist;
-    bool insideShell;
-
-    // query
-
-    if (!insideShell)
-        return false;
-
-    ray marchedRay;
-    HitInfo marchedHit;
-
-    uint result = marchAllBlackHoles(r, marchedRay, marchedHit);
-
-    if (result == GEODISC_HIT_REFLECTION)
-    {
-        main_rays[slot] = marchedRay;
-        hit_infos[slot] = marchedHit;
-
-        uint outSlot;
-        InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
-        reflectionQueue[outSlot] = slot;
-        return true;
-    }
-
-    if (result == GEODISC_HIT_BLACK_HOLE)
-    {
-        main_rays[slot] = marchedRay;
-        return true;
-    }
-
-    r = marchedRay;
-    return false;
-}
-bool HandleLinear(uint slot, inout ray r)
-{
-    HitInfo hit;
-    uint result = LinearMarchOnce(r, hit);
-
-    if (result == LINEAR_HIT_GEOMETRY)
-    {
-        main_rays[slot] = r;
-        hit_infos[slot] = hit;
-
-        uint outSlot;
-        InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
-        reflectionQueue[outSlot] = slot;
-        return true;
-    }
-
-    if (result == LINEAR_MISS_NO_SOI)
-        return true;
-
-    return false;
-}
-
 [numthreads(64, 1, 1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
@@ -396,4 +468,6 @@ void Main(uint3 id : SV_DispatchThreadID)
     uint outSky;
     InterlockedAdd(activeRayCount[SKYBOX_QUEUE], 1, outSky);
     skyboxQueue[outSky] = slot;
+    return;
 }
+#endif

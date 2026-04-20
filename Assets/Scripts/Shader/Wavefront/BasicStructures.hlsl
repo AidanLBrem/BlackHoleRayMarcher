@@ -11,13 +11,13 @@
 struct ray       { float3 position; float3 direction; };
 struct HitInfo 
 {
-    bool  didHit;
+    //bool  didHit;
     float distance;
     float u;
     float v;
     uint  triIndex;
     int   objectIndex;
-    float3 worldNormal;  // hardware RT path only
+    //float3 worldNormal;  // hardware RT path only
 };
             
 struct AABBHitInfo {

@@ -1,5 +1,6 @@
 #pragma kernel Main
-
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING
+#pragma multi_compile _ FORCE_SOFTWARE_RT
 #include "Math.hlsl"
 #include "PixelFlags.hlsl"
 #include "BasicStructures.hlsl"
@@ -30,7 +31,7 @@ RWStructuredBuffer<PixelAccum> pixelAccum;
 bool HandleReflection(uint slot, inout float rngState)
 {
     HitInfo hitInfo      = hit_info_buffer[slot];
-    if (!hitInfo.didHit)
+    if (hitInfo.distance <= 0)
         return true;
 
     ray        ray        = main_rays[slot];
@@ -53,13 +54,13 @@ bool HandleReflection(uint slot, inout float rngState)
     float3 N;
     float3 Ng;
 
-    if (hitInfo.triIndex == 0xFFFFFFFF)
+    /*if (hitInfo.triIndex == 0xFFFFFFFF)
     {
         N  = hitInfo.worldNormal;
         Ng = N;
-    }
-    else
-    {
+    }*/
+    //else
+    //{
         uint triIndex = hitInfo.triIndex;
         Triangle tri  = Triangles[triIndex];
 
@@ -70,17 +71,17 @@ bool HandleReflection(uint slot, inout float rngState)
         float3 n1 = Normals[index1];
         float3 n2 = Normals[index2];
         float3 n3 = Normals[index3];
-
+    
+        // software path — interpolate using barycentrics
         N = normalize(
             n1 * (1 - (hitInfo.u + hitInfo.v)) +
             n2 * hitInfo.u +
             n3 * hitInfo.v
         );
         N  = safeNormalize(mul(nMat, N));
-
         float3 geomNormalLocal = normalize(cross(tri.edgeAB, tri.edgeAC));
         Ng = safeNormalize(mul(nMat, geomNormalLocal));
-    }
+    //}
 
     if (dot(Ng, ray.direction) > 0) Ng = -Ng;
     if (dot(N,  Ng)            < 0) N  = -N;
