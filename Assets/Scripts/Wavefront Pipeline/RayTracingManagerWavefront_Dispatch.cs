@@ -194,12 +194,12 @@ public partial class RayTracingManagerWavefront
             //{
                 initCompute.SetInt("raysPerPixel", raysPerPixel);
                 DispatchCompute(initCompute, pixelCount, "Init");
-
+                
                 for (int bounce = 0; bounce < maxBounces; bounce++)
                 {
                     activeRayCountBuffer.SetData(zeroOne, 0, REFLECTION_QUEUE, 1);
                     activeRayCountBuffer.SetData(zeroOne, 0, SKYBOX_QUEUE, 1);
-
+                    activeRayCountBuffer.SetData(zeroOne, 0, NEE_QUEUE, 1);
                     DispatchBucketSort();
 
                     DispatchWavefront(classifyCompute, ACTIVE_RAY_QUEUE, "Propagate");
@@ -207,6 +207,14 @@ public partial class RayTracingManagerWavefront
                     DispatchCompute(resetCountCompute, 1, "reset");
 
                     DispatchWavefront(reflectionCompute, REFLECTION_QUEUE, "Reflection");
+
+                    if (useNEE)                         
+                        DispatchWavefront(neeCompute,        NEE_QUEUE,         "NEE");
+                    //activeRayCountBuffer.GetData(counts);
+                    //Debug.Log($"bounce {bounce} — REFLECTION: {counts[REFLECTION_QUEUE]}, NEE: {counts[NEE_QUEUE]}, ACTIVE: {counts[ACTIVE_RAY_QUEUE]}");
+
+                    
+
                 }
                 DispatchCompute(resetCountCompute, 1, "reset");
             //}

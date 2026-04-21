@@ -184,8 +184,7 @@ public partial class RayTracingManagerWavefront
 
         lightTriIndicesCache.Clear();
         lightTriDataCache.Clear();
-        int numLightSources = 0;
-
+        numLightSources = 0;
         for (int i = 0; i < count; i++) meshObjects[i].transformDirty = false;
 
         for (int i = 0; i < count; i++)
@@ -336,11 +335,21 @@ public partial class RayTracingManagerWavefront
             reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
             reflectionCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
             reflectionCompute.SetBuffer(0, "TLASRefs",  TLASRefBuffer);
+            reflectionCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+            reflectionCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
+            reflectionCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
+            reflectionCompute.SetInt("numLightSources",            numLightSources);
         }
 
-        if (flagVisualizerMaterial != null)
-            flagVisualizerMaterial.SetBuffer("Instances", InstanceBuffer);
-
+        if (neeCompute != null)
+        {
+            neeCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+            neeCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
+            neeCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
+            neeCompute.SetInt("numLightSources",            numLightSources);
+            Debug.Log(numLightSources);
+        }
+        
         buffersHaveRealData = true;
     }
 }

@@ -1,5 +1,5 @@
 using UnityEngine;
-using UnityEngine.Profiling;
+
 public partial class RayTracingManagerWavefront
 {
     void ReleaseBuffers()
@@ -40,11 +40,11 @@ public partial class RayTracingManagerWavefront
         newSlotForOldSlotBuffer?.Release();    newSlotForOldSlotBuffer    = null;
         sortedControlsBuffer?.Release();       sortedControlsBuffer = null;
         sortedRayColorInfoBuffer?.Release();   sortedRayColorInfoBuffer = null;
+        neeQueueBuffer?.Release();             neeQueueBuffer = null;
         if (accelStructure != null) { accelStructure.Release(); accelStructure = null; }
         resultTexture?.Release();    resultTexture = null;
         cleanAccumBuffer?.Release(); cleanAccumBuffer = null;
-
-        if (flagVisualizerMaterial    != null) { DestroyImmediate(flagVisualizerMaterial);    flagVisualizerMaterial    = null; }
+        
         if (accumulatorMaterial       != null) { DestroyImmediate(accumulatorMaterial);       accumulatorMaterial       = null; }
         if (ditherMaterial            != null) { DestroyImmediate(ditherMaterial);            ditherMaterial            = null; }
         if (colorQuantizationMaterial != null) { DestroyImmediate(colorQuantizationMaterial); colorQuantizationMaterial = null; }
@@ -101,6 +101,7 @@ public partial class RayTracingManagerWavefront
         ShaderHelper.CreateStructuredBuffer<uint>(ref newSlotForOldSlotBuffer,  pixelCount*raysPerPixel); // old slot -> new slot
         ShaderHelper.CreateStructuredBuffer<Control>(ref sortedControlsBuffer, pixelCount*raysPerPixel);
         ShaderHelper.CreateStructuredBuffer<RayColorInfo>(ref sortedRayColorInfoBuffer, pixelCount*raysPerPixel);
+        ShaderHelper.CreateStructuredBuffer<uint>(ref neeQueueBuffer, pixelCount * raysPerPixel);
         if (indirectArgsBuffer == null || !indirectArgsBuffer.IsValid())
         {
             indirectArgsBuffer?.Release();
@@ -113,20 +114,14 @@ public partial class RayTracingManagerWavefront
         BindInitBuffers();
         BindClassifyBuffers();
         BindReflectionBuffers();
+        BindNEEBuffers();
         BindAccumulateBuffers();
-        BindFlagVisualizerBuffers();
         BindWavefrontBuffers();
         BindIndirectArgs();
     }
 
     void BindWavefrontBuffers()
     {
-        if (compactCompute != null)
-        {
-            compactCompute.SetBuffer(0, "controls",         controlQueue);
-            compactCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-            compactCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
-        }
 
         if (writeIndirectArgsCompute != null)
         {
@@ -147,6 +142,12 @@ public partial class RayTracingManagerWavefront
         {
             classifyCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
             classifyCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
+        }
+
+        if (neeCompute != null)
+        {
+            reflectionCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
+            reflectionCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
         }
     }
 
@@ -212,6 +213,36 @@ public partial class RayTracingManagerWavefront
         reflectionCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
         reflectionCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
         reflectionCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
+        reflectionCompute.SetBuffer(0, "neeQueue",             neeQueueBuffer);
+        reflectionCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+        //reflectionCompute.SetInt("numLightSources",             (int)numLightSources);
+    }
+
+    void BindNEEBuffers()
+    {
+        if (neeCompute == null) return;
+        neeCompute.SetBuffer(0, "neeQueue",             neeQueueBuffer);
+        neeCompute.SetBuffer(0, "activeRayCount",       activeRayCountBuffer);
+        neeCompute.SetBuffer(0, "controls",             controlQueue);
+        neeCompute.SetBuffer(0, "main_rays",            mainRayBuffer);
+        neeCompute.SetBuffer(0, "hit_info_buffer",      HitInfoBuffer);
+        neeCompute.SetBuffer(0, "ray_color_info",       rayColorInfoBuffer);
+        neeCompute.SetBuffer(0, "Instances",            InstanceBuffer);
+        neeCompute.SetBuffer(0, "Triangles",            TriangleBuffer);
+        neeCompute.SetBuffer(0, "TriangleIndices",      MeshIndicesBuffer);
+        neeCompute.SetBuffer(0, "Normals",              MeshNormalsBuffer);
+        neeCompute.SetBuffer(0, "Vertices",             MeshVerticesBuffer);
+        neeCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+        neeCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
+        neeCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
+        neeCompute.SetBuffer(0, "Instances",        InstanceBuffer);
+        neeCompute.SetBuffer(0, "Triangles",        TriangleBuffer);
+        neeCompute.SetBuffer(0, "TriangleIndices",  MeshIndicesBuffer);
+        neeCompute.SetBuffer(0, "Normals",          MeshNormalsBuffer);
+        neeCompute.SetBuffer(0, "BVHNodes",         BVHBuffer);
+        neeCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
+        neeCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
+        neeCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
     }
 
     void BindAccumulateBuffers()
@@ -225,14 +256,7 @@ public partial class RayTracingManagerWavefront
         classifyCompute?.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
         reflectionCompute?.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
     }
-
-    void BindFlagVisualizerBuffers()
-    {
-        if (flagVisualizerMaterial == null) return;
-        flagVisualizerMaterial.SetBuffer("controls",        controlQueue);
-        flagVisualizerMaterial.SetBuffer("hit_info_buffer", HitInfoBuffer);
-        flagVisualizerMaterial.SetBuffer("Instances",       InstanceBuffer);
-    }
+    
 
     void BindIndirectArgs()
     {
@@ -249,16 +273,14 @@ public partial class RayTracingManagerWavefront
         classifyCompute?.SetBuffer(0,    "main_rays",        mainRayBuffer);
         reflectionCompute?.SetBuffer(0,  "activeRayIndices", activeRayIndicesBuffer);
         reflectionCompute?.SetBuffer(0,  "main_rays",        mainRayBuffer);
-        compactCompute?.SetBuffer(0,     "activeRayIndices", activeRayIndicesBuffer);
         initCompute?.SetBuffer(0,        "main_rays",        mainRayBuffer);
     }
-
+    
     void RebindControlBuffer()
     {
         initCompute?.SetBuffer(0, "controls", controlQueue);
         classifyCompute?.SetBuffer(0, "controls", controlQueue);
         reflectionCompute?.SetBuffer(0, "controls", controlQueue);
-        flagVisualizerMaterial?.SetBuffer("controls", controlQueue);
     }
 
     void RebindRayColorInfoBuffer()

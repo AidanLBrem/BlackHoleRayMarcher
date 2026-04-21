@@ -119,11 +119,5 @@ public partial class RayTracingManagerWavefront
             classifyCompute.SetBuffer(0, "blackholes",  blackHoleBuffer);
             classifyCompute.SetInt("num_black_holes",   cachedBlackHoleObjects.Length);
         }
-
-        if (SystemInfo.supportsRayTracing && !forceSoftwareRaytracing && linearMarchRaytraceShader != null)
-        {
-            linearMarchRaytraceShader.SetBuffer("blackholes",   blackHoleBuffer);
-            linearMarchRaytraceShader.SetInt("num_black_holes", cachedBlackHoleObjects.Length);
-        }
     }
 }

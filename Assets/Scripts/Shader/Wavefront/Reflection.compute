@@ -17,7 +17,8 @@ RWStructuredBuffer<uint>       activeRayIndices;
 RWStructuredBuffer<uint>       activeRayCount;
 StructuredBuffer<uint>         reflectionQueue;
 StructuredBuffer<uint>         pixelForSlot;
-
+RWStructuredBuffer<uint> neeQueue;
+uint numLightSources;
 struct PixelAccum
 {
     uint r;
@@ -185,19 +186,29 @@ bool HandleReflection(uint slot, inout float rngState)
     ray.direction = L;
     color_info.rayColor *= f * NdotL * weight / max(pdf, 1e-8);
     ray.position = ray.position + Ng * 1e-4;
+    main_rays[slot].direction = ray.direction;
+    main_rays[slot].position  = ray.position;
+    // NEE — queue for direct light sampling on diffuse hits
+    //TODO: impliment specular NEE
+    if (!sampleSpecular && numLightSources > 0)
+    {
+        uint outSlot;
+        InterlockedAdd(activeRayCount[NEE_QUEUE], 1, outSlot);
+        neeQueue[outSlot] = slot;
+    }
 
     // RUSSIAN ROULETTE
     float p = max(dot(color_info.rayColor, float3(0.2126, 0.7152, 0.0722)), 1e-4);
     if (randomValue(rngState) > p)
     {
+        //color_info.incomingLight = float3(1,0,0);
         ray_color_info[slot] = color_info;
         return true;
     }
 
     color_info.rayColor      /= p;
     ray_color_info[slot]      = color_info;
-    main_rays[slot].direction = ray.direction;
-    main_rays[slot].position  = ray.position;
+
 
     return false;
 }
@@ -210,7 +221,7 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     uint raySlot = reflectionQueue[slot];
 
-    float rngState = controls[raySlot].rngState;
+    float rngState = controls[raySlot].rngState + slot;
     bool done = HandleReflection(raySlot, rngState);
     controls[raySlot].rngState = rngState;
 

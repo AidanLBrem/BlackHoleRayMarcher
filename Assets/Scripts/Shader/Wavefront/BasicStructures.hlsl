@@ -93,6 +93,20 @@ struct blackhole
     float  schwarzchild_radius;
     float  black_hole_soi_multiplier;
 };
+struct LightSource
+{
+    int instanceIndex;
+    float totalArea;
+    int triStart;
+    int triCount;
+};
+
+struct LightTriangleData
+{
+    float worldSpaceArea;
+    float3 worldNormal;
+};
+
 StructuredBuffer<Mesh>     Instances;
 StructuredBuffer<Triangle> Triangles;
 StructuredBuffer<uint>     TriangleIndices;

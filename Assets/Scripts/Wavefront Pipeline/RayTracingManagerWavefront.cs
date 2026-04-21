@@ -1,79 +1,196 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using Unity.Mathematics;
-using Unity.VisualScripting;
 using Debug = UnityEngine.Debug;
-using UnityEngine.Profiling;
-using static RaytracerCPURay;
-using Random = System.Random;
 using UnityEngine.Rendering;
 #if UNITY_EDITOR
-using UnityEditor;
 #endif
 
 [ExecuteAlways, ImageEffectAllowedInSceneView]
 public partial class RayTracingManagerWavefront : MonoBehaviour
 {
-    private const int NUM_QUEUES = 100;
-    private const int ACTIVE_RAY_QUEUE = 0;
-    private const int LINEAR_RAY_QUEUEA = 1;
-    private const int GEODISC_RAY_QUEUEA = 2;
-    private const int LINEAR_RAY_QUEUEB = 3;
-    private const int GEODISC_RAY_QUEUEB = 4;
-    private const int REFLECTION_QUEUE = 5;
-    private const int NEE_QUEUE = 6;
-    private const int SCATTER_QUEUE = 7;
-    private const int SKYBOX_QUEUE = 8;
+    // ─── Queue Constants ───────────────────────────────────────────────────────
+    private const int NUM_QUEUES          = 100;
+    private const int ACTIVE_RAY_QUEUE    = 0;
+    private const int LINEAR_RAY_QUEUEA   = 1;
+    private const int GEODISC_RAY_QUEUEA  = 2;
+    private const int LINEAR_RAY_QUEUEB   = 3;
+    private const int GEODISC_RAY_QUEUEB  = 4;
+    private const int REFLECTION_QUEUE    = 5;
+    private const int NEE_QUEUE           = 6;
+    private const int SCATTER_QUEUE       = 7;
+    private const int SKYBOX_QUEUE        = 8;
 
-    // Kernel indices into bucketSortCompute
+    // ─── Kernel Constants ──────────────────────────────────────────────────────
     private const int KERNEL_CLEAR_BUCKETS = 0;
     private const int KERNEL_COUNT_BUCKETS = 1;
     private const int KERNEL_PREFIX_SUM    = 2;
     private const int KERNEL_SCATTER_RAYS  = 3;
     private const int KERNEL_FIXUP_QUEUE   = 4;
-
-    const uint FLAG_NEEDS_LINEAR_MARCH = (1u << 0);
-    const uint FLAG_NEEDS_REFLECTION   = (1u << 2);
-    const uint FLAG_NEEDS_CLASSIFY     = (1u << 5);
-
-    [SerializeField] bool useShaderInSceneView = true;
-    [SerializeField] public bool useTlas = true;
-    [SerializeField] public bool useNEE = true;
-    public bool useRedshifting = true;
-
-    [Header("TLAS Settings")]
-    public int tlasMaxLeafSize = 2;
-    public int tlasMaxDepth = 32;
-    public int tlasNumBins = 8;
-
+    // ─── Compute Kernels ───────────────────────────────────────────────────────
     [Header("Compute Kernels")]
     public ComputeShader initCompute;
     public ComputeShader classifyCompute;
     public ComputeShader reflectionCompute;
+    public ComputeShader neeCompute;
     public ComputeShader accumulateCompute;
-    public ComputeShader compactCompute;
     public ComputeShader writeIndirectArgsCompute;
     public ComputeShader resetCountCompute;
-
-    [Header("Ray Sorting")]
     public ComputeShader bucketSortCompute;
-    [Range(1, 8)]
-    public int sortBucketsPerAxis = 4;
 
-    [Header("Wavefront Ping Pong")]
-    [Range(1, 8)]
-    public int maxLinearGeodiscPingPongIterations = 4;
-
-    public int marchStepsCount;
+    // ─── Rendering ─────────────────────────────────────────────────────────────
+    [Header("Rendering")]
+    [Range(0.05f, 1.0f)]
+    public float renderScale = 0.5f;
     public float renderDistance;
-    public int raysPerPixel;
-    public int maxBounces;
-    public bool accumlateInSceneView = true;
-    public bool accumulateInGameView = true;
-    public float blackHoleSOIStepSize = 0.01f;
+    public int   raysPerPixel;
+    public int   maxBounces;
+    public bool  renderSphere    = true;
+    public bool  renderTriangles = true;
 
+    // ─── Ray Tracing ───────────────────────────────────────────────────────────
+    [Header("Ray Tracing")]
+    public bool             forceSoftwareRaytracing;
+    [SerializeField] public bool useTlas = true;
+    [SerializeField] public bool useNEE  = true;
+    private int numLightSources;
+    public bool useRedshifting = true;
+
+    // ─── Ray Sorting ───────────────────────────────────────────────────────────
+    [Header("Ray Sorting")]
+    [Range(1, 8)] public int sortBucketsPerAxis = 4;
+    [Range(1, 8)] public int maxLinearGeodiscPingPongIterations = 4;
+
+    // ─── Accumulation ──────────────────────────────────────────────────────────
+    [Header("Accumulation")]
+    public Shader accumulatorShader;
+    public float  accumWeight           = 1.0f;
+    public bool   accumlateInSceneView  = true;
+    public bool   accumulateInGameView  = true;
+    public float  numFrames             = 10000;
+
+    // ─── Post Processing ───────────────────────────────────────────────────────
+    [Header("A-Trous Filter")]
+    public bool   atrousFilter        = false;
+    public Shader atrousShader;
+    public float  atrousColorSigma    = 0.6f;
+    public bool   atrousBeforeUpscale = false;
+
+    [Header("Dithering")]
+    public bool   ditherPostProcess   = false;
+    public Shader ditherShader;
+    public bool   ditherBeforeUpscale = false;
+    public int    ditherMatrixSize    = 4;
+
+    [Header("Color Quantization")]
+    public bool   colorQuantization = false;
+    public Shader ColorQuantizationShader;
+    public int    numColors         = 256;
+
+    // ─── TLAS Settings ─────────────────────────────────────────────────────────
+    [Header("TLAS Settings")]
+    public int tlasMaxLeafSize = 2;
+    public int tlasMaxDepth    = 32;
+    public int tlasNumBins     = 8;
+
+    // ─── Black Hole ────────────────────────────────────────────────────────────
+    [Header("Black Hole")]
+    public float blackHoleSOIStepSize       = 0.01f;
+    public int   emergencyBreakMaxSteps      = 1000;
+    public int   marchStepsCount;
+    public bool  enable_lensing              = true;
+    public float bendStrength                = 1.0f;
+    public bool  impactParameterDebug        = false;
+    public bool  useOrbitalPlaneCullingIfAble = true;
+    public float strongFieldRadPerMeterCuttoff = 0.01f;
+    public bool  useStepsPerCollision        = true;
+    public int   StepsPerCollisionTest       = 3;
+    public bool  useRayMagnification         = false;
+
+    // ─── Black Hole Debug ──────────────────────────────────────────────────────
+    [Header("Black Hole Debug")]
+    public bool displayTriTests              = false;
+    public int  triTestFullSaturationValue   = 1000;
+    public bool displayBVHNodeTests          = false;
+    public int  BVHNodeTestSaturationValue   = 10;
+    public bool displayTLASNodeVisits        = false;
+    public int  TLASNodeVisitsSaturationValue = 1000;
+    public bool displayBLASNodeVisits        = false;
+    public int  BLASNodeVisitsSaturationValue = 1000;
+    public bool displayInstanceBLASTraversals = false;
+    public int  InstanceBLASTraversalsSaturationValue = 1000;
+    public bool displayTLASLeafRefs          = false;
+    public int  TLASLeafRefsSaturationValue  = 1000;
+
+    // ─── Atmosphere ────────────────────────────────────────────────────────────
+    [Header("Atmosphere")]
+    public bool  applyScattering   = true;
+    public bool  applyRayleigh     = true;
+    public bool  applyMie          = true;
+    public bool  applySundisk      = true;
+    public bool  applySunLighting  = true;
+    public float planetRadius      = 6378137.0f;
+    public float atmosphereRadius  = 6538137.0f;
+    public int   framesPerScatter  = 10;
+    public int   numOpticalDepthPoints = 8;
+    public int   inScatteringPoints    = 8;
+
+    [Header("Rayleigh Scattering")]
+    public float  densityFalloffRayleigh        = 4f;
+    public Vector3 rayleighScatteringCoefficients = new Vector3(0.0058f, 0.0135f, 0.0331f);
+
+    [Header("Mie Scattering")]
+    public float  densityFalloffMie          = 4f;
+    public float  mieForwardScatter          = 0.76f;
+    public float  mieBackwardScatter         = -0.5f;
+    public Vector3 mieScatteringCoefficients = new Vector3(21e-6f, 21e-6f, 21e-6f);
+
+    // ─── Sun ───────────────────────────────────────────────────────────────────
+    [Header("Sun")]
+    public Color     sunLightColor     = Color.white;
+    public float     sunLightIntensity = 1;
+    public Transform sun;
+
+    // ─── Debug ─────────────────────────────────────────────────────────────────
+    [Header("Debug")]
+    public bool   forceBufferRecreation = false;
+    [SerializeField] bool useShaderInSceneView = true;
+
+    // ─── Runtime State (non-serialized) ────────────────────────────────────────
+    int  numRenderedFrames = 0;
+    int  scaledW           = 1;
+    int  scaledH           = 1;
+    private int   baseSeed         = 0;
+    private float lastRenderScale  = -1f;
+    private bool  startupDone      = false;
+    private bool  tlasDirty        = true;
+    private int   lastInstanceCount      = -1;
+    private bool  buffersHaveRealData    = false;
+    private bool  lastForceSoftware      = false;
+    private int   lastSortBucketsPerAxis = -1;
+    private bool  blackHolesDirty        = true;
+    private bool  historyInitialized     = false;
+
+    Vector3    lastCameraPosition;
+    Quaternion lastCameraRotation;
+    float      lastCameraFov;
+    int        lastScreenWidth;
+    int        lastScreenHeight;
+
+    private static readonly uint[] zeroOne         = { 0 };
+    private static readonly uint[] zerosNUM_QUEUES = new uint[NUM_QUEUES];
+    private static readonly int[]  atrousStepSizes = { 1, 2, 4, 8, 16 };
+
+    // ─── Render Textures ───────────────────────────────────────────────────────
+    RenderTexture resultTexture;
+    private RenderTexture cleanAccumBuffer;
+    private Material      accumulatorMaterial;
+    private Material      ditherMaterial;
+    private Material      colorQuantizationMaterial;
+    private Material      atrousMaterial;
+
+    // ─── Compute Buffers ───────────────────────────────────────────────────────
     [NonSerialized] ComputeBuffer sphereBuffer;
     [NonSerialized] ComputeBuffer MeshVerticesBuffer;
     [NonSerialized] ComputeBuffer MeshNormalsBuffer;
@@ -90,12 +207,11 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
     [NonSerialized] private ComputeBuffer mainRayBuffer;
     [NonSerialized] private ComputeBuffer HitInfoBuffer;
     [NonSerialized] private ComputeBuffer rayColorInfoBuffer;
-    [NonSerialized] ComputeBuffer blackHoleBuffer;
+    [NonSerialized] ComputeBuffer         blackHoleBuffer;
     [NonSerialized] private ComputeBuffer pixelAccumBuffer;
     [NonSerialized] private ComputeBuffer activeRayIndicesBuffer;
     [NonSerialized] private ComputeBuffer activeRayCountBuffer;
     [NonSerialized] private ComputeBuffer indirectArgsBuffer;
-
     [NonSerialized] private ComputeBuffer linearMarchQueueBufferA;
     [NonSerialized] private ComputeBuffer linearMarchQueueBufferB;
     [NonSerialized] private ComputeBuffer geodiscMarchQueueBufferA;
@@ -103,155 +219,37 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
     [NonSerialized] private ComputeBuffer reflectionQueueBuffer;
     [NonSerialized] private ComputeBuffer skyboxQueueBuffer;
 
-    // Bucket sort buffers
+    [NonSerialized] private ComputeBuffer neeQueueBuffer;
+    // ─── Bucket Sort Buffers ───────────────────────────────────────────────────
     [NonSerialized] private ComputeBuffer bucketCountsBuffer;
     [NonSerialized] private ComputeBuffer bucketOffsetsBuffer;
-    [NonSerialized] private ComputeBuffer sortedRaysBuffer;          // ping-pong twin for mainRayBuffer
-    [NonSerialized] private ComputeBuffer sortedRayIndicesBuffer;    // ping-pong twin for activeRayIndicesBuffer
-// Mapping buffers — survive the sort so queues can be fixed up
-    [NonSerialized] private ComputeBuffer pixelForSlotBuffer;        // slot -> original pixel
-    [NonSerialized] private ComputeBuffer sortedPixelForSlotBuffer;  // scratch during sort
-    [NonSerialized] private ComputeBuffer newSlotForOldSlotBuffer;   // old slot -> new slot
+    [NonSerialized] private ComputeBuffer sortedRaysBuffer;
+    [NonSerialized] private ComputeBuffer sortedRayIndicesBuffer;
+    [NonSerialized] private ComputeBuffer pixelForSlotBuffer;
+    [NonSerialized] private ComputeBuffer sortedPixelForSlotBuffer;
+    [NonSerialized] private ComputeBuffer newSlotForOldSlotBuffer;
     [NonSerialized] private ComputeBuffer sortedControlsBuffer;
     [NonSerialized] private ComputeBuffer sortedRayColorInfoBuffer;
-    private bool tlasDirty = true;
-    private int lastInstanceCount = -1;
-    private bool buffersHaveRealData = false;
-    private bool lastForceSoftware = false;
-    private int lastSortBucketsPerAxis = -1;
-
-    [Header("Debug")]
-    public bool forceBufferRecreation = false;
-    public Shader flagVisualizerShader;
-    private Material flagVisualizerMaterial;
-
-    [Header("Atmosphere")]
-    public bool applyScattering = true;
-    public bool applyRayleigh = true;
-    public bool applyMie = true;
-    public bool applySundisk = true;
-    public bool applySunLighting = true;
-    public float planetRadius = 6378137.0f;
-    public float atmosphereRadius = 6538137.0f;
-    public int framesPerScatter = 10;
-    public int numOpticalDepthPoints = 8;
-    public int inScatteringPoints = 8;
-
-    [Header("Rayleigh Scattering")]
-    public float densityFalloffRayleigh = 4f;
-    public Vector3 rayleighScatteringCoefficients = new Vector3(0.0058f, 0.0135f, 0.0331f);
-
-    [Header("Mie Scattering")]
-    public float densityFalloffMie = 4f;
-    public float mieForwardScatter = 0.76f;
-    public float mieBackwardScatter = -0.5f;
-    public Vector3 mieScatteringCoefficients = new Vector3(21e-6f, 21e-6f, 21e-6f);
-
-    public Color sunLightColor = Color.white;
-    public float sunLightIntensity = 1;
-    public Transform sun;
-
-    RenderTexture resultTexture;
-
-    [Header("Ray Tracing")]
-    public bool forceSoftwareRaytracing;
-    public RayTracingShader linearMarchRaytraceShader;
+    
+    // ─── Acceleration Structure ────────────────────────────────────────────────
     private RayTracingAccelerationStructure accelStructure;
+    private int[] accelStructureInstanceIDs;
+    private readonly List<RayTracedMesh> lastBuiltMeshOrderList = new();
 
-    [Header("Temporal Accumulation")]
-    public Shader accumulatorShader;
-    private Material accumulatorMaterial;
-    public float accumWeight = 1.0f;
-    private RenderTexture cleanAccumBuffer;
-    private float lastRenderScale = -1f;
-
-    [Header("Color Quantization")]
-    public Shader ColorQuantizationShader;
-    public bool colorQuantization = false;
-    public int numColors = 256;
-    private Material colorQuantizationMaterial;
-
-    [Header("Dithering")]
-    public Shader ditherShader;
-    public bool ditherPostProcess = false;
-    public bool ditherBeforeUpscale = false;
-    public int ditherMatrixSize = 4;
-    private Material ditherMaterial;
-
-    [Header("A-Trous Filter")]
-    public bool atrousFilter = false;
-    public Shader atrousShader;
-    public float atrousColorSigma = 0.6f;
-    private Material atrousMaterial;
-    public bool atrousBeforeUpscale = false;
-
-    [Header("Pixel Sizing")]
-    [Range(0.05f, 1.0f)]
-    public float renderScale = 0.5f;
-
-    int numRenderedFrames = 0;
-    private int baseSeed = 0;
-    public int emergencyBreakMaxSteps = 1000;
-    public float numFrames = 10000;
-
-    public bool renderSphere = true;
-    public bool renderTriangles = true;
-    public float strongFieldRadPerMeterCuttoff = 0.01f;
-
-    static readonly List<Vector3> tV = new();
-    static readonly List<Vector3> tN = new();
-
-    [Header("Black Hole Lensing Debug Options")]
-    public bool enable_lensing = true;
-    public float bendStrength = 1.0f;
-    public bool impactParameterDebug = false;
-    public bool useOrbitalPlaneCullingIfAble = true;
-
-    public bool displayTriTests = false;
-    public int triTestFullSaturationValue = 1000;
-    public bool displayBVHNodeTests = false;
-    public int BVHNodeTestSaturationValue = 10;
-    public bool displayTLASNodeVisits = false;
-    public int TLASNodeVisitsSaturationValue = 1000;
-    public bool displayBLASNodeVisits = false;
-    public int BLASNodeVisitsSaturationValue = 1000;
-    public bool displayInstanceBLASTraversals = false;
-    public int InstanceBLASTraversalsSaturationValue = 1000;
-    public bool displayTLASLeafRefs = false;
-    public int TLASLeafRefsSaturationValue = 1000;
-
-    public bool useStepsPerCollision = true;
-    public int StepsPerCollisionTest = 3;
-    public bool useRayMagnification = false;
-
-    Vector3 lastCameraPosition;
-    Quaternion lastCameraRotation;
-    float lastCameraFov;
-    int lastScreenWidth;
-    int lastScreenHeight;
-    bool historyInitialized = false;
-
-    int scaledW = 1;
-    int scaledH = 1;
-
-    private static readonly uint[] zeroOne         = { 0 };
-    private static readonly uint[] zerosNUM_QUEUES = new uint[NUM_QUEUES];
-    private static readonly int[] atrousStepSizes  = { 1, 2, 4, 8, 16 };
-
-    private readonly List<RayTracedMesh>                     validInstancesCache = new();
-    private readonly List<SharedMeshData>                    uniqueMeshesCache   = new();
-    private readonly HashSet<SharedMeshData>                 uniqueMeshesSet     = new();
-    private readonly Dictionary<SharedMeshData, MeshOffsets> offsetsCache        = new();
+    // ─── CPU-side Caches ───────────────────────────────────────────────────────
+    private readonly List<RayTracedMesh>                     validInstancesCache  = new();
+    private readonly List<SharedMeshData>                    uniqueMeshesCache    = new();
+    private readonly HashSet<SharedMeshData>                 uniqueMeshesSet      = new();
+    private readonly Dictionary<SharedMeshData, MeshOffsets> offsetsCache         = new();
 
     private RayTracedBlackHole[] cachedBlackHoleObjects = Array.Empty<RayTracedBlackHole>();
     private BlackHole[]          cachedBlackHoles       = Array.Empty<BlackHole>();
-    private bool                 blackHolesDirty        = true;
 
-    private BvhInstance[]                       tlasInstances       = Array.Empty<BvhInstance>();
-    private MeshStruct[]                        tlasGpuInstances    = Array.Empty<MeshStruct>();
-    private GPULightSource[]                    tlasLightSources    = Array.Empty<GPULightSource>();
-    private uint[]                              tlasRefsCache       = Array.Empty<uint>();
-    private GPUBVHNode[]                        tlasNodesCache      = Array.Empty<GPUBVHNode>();
+    private BvhInstance[]                       tlasInstances        = Array.Empty<BvhInstance>();
+    private MeshStruct[]                        tlasGpuInstances     = Array.Empty<MeshStruct>();
+    private GPULightSource[]                    tlasLightSources     = Array.Empty<GPULightSource>();
+    private uint[]                              tlasRefsCache        = Array.Empty<uint>();
+    private GPUBVHNode[]                        tlasNodesCache       = Array.Empty<GPUBVHNode>();
     private readonly List<int>                  lightTriIndicesCache = new();
     private readonly List<GPULightTriangleData> lightTriDataCache    = new();
 
@@ -261,26 +259,11 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
     private readonly List<float3> blasVertices        = new();
     private readonly List<float3> blasNormals         = new();
 
-    private readonly List<RayTracedMesh> lastBuiltMeshOrderList = new();
-
-    private bool startupDone = false;
-    private int[] accelStructureInstanceIDs;
+    static readonly List<Vector3> tV = new();
+    static readonly List<Vector3> tN = new();
 
     void Swap(ref RenderTexture a, ref RenderTexture b) => (a, b) = (b, a);
-
-    [Flags]
-    public enum PixelFlags : uint
-    {
-        None                 = 0,
-        NeedsLinearMarch     = 1 << 0,
-        NeedsGeodesicMarch   = 1 << 1,
-        NeedsNEELinear       = 1 << 2,
-        NeedsNEEGeodesic     = 1 << 3,
-        NeedsScatterLinear   = 1 << 4,
-        NeedsScatterGeodesic = 1 << 5,
-        NeedsSkybox          = 1 << 6,
-        Done                 = 1 << 7,
-    }
+    
     struct PixelAccum
     {
         public uint r;
@@ -362,9 +345,6 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
     
     void EnsureMaterialsCreated()
     {
-        if (flagVisualizerMaterial == null && flagVisualizerShader != null)
-            flagVisualizerMaterial = new Material(flagVisualizerShader);
-
         if (accumulatorMaterial == null && accumulatorShader != null)
             ShaderHelper.InitMaterial(accumulatorShader, ref accumulatorMaterial);
 

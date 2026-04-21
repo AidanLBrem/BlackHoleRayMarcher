@@ -1,0 +1,145 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+#include "Math.hlsl"
+#include "PixelFlags.hlsl"
+#include "BasicStructures.hlsl"
+#include "GGX.hlsl"
+#include "RayTracing.hlsl"
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+static const float SCALE = 65536.0;
+RWStructuredBuffer<control>    controls;
+RWStructuredBuffer<ray>        main_rays;
+//RWStructuredBuffer<ray>        nee_rays;
+StructuredBuffer<HitInfo>      hit_info_buffer;
+RWStructuredBuffer<color_info> ray_color_info;
+RWStructuredBuffer<uint>       activeRayIndices;
+RWStructuredBuffer<uint>       activeRayCount;
+StructuredBuffer<uint>         reflectionQueue;
+StructuredBuffer<uint>         neeQueue;
+StructuredBuffer<uint>         pixelForSlot;
+StructuredBuffer<LightSource> LightSources;
+StructuredBuffer<int> LightTriangleIndices;
+StructuredBuffer<LightTriangleData> LightTrianglesData;
+uint numLightSources;
+struct PixelAccum
+{
+    uint r;
+    uint g;
+    uint b;
+};
+
+RWStructuredBuffer<PixelAccum> pixelAccum;
+void writeBackRNGStates(uint raySlot, float rngState)
+{
+    controls[raySlot].rngState = rngState;
+}
+float3 RandomPointOnTriangleWorld(Triangle tri, float4x4 localToWorld, inout uint rngState)
+{
+    float r1 = randomValue(rngState);
+    float r2 = randomValue(rngState);
+
+    if (r1 + r2 > 1.0) { r1 = 1.0 - r1; r2 = 1.0 - r2; }
+
+    float3 v0Local = Vertices[TriangleIndices[tri.baseIndex]];
+    float3 localPoint = v0Local + r1 * tri.edgeAB + r2 * tri.edgeAC;
+
+    return mul(localToWorld, float4(localPoint, 1.0)).xyz;
+}
+[numthreads(64,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    //get the slot in NEE_QUEUE
+    uint slot = id.x;
+    if (slot >= activeRayCount[NEE_QUEUE]) return;
+    uint raySlot = neeQueue[slot];
+    float rngState = controls[raySlot].rngState + slot;
+    uint pixelIndex = controls[raySlot].pixelIndex;
+    float c = float(slot)/(float)activeRayCount[NEE_QUEUE];
+    uint3 p = (uint3)(float3(c, 0, 0) * SCALE);
+    InterlockedAdd(pixelAccum[pixelIndex].r, p.r);
+    InterlockedAdd(pixelAccum[pixelIndex].g, p.g);
+    InterlockedAdd(pixelAccum[pixelIndex].b, p.b);
+    return;
+    //get light source - random for now
+    LightSource light = LightSources[randomRange(rngState, 0, numLightSources)];
+    int lightIdx = light.instanceIndex;
+    RayTracingMaterial mat = Instances[lightIdx].material;
+
+    //should never happen
+
+    if (mat.emissionStrength <= 0) {
+        writeBackRNGStates(raySlot, rngState);
+        return;
+    }
+
+    //get triangle we are aiming for
+    int flatIdx = randomRange(rngState, light.triStart, light.triStart + light.triCount);
+    int triIdx = LightTriangleIndices[flatIdx];
+    Triangle triangleToAimFor = Triangles[triIdx];
+    float3 samplePos = RandomPointOnTriangleWorld(triangleToAimFor, Instances[lightIdx].localToWorldMatrix, rngState);
+
+    HitInfo hitInfo      = hit_info_buffer[raySlot];
+    Mesh mesh = Instances[hitInfo.objectIndex];
+    float3x3 nMat = transpose((float3x3)mesh.worldToLocalMatrix);
+    float3 N;
+    uint triIndex = hitInfo.triIndex;
+    Triangle tri  = Triangles[triIndex];
+
+    uint index1 = TriangleIndices[tri.baseIndex];
+    uint index2 = TriangleIndices[tri.baseIndex + 1];
+    uint index3 = TriangleIndices[tri.baseIndex + 2];
+
+    float3 n1 = Normals[index1];
+    float3 n2 = Normals[index2];
+    float3 n3 = Normals[index3];
+    
+    // software path — interpolate using barycentrics
+    N = normalize(
+        n1 * (1 - (hitInfo.u + hitInfo.v)) +
+        n2 * hitInfo.u +
+        n3 * hitInfo.v
+    );
+    
+    N  = safeNormalize(mul(nMat, N));
+    //might need to change this later, for now we just use main ray
+    ray r = main_rays[raySlot];
+    //get the vector and distance to the light
+    float3 toLight = samplePos - r.position;
+    float dist = length(toLight);
+    float3 dirNorm = toLight / dist;
+    //check the angle between it and the triangle we hit's normal
+    float NdotL = dot(N, dirNorm);
+
+    if (NdotL <= 0) {
+        writeBackRNGStates(raySlot, rngState);
+        return;
+        
+    }
+    HitInfo hit = checkMeshCollisions(r, dist - 1e-4, true);
+    //check to see if we actually hit the light we are aiming for
+    if (hit.distance <= 0 || hit.objectIndex != lightIdx) {
+        writeBackRNGStates(raySlot, rngState);
+        return;
+    }
+    //check to see if we hit the front face of the triangle
+    LightTriangleData lightData = LightTrianglesData[hit.triIndex];
+    float cosLight = dot(-dirNorm, lightData.worldNormal);
+    if (cosLight <= 0)
+    {
+        writeBackRNGStates(raySlot, rngState);
+        return;
+    }
+    color_info color = ray_color_info[raySlot];
+    float3 emission = mat.emissiveColor.rgb * mat.emissionStrength;
+    float geometryTerm = (NdotL * cosLight) / (dist * dist);
+    float3 contribution = color.rayColor * emission * geometryTerm * lightData.worldSpaceArea * (float)(light.triCount * numLightSources);
+
+    uint3 packed = (uint3)(max(contribution, 0) * SCALE);
+    InterlockedAdd(pixelAccum[pixelIndex].r, packed.r);
+    InterlockedAdd(pixelAccum[pixelIndex].g, packed.g);
+    InterlockedAdd(pixelAccum[pixelIndex].b, packed.b);
+
+    writeBackRNGStates(raySlot, rngState);
+    
+}
