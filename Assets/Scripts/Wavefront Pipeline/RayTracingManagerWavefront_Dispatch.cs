@@ -217,6 +217,9 @@ public partial class RayTracingManagerWavefront
 
                 }
                 DispatchCompute(resetCountCompute, 1, "reset");
+                activeRayCountBuffer.SetData(zeroOne, 0, REFLECTION_QUEUE, 1);
+                activeRayCountBuffer.SetData(zeroOne, 0, SKYBOX_QUEUE, 1);
+                activeRayCountBuffer.SetData(zeroOne, 0, NEE_QUEUE, 1);
             //}
 
             activeRayCountBuffer.SetData(zerosNUM_QUEUES);

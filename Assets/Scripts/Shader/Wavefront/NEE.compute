@@ -55,12 +55,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     uint raySlot = neeQueue[slot];
     float rngState = controls[raySlot].rngState + slot;
     uint pixelIndex = controls[raySlot].pixelIndex;
-    float c = float(slot)/(float)activeRayCount[NEE_QUEUE];
-    uint3 p = (uint3)(float3(c, 0, 0) * SCALE);
-    InterlockedAdd(pixelAccum[pixelIndex].r, p.r);
-    InterlockedAdd(pixelAccum[pixelIndex].g, p.g);
-    InterlockedAdd(pixelAccum[pixelIndex].b, p.b);
-    return;
+    
     //get light source - random for now
     LightSource light = LightSources[randomRange(rngState, 0, numLightSources)];
     int lightIdx = light.instanceIndex;
@@ -116,12 +111,25 @@ void CSMain (uint3 id : SV_DispatchThreadID)
         return;
         
     }
-    HitInfo hit = checkMeshCollisions(r, dist - 1e-4, true);
+    ray shadowRay;
+    shadowRay.position = r.position + dirNorm * 1e-4;
+    shadowRay.direction = dirNorm;
+
+    HitInfo hit = checkMeshCollisions(shadowRay, dist - 1e-4, true);
     //check to see if we actually hit the light we are aiming for
     if (hit.distance <= 0 || hit.objectIndex != lightIdx) {
+        
+        /*if (hit.objectIndex != lightIdx)
+        {
+            uint3 p = Instances[hit.objectIndex].material.color * SCALE;
+            pixelAccum[pixelIndex].r = p.r;
+            pixelAccum[pixelIndex].g = p.g;
+            pixelAccum[pixelIndex].b = p.b;
+        }*/
         writeBackRNGStates(raySlot, rngState);
         return;
     }
+    
     //check to see if we hit the front face of the triangle
     LightTriangleData lightData = LightTrianglesData[hit.triIndex];
     float cosLight = dot(-dirNorm, lightData.worldNormal);

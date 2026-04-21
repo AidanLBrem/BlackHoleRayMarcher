@@ -146,8 +146,8 @@ public partial class RayTracingManagerWavefront
 
         if (neeCompute != null)
         {
-            reflectionCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-            reflectionCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
+            neeCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
+            neeCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
         }
     }
 
@@ -272,7 +272,9 @@ public partial class RayTracingManagerWavefront
         classifyCompute?.SetBuffer(0,    "activeRayIndices", activeRayIndicesBuffer);
         classifyCompute?.SetBuffer(0,    "main_rays",        mainRayBuffer);
         reflectionCompute?.SetBuffer(0,  "activeRayIndices", activeRayIndicesBuffer);
-        reflectionCompute?.SetBuffer(0,  "main_rays",        mainRayBuffer);
+        reflectionCompute?.SetBuffer(0,  "main_rays",        mainRayBuffer);   
+        neeCompute?.SetBuffer(0, "main_rays", mainRayBuffer);
+        neeCompute?.SetBuffer(0,    "activeRayIndices", activeRayIndicesBuffer);
         initCompute?.SetBuffer(0,        "main_rays",        mainRayBuffer);
     }
     
@@ -281,12 +283,14 @@ public partial class RayTracingManagerWavefront
         initCompute?.SetBuffer(0, "controls", controlQueue);
         classifyCompute?.SetBuffer(0, "controls", controlQueue);
         reflectionCompute?.SetBuffer(0, "controls", controlQueue);
+        neeCompute?.SetBuffer(0, "controls", controlQueue);
     }
 
     void RebindRayColorInfoBuffer()
     {
         initCompute?.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
         reflectionCompute?.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
+        neeCompute?.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
     }
     void BindHardwareRTBuffers()
     {

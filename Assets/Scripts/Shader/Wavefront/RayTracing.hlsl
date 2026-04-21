@@ -173,14 +173,6 @@ HitInfo checkMeshCollisions(ray r, float worldTMax, bool findClosestCollisionOnl
                             h.triIndex    = k;
                             h.distance    = worldT;
                             h.objectIndex = (int)instanceIndex;
-
-                            uint i0 = TriangleIndices[tri.baseIndex + 0];
-                            uint i1 = TriangleIndices[tri.baseIndex + 1];
-                            uint i2 = TriangleIndices[tri.baseIndex + 2];
-                            float3 localNormal = Normals[i0] * (1 - (h.u + h.v))
-                                               + Normals[i1] * h.u
-                                               + Normals[i2] * h.v;
-
                             //h.worldNormal = safeNormalize(mul(normalMat, localNormal));
 
                             closest = h;

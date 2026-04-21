@@ -347,6 +347,10 @@ public partial class RayTracingManagerWavefront
             neeCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
             neeCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
             neeCompute.SetInt("numLightSources",            numLightSources);
+            neeCompute.SetInt("numMeshes",                  tlasGpuInstances.Length); 
+            neeCompute.SetInt("numInstances",               tlasGpuInstances.Length);
+            neeCompute.SetInt("numTLASNodes",               tlasNodesCache.Length); 
+            neeCompute.SetInt("TLASRootIndex",              tlasBuilder.RootIndex);
             Debug.Log(numLightSources);
         }
         
