@@ -9,17 +9,17 @@
 uint _BucketsPerAxis;
 uint _NumBuckets;
 
-StructuredBuffer<uint> activeRayIndices;     // queue entries are SLOTS
-StructuredBuffer<uint> activeRayCount;
+//StructuredBuffer<uint> activeRayIndices;     // queue entries are SLOTS
+//StructuredBuffer<uint> activeRayCount;
 
-StructuredBuffer<ray>        main_rays;
+//StructuredBuffer<ray>        main_rays;
 RWStructuredBuffer<ray>        sortedRays;
 
 
-StructuredBuffer<control>    controls;
+//StructuredBuffer<control>    controls;
 RWStructuredBuffer<control>    sortedControls;
 
-StructuredBuffer<color_info> ray_color_info;
+//StructuredBuffer<color_info> ray_color_info;
 RWStructuredBuffer<color_info> sortedRayColorInfo;
 
 // old slot -> new slot

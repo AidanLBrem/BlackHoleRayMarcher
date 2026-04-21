@@ -118,3 +118,25 @@ StructuredBuffer<uint>     TLASRefs;
 StructuredBuffer<blackhole>      blackholes;
 uint num_black_holes;
 
+RWStructuredBuffer<control>    controls;
+#ifdef RW_MAIN_RAYS
+RWStructuredBuffer<ray>        main_rays;
+#else
+StructuredBuffer<ray>        main_rays;
+#endif
+RWStructuredBuffer<HitInfo>    hit_info_buffer;
+#ifdef RW_RAY_COLOR_INFO
+RWStructuredBuffer<color_info> ray_color_info;
+#else
+StructuredBuffer<color_info> ray_color_info;
+#endif
+#ifdef RW_ACTIVE_RAY_INDICES
+RWStructuredBuffer<uint>       activeRayIndices;
+#else
+StructuredBuffer<uint>       activeRayIndices;
+#endif
+#ifdef RW_ACTIVE_RAY_COUNT
+RWStructuredBuffer<uint>       activeRayCount;
+#else
+StructuredBuffer<uint>       activeRayCount;
+#endif

@@ -1,6 +1,10 @@
 #pragma kernel Main
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING
 #pragma multi_compile _ FORCE_SOFTWARE_RT
+#define RW_MAIN_RAYS
+#define RW_RAY_COLOR_INFO
+#define RW_ACTIVE_RAY_COUNT
+#define RW_ACTIVE_RAY_INDICES
 #include "Math.hlsl"
 #include "PixelFlags.hlsl"
 #include "BasicStructures.hlsl"
@@ -9,12 +13,6 @@
 uint _ScreenWidth;
 uint _ScreenHeight;
 static const float SCALE = 65536.0;
-RWStructuredBuffer<control>    controls;
-RWStructuredBuffer<ray>        main_rays;
-StructuredBuffer<HitInfo>      hit_info_buffer;
-RWStructuredBuffer<color_info> ray_color_info;
-RWStructuredBuffer<uint>       activeRayIndices;
-RWStructuredBuffer<uint>       activeRayCount;
 StructuredBuffer<uint>         reflectionQueue;
 StructuredBuffer<uint>         pixelForSlot;
 RWStructuredBuffer<uint> neeQueue;

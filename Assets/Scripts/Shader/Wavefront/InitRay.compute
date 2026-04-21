@@ -1,5 +1,8 @@
 #pragma kernel Main
-
+#define RW_MAIN_RAYS
+#define RW_RAY_COLOR_INFO
+#define RW_ACTIVE_RAY_INDICES
+#define RW_ACTIVE_RAY_COUNT
 #include "Math.hlsl"
 #include "PixelFlags.hlsl"
 #include "BasicStructures.hlsl"
@@ -12,12 +15,7 @@ float3 ViewParams;
 float4x4 CameraLocalToWorldMatrix;
 float3 CameraWorldPos;
 
-RWStructuredBuffer<control>    controls;
-RWStructuredBuffer<ray>        main_rays;
-RWStructuredBuffer<HitInfo>    hit_info_buffer;
-RWStructuredBuffer<color_info> ray_color_info;
-RWStructuredBuffer<uint>       activeRayIndices;
-RWStructuredBuffer<uint>       activeRayCount;
+
 
 [numthreads(64,1,1)]
 void Main(uint3 id : SV_DispatchThreadID)

@@ -8,13 +8,6 @@
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 static const float SCALE = 65536.0;
-RWStructuredBuffer<control>    controls;
-RWStructuredBuffer<ray>        main_rays;
-//RWStructuredBuffer<ray>        nee_rays;
-StructuredBuffer<HitInfo>      hit_info_buffer;
-RWStructuredBuffer<color_info> ray_color_info;
-RWStructuredBuffer<uint>       activeRayIndices;
-RWStructuredBuffer<uint>       activeRayCount;
 StructuredBuffer<uint>         reflectionQueue;
 StructuredBuffer<uint>         neeQueue;
 StructuredBuffer<uint>         pixelForSlot;
