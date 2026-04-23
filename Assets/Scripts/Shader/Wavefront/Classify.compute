@@ -1,5 +1,5 @@
 #pragma kernel Main
-#pragma multi_compile _ USE_TLAS
+
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING
 #pragma multi_compile _ FORCE_SOFTWARE_RT
 #define RW_MAIN_RAYS

@@ -2,7 +2,7 @@ int   TLASRootIndex;
 int   numInstances;
 int   numTLASNodes;
 int   numMeshes;
-#pragma require inlineraytracing
+#pragma multi_compile _ USE_TLAS
 AABBHitInfo RayAABB(float3 rayOrigin, float3 rayDirection, float3 inverseDirection, float3 boxMin, float3 boxMax, float distanceToBeat)
 {
     float3 invDir = inverseDirection;
@@ -165,7 +165,7 @@ HitInfo checkMeshCollisions(ray r, float worldTMax, bool findClosestCollisionOnl
                             if (localT > bestLocalT) continue;
 
                             float worldT = h.distance / dirScale;
-                            if (worldT >= bestWorldT) continue;
+                            if (worldT >= bestWorldT && worldT > 1e-4) continue;
 
                             bestLocalT = localT;
                             bestWorldT = worldT;

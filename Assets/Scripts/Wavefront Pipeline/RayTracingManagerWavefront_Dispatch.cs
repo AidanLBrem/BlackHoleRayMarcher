@@ -83,10 +83,11 @@ public partial class RayTracingManagerWavefront
         (activeRayIndicesBuffer, sortedRayIndicesBuffer) = (sortedRayIndicesBuffer, activeRayIndicesBuffer);
         (controlQueue, sortedControlsBuffer) = (sortedControlsBuffer, controlQueue);
         (rayColorInfoBuffer, sortedRayColorInfoBuffer) = (sortedRayColorInfoBuffer, rayColorInfoBuffer);
-        RebindRayBuffers();
-        RebindPixelForSlotBuffer();
-        RebindControlBuffer();
-        RebindRayColorInfoBuffer();
+        //RebindRayBuffers();
+        //RebindPixelForSlotBuffer();
+        //RebindControlBuffer();
+        //RebindRayColorInfoBuffer();
+        BindBuffersToShaders();
         // Pass 4 — fix reflection queue (queue stores old slots)
         bucketSortCompute.SetBuffer(KERNEL_FIXUP_QUEUE, "queueToFixup", reflectionQueueBuffer);
         bucketSortCompute.SetBuffer(KERNEL_FIXUP_QUEUE, "queueCount", activeRayCountBuffer);
@@ -112,16 +113,12 @@ public partial class RayTracingManagerWavefront
         {
             EnsureMaterialsCreated();
             EnsureBuffersCreated();
-            BindBuffersToShaders();
             startupDone = true;
         }
 
         List<RayTracedMesh> meshObjects = RayTracedMesh.All;
         if (AnyTransformDirty(meshObjects)) tlasDirty = true;
-
-        EnsureMaterialsCreated();
-        EnsureBuffersCreated();
-
+        
         if (!Mathf.Approximately(renderScale, lastRenderScale))
         {
             if (cleanAccumBuffer != null)

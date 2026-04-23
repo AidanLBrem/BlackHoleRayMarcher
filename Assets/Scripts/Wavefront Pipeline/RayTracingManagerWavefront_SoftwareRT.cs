@@ -61,7 +61,9 @@ public partial class RayTracingManagerWavefront
         List<RayTracedMesh> validInstances,
         Dictionary<SharedMeshData, MeshOffsets> offsets)
     {
-        int totalVertexCount = 0, totalTris = 0, totalBVHNodes = 0;
+        int totalVertexCount = 0;
+        int totalTris = 0;
+        totalBVHNodes = 0;
         for (int i = 0; i < sharedMeshes.Count; i++)
         {
             totalVertexCount += sharedMeshes[i].mesh.vertexCount;
@@ -145,7 +147,7 @@ public partial class RayTracingManagerWavefront
         ShaderHelper.CreateStructuredBuffer(ref BVHBuffer,          blasBVHNodes);
         ShaderHelper.CreateStructuredBuffer(ref MeshIndicesBuffer,  blasTriangleIndices);
 
-        if (classifyCompute != null)
+        /*if (classifyCompute != null)
         {
             classifyCompute.SetBuffer(0, "Triangles",       TriangleBuffer);
             classifyCompute.SetBuffer(0, "BVHNodes",        BVHBuffer);
@@ -161,7 +163,7 @@ public partial class RayTracingManagerWavefront
             reflectionCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
             reflectionCompute.SetBuffer(0, "Normals",         MeshNormalsBuffer);
             reflectionCompute.SetBuffer(0, "BVHNodes",        BVHBuffer);
-        }
+        }*/
 
         for (int i = 0; i < validInstances.Count; i++) validInstances[i].update = false;
 
@@ -262,7 +264,10 @@ public partial class RayTracingManagerWavefront
             }
         }
 
-        TLASBuilder tlasBuilder = new TLASBuilder();
+        if (tlasBuilder == null)
+        {
+            tlasBuilder = new TLASBuilder();
+        }
         tlasBuilder.Build(tlasInstances, new BvhBuildSettings
         {
             maxLeafSize = tlasMaxLeafSize,
@@ -308,7 +313,7 @@ public partial class RayTracingManagerWavefront
         ShaderHelper.UploadStructuredBuffer(ref LightTriangleIndicesBuffer, lightTriIndicesCache);
         ShaderHelper.UploadStructuredBuffer(ref LightTrianglesDataBuffer,   lightTriDataCache);
 
-        if (classifyCompute != null)
+        /*if (classifyCompute != null)
         {
             classifyCompute.SetBuffer(0, "TLASNodes",            TLASBuffer);
             classifyCompute.SetBuffer(0, "TLASRefs",             TLASRefBuffer);
@@ -352,7 +357,7 @@ public partial class RayTracingManagerWavefront
             neeCompute.SetInt("numTLASNodes",               tlasNodesCache.Length); 
             neeCompute.SetInt("TLASRootIndex",              tlasBuilder.RootIndex);
             Debug.Log(numLightSources);
-        }
+        }*/
         
         buffersHaveRealData = true;
     }

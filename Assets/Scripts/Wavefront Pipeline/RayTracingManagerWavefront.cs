@@ -261,7 +261,8 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
 
     static readonly List<Vector3> tV = new();
     static readonly List<Vector3> tN = new();
-
+    private int totalBVHNodes;
+    private TLASBuilder tlasBuilder;
     void Swap(ref RenderTexture a, ref RenderTexture b) => (a, b) = (b, a);
     
     struct PixelAccum
@@ -395,7 +396,6 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
                 GetUniqueSharedMeshesCached(validInstancesCache, uniqueMeshesCache);
                 ComputeHardwareMeshOffsetsCached(uniqueMeshesCache, offsetsCache); // hardware version
                 BuildAccelStructure(validInstancesCache);
-                BindHardwareRTBuffers();
                 tlasDirty = false;
                 lastInstanceCount = validInstancesCache.Count;
                 for (int i = 0; i < validInstancesCache.Count; i++)
@@ -413,7 +413,7 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
             }
 
             for (int i = 0; i < validInstancesCache.Count; i++) validInstancesCache[i].transformDirty = false;
-            classifyCompute.SetRayTracingAccelerationStructure(0, "_RTAS", accelStructure);
+            
             return;
         }
 
@@ -442,6 +442,7 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
         ComputeMeshOffsetsCached(uniqueMeshesCache, offsetsCache);
         BuildGlobalBLASGeometry(uniqueMeshesCache, validInstancesCache, offsetsCache);
         BuildAndUploadTLAS(validInstancesCache, offsetsCache);
+        BindBuffersToShaders();
     }
 
     void ApplyBlackHoleLUT(ComputeShader cs, RayTracedBlackHole blackHole)

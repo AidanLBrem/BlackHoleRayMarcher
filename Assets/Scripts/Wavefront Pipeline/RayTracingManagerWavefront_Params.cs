@@ -59,17 +59,27 @@ public partial class RayTracingManagerWavefront
     {
         if (classifyCompute != null)
         {
-            if (useTlas) classifyCompute.EnableKeyword("USE_TLAS");
-            else         classifyCompute.DisableKeyword("USE_TLAS");
+            if (useTlas)
+            {
+                classifyCompute.EnableKeyword("USE_TLAS");
+                neeCompute.EnableKeyword("USE_TLAS");
+            }
+            else
+            {
+                classifyCompute.DisableKeyword("USE_TLAS");
+                neeCompute.DisableKeyword("USE_TLAS");
+            }
             if (forceSoftwareRaytracing)
             {
                 classifyCompute.EnableKeyword("FORCE_SOFTWARE_RT");
                 reflectionCompute.EnableKeyword("FORCE_SOFTWARE_RT");
+                neeCompute.EnableKeyword("FORCE_SOFTWARE_RT");
             }
             else
             {
                 classifyCompute.DisableKeyword("FORCE_SOFTWARE_RT");
                 reflectionCompute.DisableKeyword("FORCE_SOFTWARE_RT");
+                neeCompute.DisableKeyword("FORCE_SOFTWARE_RT");
             }
         }
     }

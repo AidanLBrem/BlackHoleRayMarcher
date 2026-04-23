@@ -53,7 +53,8 @@ public partial class RayTracingManagerWavefront
 
         ShaderHelper.UploadStructuredBuffer(ref InstanceBuffer, tlasGpuInstances);
         
-        if (reflectionCompute     != null) reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
+        //if (neeCompute     != null) neeCompute.SetBuffer(0, "Instances", InstanceBuffer);
+        //if (neeCompute     != null) neeCompute.SetBuffer(0, "Instances", InstanceBuffer);
 
         accelStructure.Build();
     }

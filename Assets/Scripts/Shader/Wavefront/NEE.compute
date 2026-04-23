@@ -5,6 +5,12 @@
 #include "BasicStructures.hlsl"
 #include "GGX.hlsl"
 #include "RayTracing.hlsl"
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING
+#pragma multi_compile _ FORCE_SOFTWARE_RT
+#if UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING & !FORCE_SOFTWARE_RT
+#pragma require inlineraytracing
+RaytracingAccelerationStructure _RTAS;
+#endif
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 static const float SCALE = 65536.0;
@@ -104,11 +110,33 @@ void CSMain (uint3 id : SV_DispatchThreadID)
         return;
         
     }
+    HitInfo hit = (HitInfo)0;
+    hit.objectIndex = -1;
+    hit.distance = -1;
+    #if UNITY_DEVICE_SUPPORTS_INLINE_RAY_TRACING && !FORCE_SOFTWARE_RT
+    RayDesc raydesc;
+    raydesc.Origin = r.position + dirNorm * 1e-4;
+    raydesc.Direction = dirNorm;
+    raydesc.TMin = 0.0001;
+    raydesc.TMax = dist;
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> rq;
+    rq.TraceRayInline(_RTAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, raydesc);
+    rq.Proceed();
+    if (rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        hit.distance = rq.CommittedRayT();
+        uint instanceIndex = rq.CommittedInstanceIndex();
+        uint primIndex = rq.CommittedPrimitiveIndex();
+        hit.triIndex = Instances[instanceIndex].triangleOffset + primIndex;
+        hit.objectIndex = instanceIndex;
+    }
+    #else
     ray shadowRay;
     shadowRay.position = r.position + dirNorm * 1e-4;
     shadowRay.direction = dirNorm;
 
-    HitInfo hit = checkMeshCollisions(shadowRay, dist - 1e-4, true);
+    hit = checkMeshCollisions(shadowRay, dist, true);
+    #endif
     //check to see if we actually hit the light we are aiming for
     if (hit.distance <= 0 || hit.objectIndex != lightIdx) {
         

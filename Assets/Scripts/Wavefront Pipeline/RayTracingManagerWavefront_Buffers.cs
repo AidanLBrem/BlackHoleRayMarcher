@@ -111,6 +111,7 @@ public partial class RayTracingManagerWavefront
     
     void BindBuffersToShaders()
     {
+        //EnsureBuffersCreated();
         BindInitBuffers();
         BindClassifyBuffers();
         BindReflectionBuffers();
@@ -118,6 +119,7 @@ public partial class RayTracingManagerWavefront
         BindAccumulateBuffers();
         BindWavefrontBuffers();
         BindIndirectArgs();
+        BindHardwareRTBuffers();
     }
 
     void BindWavefrontBuffers()
@@ -177,19 +179,49 @@ public partial class RayTracingManagerWavefront
         classifyCompute.SetBuffer(0, "reflectionQueue",  reflectionQueueBuffer);
         classifyCompute.SetBuffer(0, "skyboxQueue",      skyboxQueueBuffer);
         classifyCompute.SetBuffer(0, "Instances",        InstanceBuffer);
-        classifyCompute.SetBuffer(0, "Normals",          MeshNormalsBuffer);
-        classifyCompute.SetBuffer(0, "TriangleIndices",  MeshIndicesBuffer);
-        classifyCompute.SetBuffer(0, "blackholes",       blackHoleBuffer);
-        classifyCompute.SetBuffer(0, "Triangles",        TriangleBuffer);
-        classifyCompute.SetBuffer(0, "BVHNodes",         BVHBuffer);
+
         classifyCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
         classifyCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
+        
         classifyCompute.SetBuffer(0, "Vertices",         MeshVerticesBuffer);
+        classifyCompute.SetBuffer(0, "Normals",          MeshNormalsBuffer);
+        classifyCompute.SetBuffer(0, "TriangleIndices",  MeshIndicesBuffer);
+        
+        classifyCompute.SetBuffer(0, "Triangles",        TriangleBuffer);
+        classifyCompute.SetBuffer(0, "blackholes",       blackHoleBuffer);
+
+        classifyCompute.SetBuffer(0, "BVHNodes",         BVHBuffer);
+        
+        classifyCompute.SetInt("numMeshes",                   tlasGpuInstances.Length);
+        classifyCompute.SetInt("numTLASNodes",                tlasNodesCache.Length);
+        classifyCompute.SetInt("numInstances",                tlasGpuInstances.Length);
+        classifyCompute.SetInt("TLASRootIndex",               tlasBuilder.RootIndex);
+
+
         classifyCompute.SetFloat("renderDistance",        renderDistance);
         classifyCompute.SetFloat("stepSize",              blackHoleSOIStepSize);
         classifyCompute.SetInt("emergencyBreakMaxSteps",  emergencyBreakMaxSteps);
         classifyCompute.SetBuffer(0, "pixelAccum",        pixelAccumBuffer);
         classifyCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
+        classifyCompute.SetInt("numBLASNodes",          totalBVHNodes);
+        classifyCompute.SetBuffer(0, "TLASNodes",            TLASBuffer);
+        classifyCompute.SetBuffer(0, "TLASRefs",             TLASRefBuffer);
+        classifyCompute.SetBuffer(0, "Instances",            InstanceBuffer);
+        classifyCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+        classifyCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
+        classifyCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
+        classifyCompute.SetInt("numMeshes",                   tlasGpuInstances.Length);
+        classifyCompute.SetInt("numTLASNodes",                tlasNodesCache.Length);
+        classifyCompute.SetInt("numInstances",                tlasGpuInstances.Length);
+        classifyCompute.SetInt("TLASRootIndex",               tlasBuilder.RootIndex);
+        classifyCompute.SetInt("numLightSources",             numLightSources);
+        classifyCompute.SetInt("BVHTestsSaturation",               BVHNodeTestSaturationValue);
+        classifyCompute.SetInt("triTestsSaturation",               triTestFullSaturationValue);
+        classifyCompute.SetInt("TLASNodeVisitsSaturation",         TLASNodeVisitsSaturationValue);
+        classifyCompute.SetInt("BLASNodeVisitsSaturation",         BLASNodeVisitsSaturationValue);
+        classifyCompute.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
+        classifyCompute.SetInt("TLASLeafRefsVisitedSaturation",    TLASLeafRefsSaturationValue);
+        classifyCompute.SetInt("u_StepsPerCollisionTest",          StepsPerCollisionTest);
 
     }
 
@@ -215,7 +247,14 @@ public partial class RayTracingManagerWavefront
         reflectionCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
         reflectionCompute.SetBuffer(0, "neeQueue",             neeQueueBuffer);
         reflectionCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-        //reflectionCompute.SetInt("numLightSources",             (int)numLightSources);
+        reflectionCompute.SetInt("numLightSources",             (int)numLightSources);
+        reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
+        reflectionCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
+        reflectionCompute.SetBuffer(0, "TLASRefs",  TLASRefBuffer);
+        reflectionCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+        reflectionCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
+        reflectionCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
+        reflectionCompute.SetInt("numLightSources",            numLightSources);
     }
 
     void BindNEEBuffers()
@@ -243,6 +282,18 @@ public partial class RayTracingManagerWavefront
         neeCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
         neeCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
         neeCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
+        neeCompute.SetInt("numMeshes",                  tlasGpuInstances.Length); 
+        neeCompute.SetInt("numInstances",               tlasGpuInstances.Length);
+        neeCompute.SetInt("numTLASNodes",               tlasNodesCache.Length); 
+        neeCompute.SetInt("TLASRootIndex",              tlasBuilder.RootIndex);
+        neeCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
+        neeCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
+        neeCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
+        neeCompute.SetInt("numLightSources",            numLightSources);
+        neeCompute.SetInt("numMeshes",                  tlasGpuInstances.Length); 
+        neeCompute.SetInt("numInstances",               tlasGpuInstances.Length);
+        neeCompute.SetInt("numTLASNodes",               tlasNodesCache.Length); 
+        neeCompute.SetInt("TLASRootIndex",              tlasBuilder.RootIndex);
     }
 
     void BindAccumulateBuffers()
@@ -298,7 +349,7 @@ public partial class RayTracingManagerWavefront
 
         // Bind the RTAS
         classifyCompute.SetRayTracingAccelerationStructure(0, "_RTAS", accelStructure);
-
+        neeCompute.SetRayTracingAccelerationStructure(0, "_RTAS", accelStructure);
         // Bind Instances and Triangles — populated by BuildHardwareGeometryBuffers
         classifyCompute.SetBuffer(0, "Instances", InstanceBuffer);
         classifyCompute.SetBuffer(0, "Triangles", TriangleBuffer);
