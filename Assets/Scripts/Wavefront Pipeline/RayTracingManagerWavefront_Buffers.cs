@@ -108,263 +108,89 @@ public partial class RayTracingManagerWavefront
             indirectArgsBuffer = new ComputeBuffer(NUM_QUEUES * 3, sizeof(uint), ComputeBufferType.IndirectArguments);
         }
     }
-    
-    void BindBuffersToShaders()
+    ComputeShader[] AllComputeShaders => new[]
+{
+    initCompute, classifyCompute, reflectionCompute, neeCompute,
+    accumulateCompute, writeIndirectArgsCompute, resetCountCompute, bucketSortCompute
+};
+
+void SetBufferAll(string name, ComputeBuffer buffer)
+{
+    foreach (var cs in AllComputeShaders)
+        if (cs != null) cs.SetBuffer(0, name, buffer);
+}
+
+void SetIntAll(string name, int value)
+{
+    foreach (var cs in AllComputeShaders)
+        if (cs != null) cs.SetInt(name, value);
+}
+
+void SetFloatAll(string name, float value)
+{
+    foreach (var cs in AllComputeShaders)
+        if (cs != null) cs.SetFloat(name, value);
+}
+
+void BindBuffersToShaders()
+{
+    // ─── Ray / control buffers ─────────────────────────────────────────────
+    SetBufferAll("main_rays",        mainRayBuffer);
+    SetBufferAll("controls",         controlQueue);
+    SetBufferAll("hit_info_buffer",  HitInfoBuffer);
+    SetBufferAll("ray_color_info",   rayColorInfoBuffer);
+    SetBufferAll("activeRayIndices", activeRayIndicesBuffer);
+    SetBufferAll("activeRayCount",   activeRayCountBuffer);
+    SetBufferAll("pixelAccum",       pixelAccumBuffer);
+    SetBufferAll("pixelForSlot",     pixelForSlotBuffer);
+    SetBufferAll("neeQueue",         neeQueueBuffer);
+    SetBufferAll("reflectionQueue",  reflectionQueueBuffer);
+    SetBufferAll("skyboxQueue",      skyboxQueueBuffer);
+    SetBufferAll("indirectArgs",     indirectArgsBuffer);
+    SetBufferAll("blackholes",       blackHoleBuffer);
+
+    // ─── Geometry buffers ──────────────────────────────────────────────────
+    SetBufferAll("Instances",        InstanceBuffer);
+    SetBufferAll("Triangles",        TriangleBuffer);
+    SetBufferAll("TriangleIndices",  MeshIndicesBuffer);
+    SetBufferAll("Normals",          MeshNormalsBuffer);
+    SetBufferAll("Vertices",         MeshVerticesBuffer);
+    SetBufferAll("BVHNodes",         BVHBuffer);
+    SetBufferAll("TLASNodes",        TLASBuffer);
+    SetBufferAll("TLASRefs",         TLASRefBuffer);
+
+    // ─── Light buffers ─────────────────────────────────────────────────────
+    SetBufferAll("LightSources",         LightSourceBuffer);
+    SetBufferAll("LightTriangleIndices", LightTriangleIndicesBuffer);
+    SetBufferAll("LightTrianglesData",   LightTrianglesDataBuffer);
+
+    // ─── Ints ──────────────────────────────────────────────────────────────
+    SetIntAll("numMeshes",                          tlasGpuInstances.Length);
+    SetIntAll("numInstances",                       tlasGpuInstances.Length);
+    SetIntAll("numTLASNodes",                       tlasNodesCache.Length);
+    SetIntAll("TLASRootIndex",                      tlasBuilder.RootIndex);
+    SetIntAll("numLightSources",                    numLightSources);
+    SetIntAll("numBLASNodes",                       totalBVHNodes);
+    SetIntAll("NUM_QUEUES",                         NUM_QUEUES);
+    SetIntAll("emergencyBreakMaxSteps",             emergencyBreakMaxSteps);
+    SetIntAll("BVHTestsSaturation",                 BVHNodeTestSaturationValue);
+    SetIntAll("triTestsSaturation",                 triTestFullSaturationValue);
+    SetIntAll("TLASNodeVisitsSaturation",           TLASNodeVisitsSaturationValue);
+    SetIntAll("BLASNodeVisitsSaturation",           BLASNodeVisitsSaturationValue);
+    SetIntAll("InstanceBLASTraversalsSaturation",   InstanceBLASTraversalsSaturationValue);
+    SetIntAll("TLASLeafRefsVisitedSaturation",      TLASLeafRefsSaturationValue);
+    SetIntAll("u_StepsPerCollisionTest",            StepsPerCollisionTest);
+
+    // ─── Floats ────────────────────────────────────────────────────────────
+    SetFloatAll("renderDistance", renderDistance);
+    SetFloatAll("stepSize",       blackHoleSOIStepSize);
+
+    // ─── Hardware RT only ──────────────────────────────────────────────────
+    bool useHardwareRT = SystemInfo.supportsRayTracing && !forceSoftwareRaytracing;
+    if (useHardwareRT && classifyCompute != null)
     {
-        //EnsureBuffersCreated();
-        BindInitBuffers();
-        BindClassifyBuffers();
-        BindReflectionBuffers();
-        BindNEEBuffers();
-        BindAccumulateBuffers();
-        BindWavefrontBuffers();
-        BindIndirectArgs();
-        BindHardwareRTBuffers();
-    }
-
-    void BindWavefrontBuffers()
-    {
-
-        if (writeIndirectArgsCompute != null)
-        {
-            writeIndirectArgsCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-            writeIndirectArgsCompute.SetBuffer(0, "indirectArgs",   indirectArgsBuffer);
-        }
-
-        if (resetCountCompute != null)
-            resetCountCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-        
-        if (reflectionCompute != null)
-        {
-            reflectionCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-            reflectionCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
-        }
-
-        if (classifyCompute != null)
-        {
-            classifyCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-            classifyCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
-        }
-
-        if (neeCompute != null)
-        {
-            neeCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-            neeCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
-        }
-    }
-
-    void BindInitBuffers()
-    {
-        if (initCompute == null) return;
-
-        initCompute.SetBuffer(0, "controls",         controlQueue);
-        initCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
-        initCompute.SetBuffer(0, "ray_color_info",   rayColorInfoBuffer);
-        initCompute.SetBuffer(0, "hit_info_buffer",  HitInfoBuffer);
-        initCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-        initCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
-        initCompute.SetBuffer(0, "pixelAccum",       pixelAccumBuffer);
-        initCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
-    }
-
-    void BindClassifyBuffers()
-    {
-        if (classifyCompute == null) return;
-
-        classifyCompute.SetBuffer(0, "controls",         controlQueue);
-        classifyCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
-        classifyCompute.SetBuffer(0, "hit_infos",        HitInfoBuffer);
-        classifyCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-        classifyCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
-        classifyCompute.SetBuffer(0, "reflectionQueue",  reflectionQueueBuffer);
-        classifyCompute.SetBuffer(0, "skyboxQueue",      skyboxQueueBuffer);
-        classifyCompute.SetBuffer(0, "Instances",        InstanceBuffer);
-
-        classifyCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
-        classifyCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
-        
-        classifyCompute.SetBuffer(0, "Vertices",         MeshVerticesBuffer);
-        classifyCompute.SetBuffer(0, "Normals",          MeshNormalsBuffer);
-        classifyCompute.SetBuffer(0, "TriangleIndices",  MeshIndicesBuffer);
-        
-        classifyCompute.SetBuffer(0, "Triangles",        TriangleBuffer);
-        classifyCompute.SetBuffer(0, "blackholes",       blackHoleBuffer);
-
-        classifyCompute.SetBuffer(0, "BVHNodes",         BVHBuffer);
-        
-        classifyCompute.SetInt("numMeshes",                   tlasGpuInstances.Length);
-        classifyCompute.SetInt("numTLASNodes",                tlasNodesCache.Length);
-        classifyCompute.SetInt("numInstances",                tlasGpuInstances.Length);
-        classifyCompute.SetInt("TLASRootIndex",               tlasBuilder.RootIndex);
-
-
-        classifyCompute.SetFloat("renderDistance",        renderDistance);
-        classifyCompute.SetFloat("stepSize",              blackHoleSOIStepSize);
-        classifyCompute.SetInt("emergencyBreakMaxSteps",  emergencyBreakMaxSteps);
-        classifyCompute.SetBuffer(0, "pixelAccum",        pixelAccumBuffer);
-        classifyCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
-        classifyCompute.SetInt("numBLASNodes",          totalBVHNodes);
-        classifyCompute.SetBuffer(0, "TLASNodes",            TLASBuffer);
-        classifyCompute.SetBuffer(0, "TLASRefs",             TLASRefBuffer);
-        classifyCompute.SetBuffer(0, "Instances",            InstanceBuffer);
-        classifyCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-        classifyCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
-        classifyCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
-        classifyCompute.SetInt("numMeshes",                   tlasGpuInstances.Length);
-        classifyCompute.SetInt("numTLASNodes",                tlasNodesCache.Length);
-        classifyCompute.SetInt("numInstances",                tlasGpuInstances.Length);
-        classifyCompute.SetInt("TLASRootIndex",               tlasBuilder.RootIndex);
-        classifyCompute.SetInt("numLightSources",             numLightSources);
-        classifyCompute.SetInt("BVHTestsSaturation",               BVHNodeTestSaturationValue);
-        classifyCompute.SetInt("triTestsSaturation",               triTestFullSaturationValue);
-        classifyCompute.SetInt("TLASNodeVisitsSaturation",         TLASNodeVisitsSaturationValue);
-        classifyCompute.SetInt("BLASNodeVisitsSaturation",         BLASNodeVisitsSaturationValue);
-        classifyCompute.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
-        classifyCompute.SetInt("TLASLeafRefsVisitedSaturation",    TLASLeafRefsSaturationValue);
-        classifyCompute.SetInt("u_StepsPerCollisionTest",          StepsPerCollisionTest);
-
-    }
-
-    void BindReflectionBuffers()
-    {
-        if (reflectionCompute == null) return;
-
-        reflectionCompute.SetBuffer(0, "controls",         controlQueue);
-        reflectionCompute.SetBuffer(0, "main_rays",        mainRayBuffer);
-        reflectionCompute.SetBuffer(0, "hit_info_buffer",  HitInfoBuffer);
-        reflectionCompute.SetBuffer(0, "ray_color_info",   rayColorInfoBuffer);
-        reflectionCompute.SetBuffer(0, "pixelAccum",       pixelAccumBuffer);
-        reflectionCompute.SetBuffer(0, "reflectionQueue",  reflectionQueueBuffer);
-        reflectionCompute.SetBuffer(0, "activeRayIndices", activeRayIndicesBuffer);
-        reflectionCompute.SetBuffer(0, "activeRayCount",   activeRayCountBuffer);
-        reflectionCompute.SetBuffer(0, "Instances",        InstanceBuffer);
-        reflectionCompute.SetBuffer(0, "Triangles",        TriangleBuffer);
-        reflectionCompute.SetBuffer(0, "TriangleIndices",  MeshIndicesBuffer);
-        reflectionCompute.SetBuffer(0, "Normals",          MeshNormalsBuffer);
-        reflectionCompute.SetBuffer(0, "BVHNodes",         BVHBuffer);
-        reflectionCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
-        reflectionCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
-        reflectionCompute.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
-        reflectionCompute.SetBuffer(0, "neeQueue",             neeQueueBuffer);
-        reflectionCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-        reflectionCompute.SetInt("numLightSources",             (int)numLightSources);
-        reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
-        reflectionCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
-        reflectionCompute.SetBuffer(0, "TLASRefs",  TLASRefBuffer);
-        reflectionCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-        reflectionCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
-        reflectionCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
-        reflectionCompute.SetInt("numLightSources",            numLightSources);
-    }
-
-    void BindNEEBuffers()
-    {
-        if (neeCompute == null) return;
-        neeCompute.SetBuffer(0, "neeQueue",             neeQueueBuffer);
-        neeCompute.SetBuffer(0, "activeRayCount",       activeRayCountBuffer);
-        neeCompute.SetBuffer(0, "controls",             controlQueue);
-        neeCompute.SetBuffer(0, "main_rays",            mainRayBuffer);
-        neeCompute.SetBuffer(0, "hit_info_buffer",      HitInfoBuffer);
-        neeCompute.SetBuffer(0, "ray_color_info",       rayColorInfoBuffer);
-        neeCompute.SetBuffer(0, "Instances",            InstanceBuffer);
-        neeCompute.SetBuffer(0, "Triangles",            TriangleBuffer);
-        neeCompute.SetBuffer(0, "TriangleIndices",      MeshIndicesBuffer);
-        neeCompute.SetBuffer(0, "Normals",              MeshNormalsBuffer);
-        neeCompute.SetBuffer(0, "Vertices",             MeshVerticesBuffer);
-        neeCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-        neeCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
-        neeCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
-        neeCompute.SetBuffer(0, "Instances",        InstanceBuffer);
-        neeCompute.SetBuffer(0, "Triangles",        TriangleBuffer);
-        neeCompute.SetBuffer(0, "TriangleIndices",  MeshIndicesBuffer);
-        neeCompute.SetBuffer(0, "Normals",          MeshNormalsBuffer);
-        neeCompute.SetBuffer(0, "BVHNodes",         BVHBuffer);
-        neeCompute.SetBuffer(0, "TLASNodes",        TLASBuffer);
-        neeCompute.SetBuffer(0, "TLASRefs",         TLASRefBuffer);
-        neeCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
-        neeCompute.SetInt("numMeshes",                  tlasGpuInstances.Length); 
-        neeCompute.SetInt("numInstances",               tlasGpuInstances.Length);
-        neeCompute.SetInt("numTLASNodes",               tlasNodesCache.Length); 
-        neeCompute.SetInt("TLASRootIndex",              tlasBuilder.RootIndex);
-        neeCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-        neeCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
-        neeCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
-        neeCompute.SetInt("numLightSources",            numLightSources);
-        neeCompute.SetInt("numMeshes",                  tlasGpuInstances.Length); 
-        neeCompute.SetInt("numInstances",               tlasGpuInstances.Length);
-        neeCompute.SetInt("numTLASNodes",               tlasNodesCache.Length); 
-        neeCompute.SetInt("TLASRootIndex",              tlasBuilder.RootIndex);
-    }
-
-    void BindAccumulateBuffers()
-    {
-        if (accumulateCompute == null) return;
-        accumulateCompute.SetBuffer(0, "pixelAccum", pixelAccumBuffer);
-    }
-    void RebindPixelForSlotBuffer()
-    {
-        initCompute?.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
-        classifyCompute?.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
-        reflectionCompute?.SetBuffer(0, "pixelForSlot", pixelForSlotBuffer);
-    }
-    
-
-    void BindIndirectArgs()
-    {
-        if (writeIndirectArgsCompute == null) return;
-        writeIndirectArgsCompute.SetInt("NUM_QUEUES",           NUM_QUEUES);
-        writeIndirectArgsCompute.SetBuffer(0, "activeRayCount", activeRayCountBuffer);
-        writeIndirectArgsCompute.SetBuffer(0, "indirectArgs",   indirectArgsBuffer);
-    }
-
-    // Rebinds main_rays and activeRayIndices to all shaders after a buffer swap.
-    void RebindRayBuffers()
-    {
-        classifyCompute?.SetBuffer(0,    "activeRayIndices", activeRayIndicesBuffer);
-        classifyCompute?.SetBuffer(0,    "main_rays",        mainRayBuffer);
-        reflectionCompute?.SetBuffer(0,  "activeRayIndices", activeRayIndicesBuffer);
-        reflectionCompute?.SetBuffer(0,  "main_rays",        mainRayBuffer);   
-        neeCompute?.SetBuffer(0, "main_rays", mainRayBuffer);
-        neeCompute?.SetBuffer(0,    "activeRayIndices", activeRayIndicesBuffer);
-        initCompute?.SetBuffer(0,        "main_rays",        mainRayBuffer);
-    }
-    
-    void RebindControlBuffer()
-    {
-        initCompute?.SetBuffer(0, "controls", controlQueue);
-        classifyCompute?.SetBuffer(0, "controls", controlQueue);
-        reflectionCompute?.SetBuffer(0, "controls", controlQueue);
-        neeCompute?.SetBuffer(0, "controls", controlQueue);
-    }
-
-    void RebindRayColorInfoBuffer()
-    {
-        initCompute?.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
-        reflectionCompute?.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
-        neeCompute?.SetBuffer(0, "ray_color_info", rayColorInfoBuffer);
-    }
-    void BindHardwareRTBuffers()
-    {
-        if (classifyCompute == null) return;
-
-        // Bind the RTAS
         classifyCompute.SetRayTracingAccelerationStructure(0, "_RTAS", accelStructure);
         neeCompute.SetRayTracingAccelerationStructure(0, "_RTAS", accelStructure);
-        // Bind Instances and Triangles — populated by BuildHardwareGeometryBuffers
-        classifyCompute.SetBuffer(0, "Instances", InstanceBuffer);
-        classifyCompute.SetBuffer(0, "Triangles", TriangleBuffer);
-        classifyCompute.SetBuffer(0, "TriangleIndices", MeshIndicesBuffer);
-        classifyCompute.SetBuffer(0, "Normals", MeshNormalsBuffer);
-        classifyCompute.SetBuffer(0, "Vertices", MeshVerticesBuffer);
-
-        // Safety — clear BVH buffers so software path data can't bleed through
-        if (BVHBuffer != null)
-        {
-            uint[] zeros = new uint[BVHBuffer.count * (BVHBuffer.stride / sizeof(uint))];
-            BVHBuffer.SetData(zeros);
-        }
-
-        classifyCompute.SetInt("numMeshes", tlasGpuInstances.Length);
-        classifyCompute.SetInt("numInstances", tlasGpuInstances.Length);
     }
+}
 }

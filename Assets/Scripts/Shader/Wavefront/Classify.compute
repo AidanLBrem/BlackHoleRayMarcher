@@ -17,7 +17,6 @@
 #define BH_WILL_ENTER_SHELL  (1u << 2)
 #define BH_SAFE_TO_EXIT      (1u << 3)
 
-RWStructuredBuffer<HitInfo> hit_infos;
 
 RWStructuredBuffer<uint>    reflectionQueue;
 RWStructuredBuffer<uint>    skyboxQueue;
@@ -286,7 +285,7 @@ void Main(uint3 id : SV_DispatchThreadID)
             if (result == GEODISC_HIT_REFLECTION)
             {
                 main_rays[slot] = marchedRay;
-                hit_infos[slot] = marchedHit;
+                hit_info_buffer[slot] = marchedHit;
                 uint outSlot;
                 InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
                 reflectionQueue[outSlot] = slot;
@@ -333,7 +332,7 @@ void Main(uint3 id : SV_DispatchThreadID)
                 toSend.position  = origin + direction * info.distance;
                 toSend.direction = direction;
                 main_rays[slot]  = toSend;
-                hit_infos[slot]  = info;
+                hit_info_buffer[slot]  = info;
 
                 uint outSlot;
                 InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
@@ -424,7 +423,7 @@ void Main(uint3 id : SV_DispatchThreadID)
             if (result == GEODISC_HIT_REFLECTION)
             {
                 main_rays[slot] = marchedRay;
-                hit_infos[slot] = marchedHit;
+                hit_info_buffer[slot] = marchedHit;
 
                 uint outSlot;
                 InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);
@@ -448,7 +447,7 @@ void Main(uint3 id : SV_DispatchThreadID)
             if (linearResult == LINEAR_HIT_GEOMETRY)
             {
                 main_rays[slot] = r;
-                hit_infos[slot] = hit;
+                hit_info_buffer[slot] = hit;
 
                 uint outSlot;
                 InterlockedAdd(activeRayCount[REFLECTION_QUEUE], 1, outSlot);

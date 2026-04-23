@@ -442,7 +442,6 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
         ComputeMeshOffsetsCached(uniqueMeshesCache, offsetsCache);
         BuildGlobalBLASGeometry(uniqueMeshesCache, validInstancesCache, offsetsCache);
         BuildAndUploadTLAS(validInstancesCache, offsetsCache);
-        BindBuffersToShaders();
     }
 
     void ApplyBlackHoleLUT(ComputeShader cs, RayTracedBlackHole blackHole)
