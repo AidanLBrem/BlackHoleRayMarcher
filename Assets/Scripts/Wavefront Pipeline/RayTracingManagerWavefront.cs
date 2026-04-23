@@ -262,7 +262,7 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
     static readonly List<Vector3> tV = new();
     static readonly List<Vector3> tN = new();
     private int totalBVHNodes;
-    private TLASBuilder tlasBuilder;
+    private TLASBuilder tlasBuilder = new TLASBuilder();
     void Swap(ref RenderTexture a, ref RenderTexture b) => (a, b) = (b, a);
     
     struct PixelAccum
@@ -393,13 +393,16 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
 
             if (tlasDirty || anyMeshUpdated || instanceCountChanged)
             {
+                Debug.Log("tlasDirty: " + tlasDirty + " anyMeshUpdated " + anyMeshUpdated + " instanceCountChanged " + instanceCountChanged);
                 GetUniqueSharedMeshesCached(validInstancesCache, uniqueMeshesCache);
                 ComputeHardwareMeshOffsetsCached(uniqueMeshesCache, offsetsCache); // hardware version
                 BuildAccelStructure(validInstancesCache);
+                BuildInstancesAndLights(validInstancesCache, offsetsCache);
                 tlasDirty = false;
                 lastInstanceCount = validInstancesCache.Count;
                 for (int i = 0; i < validInstancesCache.Count; i++)
                     validInstancesCache[i].update = false;
+
             }
             else if (anyTransformDirty)
             {
@@ -409,7 +412,7 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
                         accelStructureInstanceIDs[i],
                         lastBuiltMeshOrderList[i].transform.localToWorldMatrix);
 
-                accelStructure.Build(); // incremental update
+                //accelStructure.Build(); // incremental update
             }
 
             for (int i = 0; i < validInstancesCache.Count; i++) validInstancesCache[i].transformDirty = false;
@@ -442,6 +445,8 @@ public partial class RayTracingManagerWavefront : MonoBehaviour
         ComputeMeshOffsetsCached(uniqueMeshesCache, offsetsCache);
         BuildGlobalBLASGeometry(uniqueMeshesCache, validInstancesCache, offsetsCache);
         BuildAndUploadTLAS(validInstancesCache, offsetsCache);
+        BuildInstancesAndLights(validInstancesCache, offsetsCache);
+
     }
 
     void ApplyBlackHoleLUT(ComputeShader cs, RayTracedBlackHole blackHole)

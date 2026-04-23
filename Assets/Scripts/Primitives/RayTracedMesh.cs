@@ -34,6 +34,7 @@ public class RayTracedMesh : MonoBehaviour
 
     void OnValidate()
     {
+        Debug.Log("OnValidate!");
         if (rebuildBVH)
         {
             SharedMeshRegistry.DeleteKey(sharedMesh.mesh);

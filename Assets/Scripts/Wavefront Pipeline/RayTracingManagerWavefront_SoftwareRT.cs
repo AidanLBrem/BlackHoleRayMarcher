@@ -177,116 +177,29 @@ public partial class RayTracingManagerWavefront
     {
         if (!tlasDirty && TLASBuffer != null && buffersHaveRealData) return;
         tlasDirty = false;
+ 
 
-        int count = meshObjects.Count;
-
-        if (tlasInstances.Length != count) tlasInstances = new BvhInstance[count];
-        if (tlasGpuInstances.Length != count) tlasGpuInstances = new MeshStruct[count];
-        if (tlasLightSources.Length != count) tlasLightSources = new GPULightSource[count];
-
-        lightTriIndicesCache.Clear();
-        lightTriDataCache.Clear();
-        numLightSources = 0;
-        for (int i = 0; i < count; i++) meshObjects[i].transformDirty = false;
-
-        for (int i = 0; i < count; i++)
-        {
-            RayTracedMesh meshObj = meshObjects[i];
-            MeshOffsets off = offsets[meshObj.sharedMesh];
-            int localRootIndex = meshObj.sharedMesh.blas.RootIndex;
-            Bounds localRootBounds = meshObj.sharedMesh.blas.Nodes[localRootIndex].bounds;
-            Bounds worldBounds = TransformBoundsToWorld(localRootBounds, meshObj.transform);
-            int globalBlasRootIndex = off.rootNodeIndex;
-
-            tlasInstances[i] = new BvhInstance
-            {
-                blasIndex = i,
-                blasRootIndex = globalBlasRootIndex,
-                localToWorld = meshObj.transform.localToWorldMatrix,
-                worldToLocal = meshObj.transform.worldToLocalMatrix,
-                localBounds = localRootBounds,
-                worldBounds = worldBounds,
-                materialIndex = i
-            };
-
-            tlasGpuInstances[i] = new MeshStruct
-            {
-                localToWorldMatrix = meshObj.transform.localToWorldMatrix,
-                worldToLocalMatrix = meshObj.transform.worldToLocalMatrix,
-                material = meshObj.material,
-                firstBVHNodeIndex = (uint)globalBlasRootIndex,
-                triangleOffset = (uint)off.triangleOffset,
-                AABBLeftX  = worldBounds.min.x,
-                AABBLeftY  = worldBounds.min.y,
-                AABBLeftZ  = worldBounds.min.z,
-                AABBRightX = worldBounds.max.x,
-                AABBRightY = worldBounds.max.y,
-                AABBRightZ = worldBounds.max.z,
-            };
-
-            if (meshObj.material.emissiveStrength > 0)
-            {
-                Matrix4x4 l2w = meshObj.transform.localToWorldMatrix;
-                SharedMeshData sm = meshObj.sharedMesh;
-                int triStart = lightTriIndicesCache.Count;
-                float totalArea = 0f;
-                int[] order = sm.blas.PrimitiveRefs;
-
-                for (int t = 0; t < order.Length; t++)
-                {
-                    ref buildTri bt = ref sm.buildTriangles[order[t]];
-                    Vector3 worldAB = l2w.MultiplyVector(bt.posB - bt.posA);
-                    Vector3 worldAC = l2w.MultiplyVector(bt.posC - bt.posA);
-                    Vector3 worldCross = Vector3.Cross(worldAB, worldAC);
-                    float area = worldCross.magnitude * 0.5f;
-                    totalArea += area;
-
-                    int globalTriIndex = off.triangleOffset + order[t];
-                    lightTriIndicesCache.Add(globalTriIndex);
-
-                    while (lightTriDataCache.Count <= globalTriIndex)
-                        lightTriDataCache.Add(new GPULightTriangleData());
-
-                    lightTriDataCache[globalTriIndex] = new GPULightTriangleData
-                    {
-                        worldSpaceArea = area,
-                        worldNormal = worldCross.magnitude > 1e-10f ? worldCross.normalized : Vector3.up
-                    };
-                }
-
-                tlasLightSources[numLightSources++] = new GPULightSource
-                {
-                    instanceIndex = i,
-                    totalArea = totalArea,
-                    triStart = triStart,
-                    triCount = order.Length
-                };
-            }
-        }
-
-        if (tlasBuilder == null)
-        {
-            tlasBuilder = new TLASBuilder();
-        }
+        // Software-only: build CPU-side TLAS BVH and upload TLASBuffer / TLASRefBuffer
+        if (tlasBuilder == null) tlasBuilder = new TLASBuilder();
         tlasBuilder.Build(tlasInstances, new BvhBuildSettings
         {
             maxLeafSize = tlasMaxLeafSize,
-            maxDepth = tlasMaxDepth,
-            numBins = tlasNumBins
+            maxDepth    = tlasMaxDepth,
+            numBins     = tlasNumBins
         });
-
+ 
         if (tlasNodesCache.Length != tlasBuilder.Nodes.Length)
             tlasNodesCache = new GPUBVHNode[tlasBuilder.Nodes.Length];
-
+ 
         for (int i = 0; i < tlasBuilder.Nodes.Length; i++)
         {
             BvhNode n = tlasBuilder.Nodes[i];
             tlasNodesCache[i] = new GPUBVHNode
             {
-                left = n.leftChild,
-                right = n.rightChild,
+                left       = n.leftChild,
+                right      = n.rightChild,
                 firstIndex = (uint)n.start,
-                count = (uint)n.count,
+                count      = (uint)n.count,
                 AABBLeftX  = n.bounds.min.x,
                 AABBLeftY  = n.bounds.min.y,
                 AABBLeftZ  = n.bounds.min.z,
@@ -295,70 +208,120 @@ public partial class RayTracingManagerWavefront
                 AABBRightZ = n.bounds.max.z,
             };
         }
-
+ 
         if (tlasRefsCache.Length != tlasBuilder.PrimitiveRefs.Length)
             tlasRefsCache = new uint[tlasBuilder.PrimitiveRefs.Length];
-
+ 
         for (int i = 0; i < tlasRefsCache.Length; i++)
             tlasRefsCache[i] = (uint)tlasBuilder.PrimitiveRefs[i];
-
+ 
+        ShaderHelper.UploadStructuredBuffer(ref TLASBuffer,    tlasNodesCache);
+        ShaderHelper.UploadStructuredBuffer(ref TLASRefBuffer, tlasRefsCache);
+ 
+        buffersHaveRealData = true;
+    }
+    
+    void BuildInstancesAndLights(
+        List<RayTracedMesh> meshObjects,
+        Dictionary<SharedMeshData, MeshOffsets> offsets)
+    {
+        int count = meshObjects.Count;
+ 
+        if (tlasGpuInstances.Length != count) tlasGpuInstances  = new MeshStruct[count];
+        if (tlasInstances.Length    != count) tlasInstances      = new BvhInstance[count];
+        if (tlasLightSources.Length != count) tlasLightSources   = new GPULightSource[count];
+ 
+        lightTriIndicesCache.Clear();
+        lightTriDataCache.Clear();
+        numLightSources = 0;
+ 
+        for (int i = 0; i < count; i++) meshObjects[i].transformDirty = false;
+ 
+        for (int i = 0; i < count; i++)
+        {
+            RayTracedMesh  meshObj = meshObjects[i];
+            MeshOffsets    off     = offsets[meshObj.sharedMesh];
+            int            localRootIndex   = meshObj.sharedMesh.blas.RootIndex;
+            Bounds         localRootBounds  = meshObj.sharedMesh.blas.Nodes[localRootIndex].bounds;
+            Bounds         worldBounds      = TransformBoundsToWorld(localRootBounds, meshObj.transform);
+            int            globalBlasRootIndex = off.rootNodeIndex;
+ 
+            tlasInstances[i] = new BvhInstance
+            {
+                blasIndex      = i,
+                blasRootIndex  = globalBlasRootIndex,
+                localToWorld   = meshObj.transform.localToWorldMatrix,
+                worldToLocal   = meshObj.transform.worldToLocalMatrix,
+                localBounds    = localRootBounds,
+                worldBounds    = worldBounds,
+                materialIndex  = i
+            };
+ 
+            tlasGpuInstances[i] = new MeshStruct
+            {
+                localToWorldMatrix = meshObj.transform.localToWorldMatrix,
+                worldToLocalMatrix = meshObj.transform.worldToLocalMatrix,
+                material           = meshObj.material,
+                firstBVHNodeIndex  = (uint)globalBlasRootIndex,
+                triangleOffset     = (uint)off.triangleOffset,
+                AABBLeftX  = worldBounds.min.x,
+                AABBLeftY  = worldBounds.min.y,
+                AABBLeftZ  = worldBounds.min.z,
+                AABBRightX = worldBounds.max.x,
+                AABBRightY = worldBounds.max.y,
+                AABBRightZ = worldBounds.max.z,
+            };
+ 
+            if (meshObj.material.emissiveStrength > 0)
+            {
+                Matrix4x4      l2w      = meshObj.transform.localToWorldMatrix;
+                SharedMeshData sm       = meshObj.sharedMesh;
+                int            triStart = lightTriIndicesCache.Count;
+                float          totalArea = 0f;
+                int[]          order    = sm.blas.PrimitiveRefs;
+ 
+                for (int t = 0; t < order.Length; t++)
+                {
+                    ref buildTri bt      = ref sm.buildTriangles[order[t]];
+                    Vector3      worldAB = l2w.MultiplyVector(bt.posB - bt.posA);
+                    Vector3      worldAC = l2w.MultiplyVector(bt.posC - bt.posA);
+                    Vector3      worldCross = Vector3.Cross(worldAB, worldAC);
+                    float        area    = worldCross.magnitude * 0.5f;
+                    totalArea += area;
+ 
+                    int globalTriIndex = off.triangleOffset + order[t];
+                    lightTriIndicesCache.Add(globalTriIndex);
+ 
+                    while (lightTriDataCache.Count <= globalTriIndex)
+                        lightTriDataCache.Add(new GPULightTriangleData());
+ 
+                    lightTriDataCache[globalTriIndex] = new GPULightTriangleData
+                    {
+                        worldSpaceArea = area,
+                        worldNormal    = worldCross.magnitude > 1e-10f
+                            ? worldCross.normalized
+                            : Vector3.up
+                    };
+                }
+ 
+                tlasLightSources[numLightSources++] = new GPULightSource
+                {
+                    instanceIndex = i,
+                    totalArea     = totalArea,
+                    triStart      = triStart,
+                    triCount      = order.Length
+                };
+            }
+        }
+ 
+        // Upload the shared buffers — both paths need these
         if (lightTriDataCache.Count == 0) lightTriDataCache.Add(new GPULightTriangleData());
-
+ 
         ShaderHelper.CreateStructuredBuffer<GPULightSource>(ref LightSourceBuffer, Mathf.Max(1, numLightSources));
         if (numLightSources > 0) LightSourceBuffer.SetData(tlasLightSources, 0, 0, numLightSources);
-
-        ShaderHelper.UploadStructuredBuffer(ref TLASBuffer,     tlasNodesCache);
-        ShaderHelper.UploadStructuredBuffer(ref TLASRefBuffer,  tlasRefsCache);
-        ShaderHelper.UploadStructuredBuffer(ref InstanceBuffer, tlasGpuInstances);
-        ShaderHelper.UploadStructuredBuffer(ref LightTriangleIndicesBuffer, lightTriIndicesCache);
-        ShaderHelper.UploadStructuredBuffer(ref LightTrianglesDataBuffer,   lightTriDataCache);
-
-        /*if (classifyCompute != null)
-        {
-            classifyCompute.SetBuffer(0, "TLASNodes",            TLASBuffer);
-            classifyCompute.SetBuffer(0, "TLASRefs",             TLASRefBuffer);
-            classifyCompute.SetBuffer(0, "Instances",            InstanceBuffer);
-            classifyCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-            classifyCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
-            classifyCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
-            classifyCompute.SetInt("numMeshes",                   tlasGpuInstances.Length);
-            classifyCompute.SetInt("numTLASNodes",                tlasNodesCache.Length);
-            classifyCompute.SetInt("numInstances",                tlasGpuInstances.Length);
-            classifyCompute.SetInt("TLASRootIndex",               tlasBuilder.RootIndex);
-            classifyCompute.SetInt("numLightSources",             numLightSources);
-            classifyCompute.SetInt("BVHTestsSaturation",               BVHNodeTestSaturationValue);
-            classifyCompute.SetInt("triTestsSaturation",               triTestFullSaturationValue);
-            classifyCompute.SetInt("TLASNodeVisitsSaturation",         TLASNodeVisitsSaturationValue);
-            classifyCompute.SetInt("BLASNodeVisitsSaturation",         BLASNodeVisitsSaturationValue);
-            classifyCompute.SetInt("InstanceBLASTraversalsSaturation", InstanceBLASTraversalsSaturationValue);
-            classifyCompute.SetInt("TLASLeafRefsVisitedSaturation",    TLASLeafRefsSaturationValue);
-            classifyCompute.SetInt("u_StepsPerCollisionTest",          StepsPerCollisionTest);
-        }
-
-        if (reflectionCompute != null)
-        {
-            reflectionCompute.SetBuffer(0, "Instances", InstanceBuffer);
-            reflectionCompute.SetBuffer(0, "TLASNodes", TLASBuffer);
-            reflectionCompute.SetBuffer(0, "TLASRefs",  TLASRefBuffer);
-            reflectionCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-            reflectionCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
-            reflectionCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
-            reflectionCompute.SetInt("numLightSources",            numLightSources);
-        }
-
-        if (neeCompute != null)
-        {
-            neeCompute.SetBuffer(0, "LightSources",         LightSourceBuffer);
-            neeCompute.SetBuffer(0, "LightTriangleIndices", LightTriangleIndicesBuffer);
-            neeCompute.SetBuffer(0, "LightTrianglesData",   LightTrianglesDataBuffer);
-            neeCompute.SetInt("numLightSources",            numLightSources);
-            neeCompute.SetInt("numMeshes",                  tlasGpuInstances.Length); 
-            neeCompute.SetInt("numInstances",               tlasGpuInstances.Length);
-            neeCompute.SetInt("numTLASNodes",               tlasNodesCache.Length); 
-            neeCompute.SetInt("TLASRootIndex",              tlasBuilder.RootIndex);
-            Debug.Log(numLightSources);
-        }*/
-        
-        buffersHaveRealData = true;
+ 
+        ShaderHelper.UploadStructuredBuffer(ref InstanceBuffer,              tlasGpuInstances);
+        ShaderHelper.UploadStructuredBuffer(ref LightTriangleIndicesBuffer,  lightTriIndicesCache);
+        ShaderHelper.UploadStructuredBuffer(ref LightTrianglesDataBuffer,    lightTriDataCache);
     }
 }

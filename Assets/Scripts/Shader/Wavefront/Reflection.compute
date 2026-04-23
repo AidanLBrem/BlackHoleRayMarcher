@@ -17,6 +17,7 @@ StructuredBuffer<uint>         reflectionQueue;
 StructuredBuffer<uint>         pixelForSlot;
 RWStructuredBuffer<uint> neeQueue;
 uint numLightSources;
+int numBounces;
 struct PixelAccum
 {
     uint r;

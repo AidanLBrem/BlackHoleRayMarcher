@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 using UnityEngine.Profiling;
@@ -109,12 +110,8 @@ public partial class RayTracingManagerWavefront
     }
     void InitFrame()
     {
-        if (!startupDone)
-        {
-            EnsureMaterialsCreated();
-            EnsureBuffersCreated();
-            startupDone = true;
-        }
+        EnsureMaterialsCreated();
+        EnsureBuffersCreated();
 
         List<RayTracedMesh> meshObjects = RayTracedMesh.All;
         if (AnyTransformDirty(meshObjects)) tlasDirty = true;
@@ -137,11 +134,12 @@ public partial class RayTracingManagerWavefront
             FilterMode.Bilinear, ShaderHelper.RGBA_SFloat, "cleanAccumBuffer");
 
         AllocateAccelerationBuffers();
+        UpdateRayTracingParams();  
         BindBuffersToShaders();
         allocateBlackHoleBuffer();
         UpdateAtmosphereParams();
         UpdateCameraParams(Camera.current);
-        UpdateRayTracingParams();
+        //UpdateRayTracingParams();
     }
     void OnRenderImage(RenderTexture source, RenderTexture target)
     {
@@ -190,6 +188,7 @@ public partial class RayTracingManagerWavefront
             //for (int ray = 0; ray < raysPerPixel; ray++)
             //{
                 initCompute.SetInt("raysPerPixel", raysPerPixel);
+
                 DispatchCompute(initCompute, pixelCount, "Init");
                 
                 for (int bounce = 0; bounce < maxBounces; bounce++)
@@ -202,7 +201,7 @@ public partial class RayTracingManagerWavefront
                     DispatchWavefront(classifyCompute, ACTIVE_RAY_QUEUE, "Propagate");
 
                     DispatchCompute(resetCountCompute, 1, "reset");
-
+                    reflectionCompute.SetInt("numBounces", bounce);
                     DispatchWavefront(reflectionCompute, REFLECTION_QUEUE, "Reflection");
 
                     if (useNEE)                         
